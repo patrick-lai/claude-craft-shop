@@ -74,6 +74,8 @@ Select a dial to see the instruction its level gives, and preview the other leve
 
 The brief is added to the system prompt as a "Working style" section. Claude Code keeps a session's first system prompt for every request, so a change made mid-session reaches the agent as a note on your next prompt. Setting **Crew** to Solo also refuses the Agent tool.
 
+**Autopilot answers when you are away.** With Autonomy on **Autopilot**, a question the agent asks (AskUserQuestion) that nobody answers within `autoAnswerMinutes` (15 by default) is answered for you: each choice takes the option labelled *(Recommended)*, or else the first; a number takes its default; free text is left open. The agent is told no person chose (the answer carries `afkTimeoutMs`), and you get a notification saying what was picked. Answer first, or lower the dial, and nothing is picked. Autopilot's brief tells the agent to put its recommended option first.
+
 ## Context
 
 ![Context tab with a chosen folder](shots/desktop/context-library.png)

@@ -122,6 +122,28 @@ test('a link is fetched, and a repository directory imports as a folder of file 
   expect(await contextSection($)).toContain('### docs › api.md (docs/api.md)')
 })
 
+test('while the file dialog is open the buttons say Choosing and more presses are dropped', async ($, on) => {
+  const picker = world(on, { isRepo: false, isDialogSlow: true })
+  on('fs.read', ($, e) => ({ value: `contents of ${e.path}` }))
+  await startSession($)
+  const ui = await mountPane($, 'desktop')
+  await ui.press({ key: 'tab-context' })
+
+  // The first press opens the dialog and waits on it; the rest arrive meanwhile.
+  const first = ui.press({ key: 'pick-files' })
+  await ui.redraw()
+  expect((await ui.find({ type: 'Button', key: 'pick-files' }))?.text).toBe('Choosing…')
+  await ui.press({ key: 'pick-files' })
+  await ui.press({ key: 'pick-folder' })
+  expect(picker.dialogs).toBe(1)
+
+  picker.closeDialog()
+  await first
+  await ui.redraw()
+  expect((await ui.find({ type: 'Button', key: 'pick-files' }))?.text).toBe('Choose files…')
+  expect((await contextSection($))?.match(/### /g)).toHaveLength(2)
+})
+
 test('Choose files and Choose folder add what the macOS dialog picks', async ($, on) => {
   world(on, { isRepo: false })
   on('fs.list', () => ({ value: [{ name: 'adr.md', kind: 'file', size: 10, mtimeMs: 0, isLink: false }] }))

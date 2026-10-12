@@ -18,6 +18,7 @@ const contextView = atom({ plugin: 'craft-shop', key: 'contextView' } as const, 
   openId: null,
   target: null,
   isNamingFolder: false,
+  picking: null,
   menuFolder: null,
   renamingFolder: null,
   deletingFolder: null,
@@ -267,9 +268,24 @@ function relativePath(top: string, path: string): string {
   return path.startsWith(`${top}/`) ? path.slice(top.length + 1) : path
 }
 
+// Set before the first await, so a second press while the dialog is coming
+// up (it can take a few seconds) is dropped rather than opening another.
+let isPicking = false
+
 async function choose($: $, kind: 'file' | 'folder'): Promise<void> {
-  await say($, kind === 'file' ? 'Choosing files…' : 'Choosing a folder…')
-  const picked = await pickPaths($, kind)
+  if (isPicking) return
+  isPicking = true
+  try {
+    await setView($, { picking: kind })
+    await say($, 'Waiting for the file dialog. It can take a moment to open, sometimes behind this window.')
+    await addPicked($, kind, await pickPaths($, kind))
+  } finally {
+    isPicking = false
+    await setView($, { picking: null })
+  }
+}
+
+async function addPicked($: $, kind: 'file' | 'folder', picked: string[] | null): Promise<void> {
   if (picked === null) return say($, 'Could not open the file dialog here. Type a path in the field instead.')
   if (picked.length === 0) return say($, '')
   const top = await $.session.root()
@@ -588,8 +604,19 @@ export function registerContext(on: On): void {
       <Box flexDirection="column" gap={1}>
         <Box justifyContent="space-between" alignItems="center" gap={1} flexWrap="wrap">
           <Box gap={1} alignItems="center" flexWrap="wrap">
-            <Button key="pick-files" label="Choose files…" variant="primary" onPress={() => void choose($, 'file')} />
-            <Button key="pick-folder" label="Choose folder…" onPress={() => void choose($, 'folder')} />
+            <Button
+              key="pick-files"
+              label={view.picking === 'file' ? 'Choosing…' : 'Choose files…'}
+              variant={view.picking === null ? 'primary' : undefined}
+              dimColor={view.picking !== null}
+              onPress={() => void choose($, 'file')}
+            />
+            <Button
+              key="pick-folder"
+              label={view.picking === 'folder' ? 'Choosing…' : 'Choose folder…'}
+              dimColor={view.picking !== null}
+              onPress={() => void choose($, 'folder')}
+            />
             <Button key="folder-new" label="New folder" variant={view.isNamingFolder ? 'secondary' : undefined} dimColor={!view.isNamingFolder} onPress={go({ isNamingFolder: !view.isNamingFolder })} />
           </Box>
           {Select !== undefined && groups.length > 0 && (

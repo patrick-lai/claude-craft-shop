@@ -48,6 +48,8 @@ export type ContextView = {
   openId: string | null
   target: string | null
   isNamingFolder: boolean
+  // Which file dialog is open, while one is.
+  picking: 'file' | 'folder' | null
   menuFolder: string | null
   renamingFolder: string | null
   deletingFolder: string | null

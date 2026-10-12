@@ -6,18 +6,19 @@ import type { Engine, MockClock } from 'claude-code/testing'
 
 export const REPO = '/repo'
 
-export type World = { clock: MockClock; toolCalls: string[]; fetched: string[] }
+export type World = { clock: MockClock; toolCalls: string[]; fetched: string[]; dialogs: number; closeDialog: () => void }
 
 function ran(stdout = '', exitCode = 0) {
   return { value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
 }
 
-export function world(on: On, { isRepo = true } = {}): World {
+export function world(on: On, { isRepo = true, isDialogSlow = false } = {}): World {
   const clock = mock.clock(on, { now: 1_000_000 })
   mock.store(on)
   mock.env(on, { HOME: '/home/me' })
   const toolCalls: string[] = []
   const fetched: string[] = []
+  const state: World = { clock, toolCalls, fetched, dialogs: 0, closeDialog: () => undefined }
 
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
@@ -46,7 +47,12 @@ export function world(on: On, { isRepo = true } = {}): World {
   on('process.run', ($, e) => {
     const command = e.argv.join(' ')
     // The macOS file dialog: what picked files come back as.
-    if (e.argv[0] === 'osascript') return ran(command.includes('choose folder') ? `${REPO}/docs/\n` : `${REPO}/docs/api.md\n/Users/me/notes/style.md\n`)
+    if (e.argv[0] === 'osascript') {
+      const picked = ran(command.includes('choose folder') ? `${REPO}/docs/\n` : `${REPO}/docs/api.md\n/Users/me/notes/style.md\n`)
+      state.dialogs += 1
+      // A slow dialog stays open until the test closes it.
+      return isDialogSlow ? new Promise<typeof picked>(resolve => (state.closeDialog = () => resolve(picked))) : picked
+    }
     if (command === 'git rev-parse --show-toplevel') return ran(`${REPO}\n`)
     if (command === 'git symbolic-ref --short refs/remotes/origin/HEAD') return ran('origin/main\n')
     if (command === 'git fetch -q origin main') return ran()
@@ -59,7 +65,7 @@ export function world(on: On, { isRepo = true } = {}): World {
     toolCalls.push(String(e.tool))
     return { result: 'ok' }
   })
-  return { clock, toolCalls, fetched }
+  return state
 }
 
 export async function startSession($: Engine): Promise<void> {

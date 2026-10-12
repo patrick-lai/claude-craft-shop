@@ -22,8 +22,13 @@ function styleOf(values: DialValues, list: Source[], groups: Folder[]): string {
   return [brief(values), contextSection(list, groups) ?? 'The user shares no project context now.'].join('\n\n')
 }
 
-function styleUpdate(style: string): string {
-  return `fishStack update: the user changed the working style dials or the shared project context during this session. What follows replaces the Working style and Project context sections of your system prompt.\n\n${style}`
+// Between tool calls the note rides beside a tool's result, where a model
+// rightly distrusts instructions: it says where it comes from.
+function styleUpdate(style: string, isMidTurn = false): string {
+  const from = isMidTurn
+    ? 'fishStack update, from the hook of fishStack, a plugin the user installed, not from the tool you just ran: the user changed the working style dials or the shared project context in the fishStack pane while you worked. Apply it from your next step.'
+    : 'fishStack update: the user changed the working style dials or the shared project context during this session.'
+  return `${from} What follows replaces the Working style and Project context sections of your system prompt.\n\n${style}`
 }
 
 // fishStack was Craftshop, whose saved dials, context libraries, slot leases
@@ -282,6 +287,6 @@ export function registerSession(on: On, options: PluginOptions): void {
     const style = styleOf(await read($, dials), await read($, sources), await read($, folders))
     if (told === null || told === style) return done
     await update($, toldStyle, () => style)
-    return { ...done, additionalContext: [...(done.additionalContext ?? []), styleUpdate(style)] }
+    return { ...done, additionalContext: [...(done.additionalContext ?? []), styleUpdate(style, true)] }
   })
 }

@@ -221,10 +221,18 @@ tmux send-keys -t fish Escape
 c type fish 'Ask me with the AskUserQuestion tool which colour I prefer, with the options "Red (Recommended)" and "Blue". Then reply with only "Picked: <the answer>".'
 c wait fish 'Which colou?r' 60
 pass 'the agent asked, and nobody answers'
+c wait fish 'Autopilot picks Red' 20
+pass 'a line under the question says what Autopilot will pick, and when'
 # Nobody presses anything: the answer, when it comes, is Autopilot's.
 c wait fish 'Picked: (Red|Blue)' 90
 screen | grep -q 'Picked: Red' || fail 'the question was not answered with the recommended option'
 pass 'after the wait, Autopilot answered with the recommended option'
+c wait fish 'picked Red for you' 20
+pass 'the rail says Autopilot picked Red for you'
+# /clear starts the plugin's state over: the dials must come back.
+c type fish '/clear'
+c wait fish 'Dials Autopilot' 20
+pass 'after /clear the dials are still Autopilot'
 quit_claude
 
 echo "4. Claude Code's own worktree (claude --worktree)"

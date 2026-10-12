@@ -550,16 +550,17 @@ let hasAutoOpened = false
 // session headless, so its session.start says no one is at the prompt).
 let hasStarted = false
 // Where the session worked as a /clear ended it, for the session after.
-let carried: { worktree: Worktree; elsewhere: string | null } | null = null
+let carried: { worktree: Worktree; elsewhere: string | null; isBandHidden: boolean } | null = null
 
 // After a /clear: the session that follows works where the last one did,
 // in the same slot, its lease kept alive from here.
 async function carryOverClear($: $): Promise<void> {
   if (carried === null) return
-  const { worktree: was, elsewhere: where } = carried
+  const { worktree: was, elsewhere: where, isBandHidden: wasHidden } = carried
   carried = null
   await update($, worktree, () => was)
   await update($, elsewhere, () => where)
+  await update($, isBandHidden, () => wasHidden)
   if (was.phase === 'ready' && was.path !== null) startHeartbeat($, was.path)
 }
 
@@ -740,7 +741,7 @@ export function registerWorktree(on: On, options: PluginOptions): void {
     // slot, so the lease stays, and what the next session needs is kept for
     // it (the state starts over, and no session.start follows).
     if (e.reason === 'clear') {
-      carried = { worktree: await read($, worktree), elsewhere: await read($, elsewhere) }
+      carried = { worktree: await read($, worktree), elsewhere: await read($, elsewhere), isBandHidden: await read($, isBandHidden) }
       return next(e)
     }
     heartbeat?.cancel()

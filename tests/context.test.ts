@@ -77,6 +77,29 @@ test('a folder groups sources, switches them at once and names them for the agen
   expect(await contextSection($)).toContain('### Refunds settle in 5 business days.')
 })
 
+test('a view saved by an older version still draws, and a new folder works from it', async ($, on) => {
+  world(on, { isRepo: false })
+  // What the folder-cards version left in $.state, which outlives a reload:
+  // served until this version writes the view.
+  const older = { folderId: null, openId: null, adding: null, isRenaming: false, isConfirmingDelete: false }
+  let isRewritten = false
+  on('state.set', ($, e, next) => {
+    if (e.key === 'contextView') isRewritten = true
+    return next(e)
+  })
+  on('state.get', async ($, e, next) => {
+    const stored = await next(e)
+    return e.key === 'contextView' && !isRewritten ? { ...stored, value: older as never } : stored
+  })
+  await startSession($)
+  const ui = await mountPane($, 'desktop')
+  await ui.press({ key: 'tab-context' })
+  await ui.press({ key: 'folder-new' })
+  await ui.input({ key: 'folder-name', text: 'Payments' })
+  expect(await ui.drawn()).toBeDefined()
+  expect(await ui.find({ text: /New sources go into Payments/ })).toBeDefined()
+})
+
 test('a source opens in place to rename, move into a folder and delete', async ($, on) => {
   world(on, { isRepo: false })
   await startSession($)

@@ -158,8 +158,30 @@ async function newId($: $): Promise<string> {
   return `${(await $.clock.now()).toString(36)}-${crypto.randomUUID().slice(0, 4)}`
 }
 
+const VIEW: ContextView = {
+  openFolders: [],
+  openId: null,
+  target: null,
+  isNamingFolder: false,
+  picking: null,
+  menuFolder: null,
+  renamingFolder: null,
+  deletingFolder: null,
+  isEditingText: false,
+}
+
+// The view as this version draws it. $.state outlives a reload, so a view
+// saved by an older version can lack fields; they start at their defaults.
+async function readView($: $): Promise<ContextView> {
+  return { ...VIEW, ...(await read($, contextView)) }
+}
+
+async function updateView($: $, change: (now: ContextView) => ContextView): Promise<void> {
+  await update($, contextView, now => change({ ...VIEW, ...now }))
+}
+
 async function setView($: $, change: Partial<ContextView>): Promise<void> {
-  await update($, contextView, now => ({ ...now, ...change }))
+  await updateView($, now => ({ ...now, ...change }))
 }
 
 async function say($: $, text: string): Promise<void> {
@@ -167,11 +189,11 @@ async function say($: $, text: string): Promise<void> {
 }
 
 async function addSource($: $, source: Omit<Source, 'id' | 'mode' | 'folderId'>): Promise<Source> {
-  const { target } = await read($, contextView)
+  const { target } = await readView($)
   const added: Source = { ...source, id: await newId($), mode: 'guidance', folderId: target }
   await saveSources($, list => [...list, added])
   // A source added into a folder shows there: the folder opens.
-  if (target !== null) await update($, contextView, now => ({ ...now, openFolders: [...new Set([...now.openFolders, target])] }))
+  if (target !== null) await updateView($, now => ({ ...now, openFolders: [...new Set([...now.openFolders, target])] }))
   return added
 }
 
@@ -332,7 +354,7 @@ async function importDirectory($: $, directory: string, path: string): Promise<v
   }
   await update($, folders, list => [...list, folder])
   await saveSources($, list => [...list, ...added])
-  await update($, contextView, now => ({ ...now, openFolders: [...now.openFolders, folder.id] }))
+  await updateView($, now => ({ ...now, openFolders: [...now.openFolders, folder.id] }))
   await clearInput($, `Added ${path} as a folder of ${files.length} files`)
 }
 
@@ -344,7 +366,7 @@ async function addFolder($: $, raw: string): Promise<void> {
   await save($)
   await update($, contextDraft, now => ({ ...now, name: '' }))
   await setView($, { isNamingFolder: false, target: folder.id })
-  await update($, contextView, now => ({ ...now, openFolders: [...now.openFolders, folder.id] }))
+  await updateView($, now => ({ ...now, openFolders: [...now.openFolders, folder.id] }))
   await say($, `Made ${name}. New sources go into ${name} until you pick another folder.`)
 }
 
@@ -377,7 +399,7 @@ async function setFolderOn($: $, folderId: string, isOn: boolean): Promise<void>
 
 async function moveSource($: $, id: string, folderId: string | null): Promise<void> {
   await saveSources($, list => list.map(one => (one.id === id ? { ...one, folderId } : one)))
-  if (folderId !== null) await update($, contextView, now => ({ ...now, openFolders: [...new Set([...now.openFolders, folderId])] }))
+  if (folderId !== null) await updateView($, now => ({ ...now, openFolders: [...new Set([...now.openFolders, folderId])] }))
 }
 
 async function renameSource($: $, id: string, title: string): Promise<void> {
@@ -407,11 +429,11 @@ async function deleteFolder($: $, id: string, isKeepingSources: boolean): Promis
   )
   await update($, folders, list => list.filter(one => one.id !== id))
   await save($)
-  await update($, contextView, now => ({ ...now, deletingFolder: null, target: now.target === id ? null : now.target, openFolders: now.openFolders.filter(one => one !== id) }))
+  await updateView($, now => ({ ...now, deletingFolder: null, target: now.target === id ? null : now.target, openFolders: now.openFolders.filter(one => one !== id) }))
 }
 
 async function toggleFolderOpen($: $, id: string): Promise<void> {
-  await update($, contextView, now => ({
+  await updateView($, now => ({
     ...now,
     openFolders: now.openFolders.includes(id) ? now.openFolders.filter(one => one !== id) : [...now.openFolders, id],
   }))
@@ -425,7 +447,7 @@ export function registerContext(on: On): void {
     const rich = isRich(ui)
     const list = await read($, sources)
     const groups = await read($, folders)
-    const view = await read($, contextView)
+    const view = await readView($)
     const draft = await read($, contextDraft)
     const status = await read($, contextStatus)
     const columns = e.props.bodyColumns

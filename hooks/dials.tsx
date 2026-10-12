@@ -5,7 +5,8 @@ import { atom, read, update } from 'claude-code'
 import type { ClientProps, ElementConstructor, EngineInterface, On } from 'claude-code'
 
 import type { DialKey, DialValues, Tab } from '../types'
-import { card, chip, dialIcon, isRich, presetGlyph, segmented, svg, track } from './kit'
+import { presetArt } from './art'
+import { card, chip, dialIcon, drawnButton, isRich, segmented, svg, track } from './kit'
 import { bar, frame, PANE, resolveUi } from './ui'
 import type { Ui } from './ui'
 
@@ -427,18 +428,16 @@ export function registerDials(on: On): void {
           />
         </Box>
         {isShown && card(ui, 'brief', [<Markdown text={brief(values)} />], { tone: 'muted' })}
-        <Box gap={3} flexWrap="wrap" alignItems="center">
-          {PRESETS.map(preset => (
-            <Box key={`preset-box-${preset.name}`} gap={0} alignItems="center">
-              {svg(ui, presetGlyph(DIALS.map(dial => preset.values[dial.key]), preset.name === current ? '#8f9cff' : '#8f9cff99'), preset.name, 18, 18)}
-              <Button
-                key={`preset-${preset.name}`}
-                label={preset.name}
-                variant={preset.name === current ? 'primary' : 'secondary'}
-                onPress={() => void setDials($, () => preset.values)}
-              />
-            </Box>
-          ))}
+        <Box gap={1} flexWrap="wrap" alignItems="center">
+          {PRESETS.map(preset => {
+            const isActive = preset.name === current
+            const art = presetArt(preset.name, DIALS.map(dial => preset.values[dial.key]), isActive)
+            return (
+              drawnButton(ui, `preset-${preset.name}`, art.source, preset.name, art.width, art.height, () => void setDials($, () => preset.values)) ?? (
+                <Button key={`preset-${preset.name}`} label={preset.name} variant={isActive ? 'primary' : 'secondary'} onPress={() => void setDials($, () => preset.values)} />
+              )
+            )
+          })}
           {current === 'Custom' && chip(ui, 'Custom', 'claude')}
         </Box>
         {overview}

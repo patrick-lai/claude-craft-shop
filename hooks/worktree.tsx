@@ -10,7 +10,8 @@ import type { Slot, Tab, Worktree, WorktreePhase } from '../types'
 import { frame, PANE, PANE_TITLE, resolveUi } from './ui'
 import type { Ui } from './ui'
 import { BALANCED, presetName } from './dials'
-import { branchArt, card, label, segmented, svg } from './kit'
+import { switchArt } from './art'
+import { branchArt, card, drawnButton, label, segmented, svg } from './kit'
 import { drawRail } from './rail'
 
 export const IDLE_WORKTREE: Worktree = {
@@ -590,7 +591,10 @@ export function registerWorktree(on: On, options: PluginOptions): void {
                 : "Off: Craftshop leaves worktrees to Claude Code (the desktop's worktree option, claude --worktree, EnterWorktree)."}
             </Text>
           </Box>
-          <Box flexShrink={0}>{segmented(ui, 'auto-worktree', AUTO_CHOICES, isAuto ? 'on' : 'off', choice => void setAuto($, choice === 'on'))}</Box>
+          <Box flexShrink={0}>
+            {drawnButton(ui, 'auto-worktree', switchArt(isAuto ? 'on' : 'off'), isAuto ? 'Perm worktree on' : 'Perm worktree off', 36, 22, () => void setAuto($, !isAuto)) ??
+              segmented(ui, 'auto-worktree', AUTO_CHOICES, isAuto ? 'on' : 'off', choice => void setAuto($, choice === 'on'))}
+          </Box>
         </Box>,
       ],
       { tone: 'muted' },

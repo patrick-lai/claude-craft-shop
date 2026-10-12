@@ -7,7 +7,8 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 
 import type { ContextView, Folder, Source, SourceMode, Tab } from '../types'
-import { card, chip, folderArt, glyph, GLYPH_COLOR, isRich, svg, tickMeter, track } from './kit'
+import { switchArt } from './art'
+import { card, chip, drawnButton, folderArt, glyph, GLYPH_COLOR, isRich, svg, tickMeter, track } from './kit'
 import { bar, frame, PANE, resolveUi, tokens } from './ui'
 import type { Ui } from './ui'
 
@@ -425,7 +426,8 @@ export function registerContext(on: On): void {
     const isThin = (source: Source) => source.kind === 'link' && source.text.length < 200
 
     // On/Off is the main switch, drawn the same for a source and a folder.
-    const onOff = (key: string, state: 'on' | 'off' | 'some', onPress: () => void) => (
+    const onOff = (key: string, state: 'on' | 'off' | 'some', onPress: () => void) =>
+      drawnButton(ui, key, switchArt(state), state === 'on' ? 'On' : state === 'some' ? 'Some on' : 'Off', 36, 22, onPress) ?? (
       <Button key={key} onPress={onPress}>
         {state === 'on' ? (
           <Text color="success" bold>

@@ -1,6 +1,7 @@
 import type { Elements, RenderElement } from 'claude-code'
 
 import type { Tab } from '../types'
+import { tabsArt } from './art'
 
 export const PANE = 'craft-shop'
 export const PANE_TITLE = 'Craftshop'
@@ -10,7 +11,7 @@ export const PANE_TITLE = 'Craftshop'
 // they are missing.
 export type Ui = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button' | 'Markdown' | 'Code'> &
   Partial<Pick<Elements['terminal'], 'Input' | 'Select'>> &
-  Partial<Pick<Elements['desktop'], 'Svg'>>
+  Partial<Pick<Elements['desktop'], 'Svg' | 'Client'>>
 
 // $.ui.resolve completes every table with stand-ins that draw nothing; this
 // leaves out what the surface lacks, so the tabs can test for it: the
@@ -19,6 +20,9 @@ export function resolveUi(table: Ui, surface: string): Ui {
   return {
     ...table,
     Svg: surface === 'terminal' ? undefined : table.Svg,
+    // Drawn controls take presses through a Client, which only the desktop
+    // lays over a picture; the terminal keeps its Buttons.
+    Client: surface === 'desktop' ? table.Client : undefined,
     Input: surface === 'mobile' ? undefined : table.Input,
     Select: surface === 'mobile' ? undefined : table.Select,
   }
@@ -38,8 +42,24 @@ export function isTab(value: string): value is Tab {
 // crosses an import, so a tab cannot be drawn from another file); this is
 // the frame they share.
 export function frame(ui: Ui, current: Tab, columns: number, onSelect: (id: Tab) => void, body: RenderElement) {
-  const { Box, Button, Text } = ui
+  const { Box, Button, Text, Svg, Client } = ui
   const rich = ui.Svg !== undefined
+  if (Svg !== undefined && Client !== undefined) {
+    // The desktop draws the wordmark and the tabs as one picture; a Client
+    // over it takes the press (pane.tsx's tabs-click hook switches the tab).
+    const art = tabsArt(TABS, current)
+    return (
+      <Box flexDirection="column" width={columns} gap={1}>
+        <Box key="tabs-art" position="relative">
+          <Svg source={art.source} alt={`Craftshop tabs: ${TABS.map(one => one.label).join(', ')}; ${current} shown`} width={art.width} height={art.height} />
+          <Box position="absolute" top={0} left={0} right={0} bottom={0}>
+            <Client key="tabs-click" module="./rail-click.tsx" props={{ width: art.width, segments: art.segments }} width="100%" height="100%" />
+          </Box>
+        </Box>
+        {body}
+      </Box>
+    )
+  }
   // The tabs sit in one rounded tray, the current one filled: a segmented
   // control, as CommissionAI's Stage tabs read.
   return (

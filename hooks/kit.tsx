@@ -274,3 +274,23 @@ export function cacheGauge(secondsLeft: number, isWorking: boolean, hitPercent: 
   const title = lines.map(line => escape(line)).join('\n\n')
   return `<svg xmlns="http://www.w3.org/2000/svg" width="70" height="20" viewBox="0 0 70 20"><title>${title}</title><rect width="70" height="20" fill="transparent"/>${flame}${bars}</svg>`
 }
+
+// What a drawn control runs when pressed, by its Client's key: set while the
+// drawing is made, run by the press hook in pane.tsx.
+export const pressHandlers = new Map<string, () => void>()
+
+// A picture that presses like a Button on the desktop: the Svg with a Client
+// laid over it. Where there is no Client, the caller draws a Button instead.
+export function drawnButton(ui: Ui, key: string, source: string, alt: string, width: number, height: number, onPress: () => void) {
+  const { Box, Svg, Client } = ui
+  if (Svg === undefined || Client === undefined) return null
+  pressHandlers.set(key, onPress)
+  return (
+    <Box key={`drawn-${key}`} position="relative" flexShrink={0}>
+      <Svg source={source} alt={alt} width={width} height={height} />
+      <Box position="absolute" top={0} left={0} right={0} bottom={0}>
+        <Client key={key} module="./press.tsx" props={{}} width="100%" height="100%" />
+      </Box>
+    </Box>
+  )
+}

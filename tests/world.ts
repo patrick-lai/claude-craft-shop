@@ -104,3 +104,35 @@ export const COMPOSE: PromptComposeInput = {
   outputStyle: null,
   traits: [],
 }
+
+type Drawing = Awaited<ReturnType<typeof mountPane>>
+
+// Presses a control by key as a person would on its surface: its Button, or
+// on the desktop the Client laid over its picture (the tab bar's by segment).
+// What activate needs of a drawing, on whichever surface it was mounted.
+type Pressable = Pick<Drawing, 'find' | 'press' | 'resize' | 'pointer'>
+
+export async function activate(ui: Pressable, key: string): Promise<void> {
+  if ((await ui.find({ type: 'Button', key })) !== undefined) {
+    await ui.press({ key })
+    return
+  }
+  if (key.startsWith('tab-')) {
+    const bar = (await ui.find({ type: 'Client', key: 'tabs-click' }))!.props as {
+      props: { width: number; segments: { x0: number; x1: number; tab: string }[] }
+    }
+    const segment = bar.props.segments.find(one => one.tab === key.slice('tab-'.length))!
+    await ui.resize({ columns: 60, rows: 2, in: 'tabs-click' })
+    const x = Math.floor(((segment.x0 + segment.x1) / 2 / bar.props.width) * 60)
+    await ui.pointer({ type: 'down', x, y: 0, button: 'left', in: 'tabs-click' })
+    return
+  }
+  await ui.resize({ columns: 4, rows: 1, in: key })
+  await ui.pointer({ type: 'down', x: 1, y: 0, button: 'left', in: key })
+}
+
+// The keys of the controls, Buttons or drawn, whose key matches.
+export async function keysOf(ui: Pick<Drawing, 'findAll'>, pattern: RegExp): Promise<string[]> {
+  const found = [...(await ui.findAll({ type: 'Button' })), ...(await ui.findAll({ type: 'Client' }))]
+  return found.map(one => one.key).filter((key): key is string => key !== undefined && pattern.test(key))
+}

@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { COMPOSE, mountPane, startSession, world } from './world'
+import { activate, COMPOSE, keysOf, mountPane, startSession, world } from './world'
 
 type Drawing = Awaited<ReturnType<typeof mountPane>>
 
@@ -20,7 +20,7 @@ test('a note added in the one field reaches the agent, Strict when pressed, and 
   await startSession($)
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await mountPane($, surface)
-    await ui.press({ key: 'tab-context' })
+    await activate(ui, 'tab-context')
     if (surface === 'terminal') expect(await ui.find({ text: /No sources yet/ })).toBeDefined()
     await ui.input({ key: 'add-input', text: `The API listens on port 4321 (${surface}).` })
     expect(await ui.find({ text: /The API listens on port 4321/ }), surface).toBeDefined()
@@ -30,11 +30,11 @@ test('a note added in the one field reaches the agent, Strict when pressed, and 
 
   const ui = await mountPane($, 'terminal')
   expect(await ui.find({ text: /2 of 2/ })).toBeDefined()
-  await ui.press({ key: await keyOf(ui, /^strict-/) })
+  await activate(ui, (await keysOf(ui, /^strict-/))[0]!)
   expect(await contextSection($)).toMatch(/STRICT: binding ground truth/)
 
-  for (const one of (await ui.findAll({ type: 'Button' })).filter(button => button.key?.startsWith('toggle-'))) {
-    await ui.press({ key: one.key! })
+  for (const one of await keysOf(ui, /^toggle-/)) {
+    await activate(ui, one)
   }
   expect(await contextSection($)).toBeUndefined()
   expect(await ui.find({ text: /0 of 2/ })).toBeDefined()
@@ -52,26 +52,26 @@ test('a chosen folder is one group: switched at once, named for the agent, remov
   await startSession($)
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await mountPane($, surface)
-    await ui.press({ key: 'tab-context' })
+    await activate(ui, 'tab-context')
     expect(await ui.find({ type: 'Button', key: 'folder-new' }), surface).toBeUndefined()
     await ui.unmount()
   }
 
   const ui = await mountPane($, 'terminal')
-  await ui.press({ key: 'tab-context' })
+  await activate(ui, 'tab-context')
   await ui.press({ key: 'pick-folder' })
   expect(await ui.find({ text: /2 sources · 2 on/ })).toBeDefined()
   expect(await contextSection($)).toContain('### docs › refunds.md (docs/refunds.md)')
 
-  await ui.press({ key: await keyOf(ui, /^folder-toggle-/) })
+  await activate(ui, (await keysOf(ui, /^folder-toggle-/))[0]!)
   expect(await contextSection($)).toBeUndefined()
 
   // One member back on leaves the folder partly on.
-  await ui.press({ key: await keyOf(ui, /^toggle-/) })
+  await activate(ui, (await keysOf(ui, /^toggle-/))[0]!)
   expect(await ui.find({ text: /Some on/ })).toBeDefined()
 
   // Removing the folder takes its sources with it.
-  await ui.press({ key: await keyOf(ui, /^folder-delete-/) })
+  await activate(ui, (await keysOf(ui, /^folder-delete-/))[0]!)
   await ui.press({ key: 'delete-folder' })
   expect(await contextSection($)).toBeUndefined()
   expect(await ui.find({ text: /No sources yet/ })).toBeDefined()
@@ -95,7 +95,7 @@ test('a view saved by an older version still draws, and a folder comes in from i
   })
   await startSession($)
   const ui = await mountPane($, 'desktop')
-  await ui.press({ key: 'tab-context' })
+  await activate(ui, 'tab-context')
   expect(await ui.drawn()).toBeDefined()
   await ui.input({ key: 'add-input', text: 'docs/' })
   expect(await ui.drawn()).toBeDefined()
@@ -106,7 +106,7 @@ test('a source opens in place to rename and delete', async ($, on) => {
   world(on, { isRepo: false })
   await startSession($)
   const ui = await mountPane($, 'desktop')
-  await ui.press({ key: 'tab-context' })
+  await activate(ui, 'tab-context')
   await ui.input({ key: 'add-input', text: 'Use tabs.' })
 
   const open = await keyOf(ui, /^open-/)
@@ -132,7 +132,7 @@ test('a link is fetched, and a repository directory imports as a folder of file 
   on('fs.read', ($, e) => ({ value: `contents of ${e.path}` }))
   await startSession($)
   const ui = await mountPane($, 'terminal')
-  await ui.press({ key: 'tab-context' })
+  await activate(ui, 'tab-context')
   await ui.input({ key: 'add-input', text: 'https://example.com/style' })
   expect(await ui.find({ text: /example\.com\/style/ })).toBeDefined()
   await ui.input({ key: 'add-input', text: 'docs/' })
@@ -147,7 +147,7 @@ test('while the file dialog is open the buttons say Choosing and more presses ar
   on('fs.read', ($, e) => ({ value: `contents of ${e.path}` }))
   await startSession($)
   const ui = await mountPane($, 'desktop')
-  await ui.press({ key: 'tab-context' })
+  await activate(ui, 'tab-context')
 
   // The first press opens the dialog and waits on it; the rest arrive meanwhile.
   const first = ui.press({ key: 'pick-files' })
@@ -170,7 +170,7 @@ test('Choose files and Choose folder add what the macOS dialog picks', async ($,
   on('fs.read', ($, e) => ({ value: `contents of ${e.path}` }))
   await startSession($)
   const ui = await mountPane($, 'desktop')
-  await ui.press({ key: 'tab-context' })
+  await activate(ui, 'tab-context')
 
   await ui.press({ key: 'pick-files' })
   expect(await ui.find({ text: /Added api\.md, style\.md/ })).toBeDefined()

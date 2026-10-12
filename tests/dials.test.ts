@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { COMPOSE, mountPane, startSession, world } from './world'
+import { activate, COMPOSE, mountPane, startSession, world } from './world'
 
 async function dialsSection($: Engine) {
   const composed = await $.prompt.compose(COMPOSE)
@@ -12,7 +12,7 @@ test('dragging a dot on the desktop radar sets that dial, and the agent is told'
   world(on, { isRepo: false })
   await startSession($)
   const ui = await mountPane($, 'desktop')
-  await ui.press({ key: 'tab-dials' })
+  await activate(ui, 'tab-dials')
   // The radar is 360 by 300 pixels; laid out at 45 by 15 cells, a cell is 8 by 20.
   await ui.resize({ columns: 45, rows: 15, in: 'radar-drag' })
 
@@ -36,7 +36,7 @@ test('the working style the model is told follows the dials', async ($, on) => {
   expect(await dialsSection($)).toContain('Foresight (Plan steps)')
 
   const ui = await mountPane($, 'terminal')
-  await ui.press({ key: 'tab-dials' })
+  await activate(ui, 'tab-dials')
   await ui.press({ key: 'pip-foresight-5' })
   await ui.press({ key: 'pip-voice-1' })
   const section = await dialsSection($)
@@ -44,7 +44,7 @@ test('the working style the model is told follows the dials', async ($, on) => {
   expect(section).toContain('Voice (Silent)')
   expect(await ui.find({ text: /Custom/ })).toBeDefined()
 
-  await ui.press({ key: 'preset-Quick' })
+  await activate(ui, 'preset-Quick')
   expect(await dialsSection($)).toContain('Crew (Solo)')
 })
 
@@ -55,7 +55,7 @@ test('Crew set to Solo refuses subagents', async ($, on) => {
   expect((await $.tool.call(agent)).deny).toBeUndefined()
 
   const ui = await mountPane($, 'terminal')
-  await ui.press({ key: 'tab-dials' })
+  await activate(ui, 'tab-dials')
   await ui.press({ key: 'pip-crew-1' })
   expect((await $.tool.call(agent)).deny).toContain('Solo')
 })
@@ -69,7 +69,7 @@ test('a dial changed mid-session reaches the model with the next prompt, once', 
   expect(await submit()).toBe('')
 
   const ui = await mountPane($, 'terminal')
-  await ui.press({ key: 'tab-dials' })
+  await activate(ui, 'tab-dials')
   await ui.press({ key: 'pip-voice-5' })
   const told = await submit()
   expect(told).toContain('Craftshop update')

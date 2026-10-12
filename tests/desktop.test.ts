@@ -4,7 +4,7 @@
 // HTML page for a look at the layout.
 import { expect, test } from 'claude-code/testing'
 
-import { mountPane, startSession, world } from './world'
+import { activate, keysOf, mountPane, startSession, world } from './world'
 
 declare const console: { log: (...args: unknown[]) => void }
 
@@ -33,28 +33,28 @@ test('every tab draws on the desktop with content in it', async ($, on) => {
   await startSession($)
   const ui = await mountPane($, 'desktop')
 
-  await ui.press({ key: 'tab-context' })
+  await activate(ui, 'tab-context')
   await show(ui, 'context-empty')
 
   await ui.press({ key: 'pick-folder' })
-  const [strict] = await buttons(ui, /^strict-/)
-  await ui.press({ key: strict!.key! })
+  const [strict] = await keysOf(ui, /^strict-/)
+  await activate(ui, strict!)
   await ui.input({ key: 'add-input', text: 'Every endpoint returns JSON with snake_case keys. Paginate with cursor, never offset.' })
   await ui.input({ key: 'add-input', text: 'https://example.com/style' })
-  const [off] = (await buttons(ui, /^toggle-/)).slice(-1)
-  await ui.press({ key: off!.key! })
+  const [off] = (await keysOf(ui, /^toggle-/)).slice(-1)
+  await activate(ui, off!)
   await show(ui, 'context-library')
 
-  const [open] = await buttons(ui, /^open-/)
-  await ui.press({ key: open!.key! })
+  const [open] = await keysOf(ui, /^open-/)
+  await activate(ui, open!)
   await show(ui, 'context-source')
 
-  await ui.press({ key: 'tab-dials' })
-  await ui.press({ key: 'preset-Autopilot' })
+  await activate(ui, 'tab-dials')
+  await activate(ui, 'preset-Autopilot')
   await ui.press({ key: 'dial-tenacity' })
   await show(ui, 'dials')
 
-  await ui.press({ key: 'tab-worktree' })
+  await activate(ui, 'tab-worktree')
   await show(ui, 'worktree-off')
 
   await $.turn.complete({ turnId: 't1', answer: 'done', durationMs: 1_000, reason: 'answer', isAborted: false })
@@ -71,7 +71,7 @@ test('the worktree tab draws its steps and slots on the desktop', { options: { a
   const { clock } = world(on)
   await startSession($)
   const ui = await mountPane($, 'desktop')
-  await ui.press({ key: 'tab-worktree' })
+  await activate(ui, 'tab-worktree')
   await show(ui, 'worktree-preparing')
   await clock.advance(1)
   await show(ui, 'worktree-ready')

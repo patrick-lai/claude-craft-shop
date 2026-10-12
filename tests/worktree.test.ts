@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { PANE_PROPS, startSession, world } from './world'
+import { activate, PANE_PROPS, startSession, world } from './world'
 
 const EDIT = { tool: 'Edit', file_path: '/repo/a.ts', old_string: 'a', new_string: 'b' } as const
 
@@ -70,9 +70,9 @@ test('Perm worktree is off by default: no slot and no read-only guard', async ($
   expect(toolCalls).not.toContain('EnterWorktree')
 
   const ui = await $.ui.mount({ plugin: 'craft-shop', surface: 'desktop', component: 'Pane', requestId: 'craft-shop', props: PANE_PROPS })
-  await ui.press({ key: 'tab-worktree' })
+  await activate(ui, 'tab-worktree')
   expect(await ui.find({ text: /Off: Craftshop leaves worktrees to Claude Code/ })).toBeDefined()
-  await ui.press({ key: 'auto-worktree-on' })
+  await activate(ui, 'auto-worktree')
   expect(await ui.find({ text: /On: new sessions in a main checkout/ })).toBeDefined()
 })
 

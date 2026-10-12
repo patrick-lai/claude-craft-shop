@@ -6,7 +6,9 @@ import type { Tab } from '../types'
 import { paint } from './art'
 import { brandMark } from './brand'
 
-export type RailPill = { id: string; tab: Tab | 'pane'; caption: string; width: number; height: number; source: string; hotSource: string }
+// Where a press takes you: a tab, the pane as it was, or nowhere (a pill with
+// no pane of its own only explains itself on hover).
+export type RailPill = { id: string; tab: Tab | 'pane' | null; caption: string; width: number; height: number; source: string; hotSource: string }
 
 export type RailArtFigures = {
   cacheSecondsLeft: number | null
@@ -122,7 +124,7 @@ export function railArt(figures: RailArtFigures, iconOnly: ReadonlySet<Compactab
         : isWarm
           ? `Cache warm, ${clock(left)} left: replies now are cheaper`
           : 'Cache cold: the next message rereads the chat'
-    pill('cache', width, 'context', caption, left => {
+    pill('cache', width, null, caption, left => {
       const bars = BARS.map((color, index) => `<rect x="${left + 12 + 14 + 7 + index * 9}" y="${mid - 7}" width="6" height="14" rx="3" fill="${index < lit ? color : 'var(--track)'}"/>`).join('')
       return `${flame(left + 12, mid - 7.5, isWarm)}${bars}`
     })
@@ -138,7 +140,7 @@ export function railArt(figures: RailArtFigures, iconOnly: ReadonlySet<Compactab
     const width = 12 + 12 + 7 + textWidth(label, 12.5, true) + 14
     const counted = sent === null ? null : `↑ ${sent} sent · ↓ ${received} received`
     const caption = [counted, cost === null ? null : counted === null ? `${cost} at API list price, not your bill` : 'API list price, not your bill'].filter(Boolean).join(' · ')
-    pill('tokens', width, 'context', caption, left => `${updown(left + 12, mid)}<text x="${left + 12 + 12 + 7}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5" font-weight="600" fill="var(--text)" class="num">${escape(label)}</text>`)
+    pill('tokens', width, null, caption, left => `${updown(left + 12, mid)}<text x="${left + 12 + 12 + 7}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5" font-weight="600" fill="var(--text)" class="num">${escape(label)}</text>`)
   }
 
   {

@@ -6,7 +6,7 @@ import type { Engine, MockClock } from 'claude-code/testing'
 
 export const REPO = '/repo'
 
-export type World = { clock: MockClock; toolCalls: string[]; fetched: string[]; dialogs: number; closeDialog: () => void }
+export type World = { clock: MockClock; toolCalls: string[]; fetched: string[]; dialogs: number; closeDialog: () => void; panes: string[] }
 
 function ran(stdout = '', exitCode = 0) {
   return { value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
@@ -23,7 +23,8 @@ export function world(
   mock.env(on, { HOME: '/home/me' })
   const toolCalls: string[] = []
   const fetched: string[] = []
-  const state: World = { clock, toolCalls, fetched, dialogs: 0, closeDialog: () => undefined }
+  const panes: string[] = []
+  const state: World = { clock, toolCalls, fetched, dialogs: 0, closeDialog: () => undefined, panes }
 
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
@@ -47,7 +48,6 @@ export function world(
   on('session.usage', () => ({
     value: { startedAt: 0, context: { window: 200_000, tokens: 68_000, percent: 34, breakdown: breakdown as never }, rateLimits: [], cost: { usd: 0.42 } as never },
   }))
-  const panes: string[] = []
   on('ui.open', ($, e) => {
     if (!panes.includes(e.id)) panes.push(e.id)
     return { value: { isPlaced: true } }

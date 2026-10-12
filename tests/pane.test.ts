@@ -45,7 +45,9 @@ test("the rail's cache gauge runs down for 5 minutes after a reply, then goes co
     component: 'AbovePrompt',
     props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 100, scroll: { offset: 0, bodyRows: 10 }, view: {} },
   })
-  const cache = async () => (await band.find({ type: 'Button', key: 'rail-cache' }))?.text
+  // Shown, not a button: the cache has no pane of its own.
+  expect(await band.find({ type: 'Button', key: 'rail-cache' })).toBeUndefined()
+  const cache = async () => (await band.find({ key: 'rail-cache' }))?.text
   // The gauge is there from the start, empty until a reply.
   expect(await cache()).toBe('Cache starts next reply')
 
@@ -222,6 +224,48 @@ test("another session's kept figures are not this one's: the gauge waits, the co
   const alt = (id: string) => (byKey(tree, `drawn-rail-${id}-press`) as { children: { props: { alt: string; source: string } }[] }).children[0]!.props
   expect(alt('cache').alt).toBe('Prompt cache: the gauge starts with the next reply')
   expect(alt('tokens').alt).toBe('≈ $0.42 at API list price, not your bill')
+})
+
+test('each rail pill opens its own pane, and the cache and cost open nothing', async ($, on) => {
+  const { panes } = world(on, { isRepo: false })
+  on('turn.complete', ($, e) => ({ text: e.answer }))
+  await startSession($)
+  await $.turn.complete({ turnId: 't1', answer: 'done', durationMs: 1_000, reason: 'answer', isAborted: false } as never)
+  const band = await $.ui.mount({
+    plugin: 'fishstack',
+    surface: 'desktop',
+    component: 'AbovePrompt',
+    props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 200, scroll: { offset: 0, bodyRows: 10 }, view: {} },
+  })
+  // The cache and the cost explain themselves on hover; a press opens nothing.
+  await activate(band, 'rail-cache-press')
+  await activate(band, 'rail-tokens-press')
+  expect(panes).toEqual([])
+
+  const tabShown = async () => {
+    const pane = await mountPane($, 'desktop')
+    const shown =
+      (await pane.find({ type: 'Button', key: 'dial-foresight' })) !== undefined
+        ? 'dials'
+        : (await pane.find({ key: 'pick-files' })) !== undefined
+          ? 'context'
+          : (await pane.find({ key: 'auto-worktree' })) !== undefined
+            ? 'worktree'
+            : 'none'
+    await pane.unmount()
+    return shown
+  }
+  await activate(band, 'rail-dials-press')
+  expect(panes).toEqual(['fishstack'])
+  expect(await tabShown()).toBe('dials')
+  await activate(band, 'rail-sources-press')
+  expect(await tabShown()).toBe('context')
+  await activate(band, 'rail-worktree-press')
+  expect(await tabShown()).toBe('worktree')
+  // The mark opens the pane as it was left.
+  await activate(band, 'rail-dials-press')
+  await activate(band, 'rail-brand-press')
+  expect(await tabShown()).toBe('dials')
 })
 
 // The element drawn under a key, hover and all (find leaves hover out).

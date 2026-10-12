@@ -59,7 +59,9 @@ export function drawRail(ui: Ui, figures: RailFigures, open: (tab: Tab | null) =
     return (
       <Box key="rail-row" gap={1} alignItems="center" flexWrap="nowrap" overflow="hidden">
         {pills.map(pill =>
-          drawnButton(ui, `rail-${pill.id}-press`, pill.source, pill.caption, pill.width, pill.height, () => open(pill.tab === 'pane' ? null : pill.tab), {
+          drawnButton(ui, `rail-${pill.id}-press`, pill.source, pill.caption, pill.width, pill.height, () => {
+              if (pill.tab !== null) open(pill.tab === 'pane' ? null : pill.tab)
+            }, {
             hotSource: pill.hotSource,
             isHot: pill.id === hover,
             onHover: isOn => onHover(pill.id, isOn),
@@ -81,6 +83,8 @@ export function drawRail(ui: Ui, figures: RailFigures, open: (tab: Tab | null) =
       {children}
     </Button>
   )
+  // An item with no pane of its own: shown, not pressed.
+  const still = (key: string, children: RenderElement) => <Box key={key}>{children}</Box>
   return (
     <Box gap={2} alignItems="center" flexWrap="wrap">
       {item(
@@ -99,9 +103,8 @@ export function drawRail(ui: Ui, figures: RailFigures, open: (tab: Tab | null) =
             {'▯'.repeat(figures.isWorking ? 0 : 5 - Math.ceil((left ?? 0) / 60))}
           </Text>
         )}
-        {item(
+        {still(
           'rail-cache',
-          'context',
           figures.isWorking ? (
             <Text dimColor>Working</Text>
           ) : left === null ? (
@@ -117,9 +120,8 @@ export function drawRail(ui: Ui, figures: RailFigures, open: (tab: Tab | null) =
         )}
       </Box>
       {(figures.tokens !== null || figures.costUsd !== null) &&
-        item(
+        still(
           'rail-tokens',
-          'context',
           <Text>
             {figures.tokens !== null && (
               <Text>

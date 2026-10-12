@@ -1,16 +1,18 @@
 {
   "name": "craft-shop",
   "version": "0.1.0",
-  "description": "A Craft Shop pane for Claude Code: a worktree with a read-only head start, crew dials, a context library and an API workbench.",
-  "author": { "name": "Patrick Lai" },
+  "description": "A Craft Shop pane for Claude Code: a perm worktree with a read-only head start, crew dials and a context library.",
+  "author": {
+    "name": "Patrick Lai"
+  },
   "repository": "https://github.com/patrick-lai/claude-craft-shop",
   "types": "./types/index.d.ts",
   "userConfig": {
     "autoWorktree": {
       "type": "boolean",
-      "title": "Auto worktree",
-      "description": "Move each session started in a main checkout into a worktree of its own, read-only until it is ready.",
-      "default": true
+      "title": "Perm worktree",
+      "description": "Default for the Perm worktree toggle: give each session started in a main checkout, and each worktree Claude Code creates, a lasting slot, read-only until it is ready. Off leaves worktrees to Claude Code.",
+      "default": false
     },
     "worktreeRoot": {
       "type": "string",
@@ -22,18 +24,6 @@
       "type": "string",
       "title": "Setup command",
       "description": "A shell command run in a new slot before the session moves in (say `pnpm install`). Empty runs nothing.",
-      "default": ""
-    },
-    "apiBase": {
-      "type": "string",
-      "title": "API base URL",
-      "description": "The local server the API tab and the api_send tool talk to.",
-      "default": "http://localhost:3000"
-    },
-    "openapiPath": {
-      "type": "string",
-      "title": "OpenAPI file",
-      "description": "The OpenAPI JSON file the API tab reads. Empty looks for openapi.json in the project.",
       "default": ""
     }
   }

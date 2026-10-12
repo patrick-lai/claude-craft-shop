@@ -45,7 +45,7 @@ export function world(on: On, { isRepo = true } = {}): World {
     if (command === 'git fetch -q origin main') return ran()
     if (command === 'git rev-parse origin/main') return ran('0123456789abcdef\n')
     if (command === 'git worktree list --porcelain') return ran(`worktree ${REPO}\nbranch refs/heads/main\n`)
-    if (command.startsWith('git worktree add -q -B craft/abcdef ')) return ran()
+    if (command.startsWith('git worktree add -q -B craft/')) return ran()
     return ran('', 1)
   })
   on('tool.call', ($, e) => {

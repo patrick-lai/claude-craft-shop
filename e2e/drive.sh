@@ -40,15 +40,14 @@ close_diff_panel() {
 fixture="$("$here/setup.sh")"
 app="$fixture/app"
 tmux kill-session -t craft 2>/dev/null || true
-tmux kill-session -t api 2>/dev/null || true
-tmux new-session -d -s api -x 120 -y 20 "cd '$app' && node server.js"
 tmux new-session -d -s craft -x 200 -y 50 -e CLAUDE_CODE_NO_FLICKER=1 -e COLORTERM=truecolor \
   "unset NO_COLOR; cd '$app' && claude --plugin-dir '$repo' --settings '$fixture/settings.json' --permission-mode acceptEdits"
 
 echo "1. Worktree head start ($fixture)"
 c wait craft 'trust this folder' 30
+sleep 1
 tmux send-keys -t craft Down
-sleep 0.4
+c wait craft '❯ 2\. Yes, I trust this folder|❯ Yes, I trust this folder' 10
 tmux send-keys -t craft Enter
 c wait craft 'Read-only until the worktree is ready' 30
 pass 'the band says read-only while the worktree is prepared'
@@ -71,7 +70,7 @@ pass "the session moved into $slot and hello.txt landed there, not in the main c
 c idle craft 180
 close_diff_panel
 c type craft '/craft worktree'
-c wait craft 'Worktree ready' 30
+c wait craft '● Ready · craft/' 30
 c shot craft "$out/03-worktree.ansi"
 
 echo '2. Crew dials'
@@ -79,8 +78,8 @@ c type craft '/craft dials'
 close_diff_panel
 c click craft '[ Balanced ]' 2
 c click craft '[ Quick ]' 2
-c click craft 'Voice     ●' 14
-c click craft '▸ Voice' 2
+c click craft 'Voice       ■' 16
+c click craft 'Voice       ■' 0
 c click craft '[ What agents are told ]' 2
 c wait craft 'Voice \(Teach\)' 10
 pass 'pressing the pips changes the brief'
@@ -92,36 +91,20 @@ pass 'the agent echoes the working style it was given'
 
 echo '3. Context library'
 c type craft '/craft context'
-c click craft 'Title :' 8
-c type craft 'Launch facts'
-c click craft 'Text  :' 8
+c click craft 'New folder' 0
+c click craft 'Folder name' 0
+c type craft 'Launch'
+c wait craft 'New sources go into Launch' 10
+pass 'a new folder becomes where new sources go'
+c click craft 'Paste a link' 0
 c type craft "The Workshop API's launch codename is BLUE HERON."
-c wait craft 'Launch facts' 10
-c click craft 'Guidance ▾' 2
-c pick craft '  Strict'
-c wait craft 'Strict ▾' 10
-pass 'a strict note is in the library'
+c wait craft '1 source · 1 on' 10
+c click craft 'Make strict' 0
+pass 'a strict note sits in the Launch folder'
 c shot craft "$out/05-context.ansi"
 tmux send-keys -t craft Escape
 c ask craft "What is the Workshop API's launch codename? Answer in two words."
 screen | grep -qi 'BLUE HERON' || fail 'the agent did not cite the strict note'
 pass 'the agent cites the strict note'
-
-echo '4. API workbench'
-c idle craft 60
-c ask craft 'Use the api_send tool to GET /items expecting 200, then POST /items with body {"name":"Plane"} expecting 201. Report the two statuses only.' 180
-c type craft '/craft api'
-c click craft '[ Log ]' 2
-c wait craft 'agent +POST +/items +201' 10
-pass 'the Log shows the agent calls'
-c shot craft "$out/06-api-log.ansi"
-c click craft '[ Reference ]' 2
-c click craft '/items/{id}' 0
-c click craft '[ Try it ]' 2
-c click craft '[ Log ]' 2
-c wait craft 'you +GET +/items/1 +200' 10
-pass 'Try it sends the example and the Log shows it'
-c click craft '[ Reference ]' 2
-c shot craft "$out/07-api-reference.ansi"
 
 echo 'All checks passed.'

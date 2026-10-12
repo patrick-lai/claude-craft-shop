@@ -7,7 +7,9 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, PluginOptions, Timer } from 'claude-code'
 
 import type { Slot, Tab, Worktree, WorktreePhase } from '../types'
-import { frame, PANE, PANE_TITLE } from './ui'
+import { frame, PANE, PANE_TITLE, resolveUi } from './ui'
+import type { Ui } from './ui'
+import { branchArt, card, label, segmented, svg } from './kit'
 
 export const IDLE_WORKTREE: Worktree = {
   phase: 'off',
@@ -27,6 +29,7 @@ const isTurnRunning = atom({ plugin: 'craft-shop', key: 'isTurnRunning' } as con
 const slots = atom({ plugin: 'craft-shop', key: 'slots' } as const, [])
 const tab = atom({ plugin: 'craft-shop', key: 'tab' } as const, 'worktree')
 const worktree = atom({ plugin: 'craft-shop', key: 'worktree' } as const, IDLE_WORKTREE)
+const isStepsShown = atom({ plugin: 'craft-shop', key: 'isStepsShown' } as const, false)
 
 type $ = EngineInterface
 
@@ -227,7 +230,6 @@ async function defaultBranch($: $, main: string): Promise<string> {
 
 // Held by the module, not $.state: a reload runs session.start again, which
 // restarts prepare() and its heartbeat.
-let isEnterPending = false
 let heartbeat: Timer | null = null
 
 function startHeartbeat($: $, path: string): void {
@@ -244,7 +246,6 @@ async function fail($: $, error: unknown): Promise<void> {
 async function enter($: $, options: PluginOptions): Promise<void> {
   const { path, branch } = await read($, worktree)
   if (path === null || branch === null) return
-  isEnterPending = false
   const entered = await $.tool.call({ tool: 'EnterWorktree', path })
   if (entered.deny !== undefined || entered.isError === true) {
     $.ui.log(`EnterWorktree refused: ${entered.deny ?? entered.text ?? ''}`, { to: 'debug' })
@@ -283,12 +284,7 @@ async function prepare($: $, options: PluginOptions): Promise<void> {
     await seedDependencies($, options, main, path)
     await refreshSlots($, options)
 
-    if (await read($, isTurnRunning)) {
-      isEnterPending = true
-      await setStep($, 'Ready; moving in when this turn ends')
-    } else {
-      await enter($, options)
-    }
+    await enter($, options)
   } catch (error) {
     await fail($, error)
   }
@@ -299,6 +295,11 @@ async function beginWorktree($: $, options: PluginOptions): Promise<void> {
   await update($, isBandHidden, () => false)
   $.clock.after(0, () => void prepare($, options))
 }
+
+const AUTO_CHOICES = [
+  { value: 'off', label: 'Off' },
+  { value: 'on', label: 'On' },
+] as const
 
 const PHASE: Record<WorktreePhase, { label: string; color: string }> = {
   off: { label: 'Off', color: 'inactive' },
@@ -311,30 +312,126 @@ const PHASE: Record<WorktreePhase, { label: string; color: string }> = {
 // a render's viewport says and session.start does not.
 let hasAutoOpened = false
 
+// Claims a slot once per load, for the first person at the session: a REPL
+// at session.start, or the desktop app or an editor attaching (they run the
+// session headless, so its session.start says no one is at the prompt).
+let hasStarted = false
+
+export const AUTO_WORKTREE_KEY = 'autoWorktree'
+
+// The Perm worktree tab's toggle, kept across sessions; until it is pressed,
+// the autoWorktree option decides, off unless set.
+async function isAutoOn($: $, options: PluginOptions): Promise<boolean> {
+  const stored = await $.store.get(AUTO_WORKTREE_KEY)
+  return typeof stored === 'boolean' ? stored : options.autoWorktree === true
+}
+
+async function setAuto($: $, isOn: boolean): Promise<void> {
+  await $.store.set(AUTO_WORKTREE_KEY, isOn)
+  $.ui.invalidate('ui.render')
+}
+
+async function startWorktree($: $, options: PluginOptions, cwd: string, isForced = false): Promise<void> {
+  if (hasStarted) return
+  hasStarted = true
+  const current = await read($, worktree)
+  if (current.phase === 'ready' && current.path !== null) {
+    startHeartbeat($, current.path)
+    return
+  }
+  if (current.phase === 'preparing') {
+    await beginWorktree($, options)
+    return
+  }
+  // Off, Craft Shop stays out of the way: no slot, no read-only guard, and
+  // Claude Code's own worktree handling applies.
+  if (!isForced && !(await isAutoOn($, options))) return
+
+  const repo = await $.session.repo()
+  if (repo === null) return
+  const top = await git($, ['rev-parse', '--show-toplevel'], cwd)
+  if (top.exitCode !== 0) return
+  const main = await realPath($, top.stdout.trim())
+  if (main !== (await realPath($, repo.root))) return
+
+  await update($, worktree, now => ({ ...now, main }))
+  await beginWorktree($, options)
+}
+
+// The empty state's button: claims a slot now, whether the toggle is on or off.
+async function claimNow($: $, options: PluginOptions): Promise<void> {
+  hasStarted = false
+  await startWorktree($, options, await $.session.cwd(), true)
+  if ((await read($, worktree)).phase === 'off') {
+    await $.ui.toast("No worktree: this session isn't in a repository's main checkout.")
+  }
+}
+
+// Answers Claude Code's own worktree creation (claude --worktree, EnterWorktree
+// with a name) with a slot: claimed at once so the session can enter it, then
+// seeded while the session stays read-only. Null hands creation back.
+async function claimForCreate($: $, options: PluginOptions, cwd: string, name: string): Promise<string | null> {
+  try {
+    const top = await gitOut($, ['rev-parse', '--show-toplevel'], cwd, 'Not inside a repository.')
+    const repo = await $.session.repo()
+    const main = await realPath($, repo?.root ?? top)
+    const branchName = await defaultBranch($, main)
+    const fetched = await git($, ['fetch', '-q', 'origin', branchName], main)
+    const base = fetched.exitCode === 0 ? `origin/${branchName}` : branchName
+    const baseSha = await gitOut($, ['rev-parse', base], main, `Could not resolve ${base}.`)
+    const branch = `craft/${name.replace(/[^A-Za-z0-9._-]+/g, '-').slice(0, 40) || (await $.session.id()).slice(0, 6)}`
+    hasStarted = true
+    await update($, worktree, (): Worktree => ({ ...IDLE_WORKTREE, phase: 'preparing', step: 'Claiming a slot', main, base, baseSha, branch }))
+    const path = await claimSlot($, options, main, base, branch)
+    await update($, worktree, current => ({ ...current, path }))
+    startHeartbeat($, path)
+    $.clock.after(0, () => void seedThenUnlock($, options, main, path))
+    return path
+  } catch (error) {
+    $.ui.log(`WorktreeCreate fell back to Claude Code: ${String(error)}`, { to: 'debug' })
+    await update($, worktree, () => IDLE_WORKTREE)
+    return null
+  }
+}
+
+async function seedThenUnlock($: $, options: PluginOptions, main: string, path: string): Promise<void> {
+  try {
+    await seedDependencies($, options, main, path)
+    await setStep($, 'Worktree ready')
+    await update($, worktree, (current): Worktree => ({ ...current, phase: 'ready', error: null }))
+    await refreshSlots($, options)
+  } catch (error) {
+    await fail($, error)
+  }
+}
+
 export function registerWorktree(on: On, options: PluginOptions): void {
+  on('classic.WorktreeCreate', async ($, e, next) => {
+    if (!(await isAutoOn($, options))) return next(e)
+    const path = await claimForCreate($, options, e.cwd, e.name)
+    return path === null ? next(e) : { worktreePath: path }
+  })
+
   on('session.start', { isInteractive: true }, async ($, e, next) => {
     const started = await next(e)
-    const current = await read($, worktree)
-    if (current.phase === 'ready' && current.path !== null) {
-      startHeartbeat($, current.path)
-      return started
-    }
-    if (current.phase === 'preparing') {
-      await beginWorktree($, options)
-      return started
-    }
-    if (options.autoWorktree === false) return started
-
-    const repo = await $.session.repo()
-    if (repo === null) return started
-    const top = await git($, ['rev-parse', '--show-toplevel'], e.cwd)
-    if (top.exitCode !== 0) return started
-    const main = await realPath($, top.stdout.trim())
-    if (main !== (await realPath($, repo.root))) return started
-
-    await update($, worktree, now => ({ ...now, main }))
-    await beginWorktree($, options)
+    await startWorktree($, options, e.cwd)
     return started
+  })
+
+  on('session.start', { isInteractive: false }, async ($, e, next) => {
+    const started = await next(e)
+    if ((await $.session.surfaces()).some(one => one === 'desktop' || one === 'vscode')) await startWorktree($, options, e.cwd)
+    return started
+  })
+
+  on('session.attach', async ($, e, next) => {
+    const attached = await next(e)
+    if (e.surface === 'desktop' || e.surface === 'vscode') await startWorktree($, options, await $.session.cwd())
+    if (e.viewport?.isFullscreen === true && !hasAutoOpened) {
+      hasAutoOpened = true
+      $.clock.after(0, () => void $.ui.open({ id: PANE, title: PANE_TITLE }))
+    }
+    return attached
   })
 
   on('session.end', async ($, e, next) => {
@@ -354,7 +451,6 @@ export function registerWorktree(on: On, options: PluginOptions): void {
     if (e.agentId !== undefined) return done
     await update($, isTurnRunning, () => false)
     if ((await read($, worktree)).phase === 'ready') await update($, isBandHidden, () => true)
-    if (isEnterPending) $.clock.after(0, () => void enter($, options))
     return done
   })
 
@@ -411,7 +507,7 @@ export function registerWorktree(on: On, options: PluginOptions): void {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
     if ((await read($, tab)) !== 'worktree') return next(e)
-    const ui = $.ui.resolve(e)
+    const ui: Ui = resolveUi($.ui.resolve(e), e.surface)
     const { Box, Text, Button } = ui
     const state = await read($, worktree)
     const list = await read($, slots)
@@ -419,100 +515,214 @@ export function registerWorktree(on: On, options: PluginOptions): void {
     const first = state.steps[0]?.at ?? 0
     const select = (id: Tab) => void update($, tab, () => id)
 
+    const isAuto = await isAutoOn($, options)
+    const autoCard = card(
+      ui,
+      'worktree-auto',
+      [
+        <Box justifyContent="space-between" alignItems="center" gap={1}>
+          <Box flexDirection="column" flexShrink={1}>
+            <Text bold>Perm worktree</Text>
+            <Text dimColor>
+              {isAuto
+                ? "On: new sessions in a main checkout, and Claude's own worktrees, get a lasting slot. Read-only until it is ready, then the lock lifts."
+                : "Off: Craft Shop leaves worktrees to Claude Code (the desktop's worktree option, claude --worktree, EnterWorktree)."}
+            </Text>
+          </Box>
+          <Box flexShrink={0}>{segmented(ui, 'auto-worktree', AUTO_CHOICES, isAuto ? 'on' : 'off', choice => void setAuto($, choice === 'on'))}</Box>
+        </Box>,
+      ],
+      { tone: 'muted' },
+    )
+
     if (state.phase === 'off') {
+      const rich = ui.Svg !== undefined
       return frame(
         ui,
         'worktree',
         e.props.bodyColumns,
         select,
-        <Box flexDirection="column">
-          <Text dimColor>No worktree for this session.</Text>
-          <Text dimColor>
-            Craft Shop claims one when a session starts in a repository's main checkout with autoWorktree on.
-          </Text>
+        <Box flexDirection="column" gap={1}>
+          {autoCard}
+          {card(ui, 'worktree-empty', [
+            <Box gap={2} alignItems="center">
+              {svg(ui, branchArt(200, 108), 'A branch off the main line', 200, 108)}
+              <Box flexDirection="column" flexShrink={1} flexGrow={1} gap={1}>
+                <Box flexDirection="column">
+                  <Text bold>No worktree for this session</Text>
+                  <Text dimColor>{isAuto ? 'This session started before the toggle was on, or outside a main checkout.' : 'Create one for this session now, or turn Perm worktree on for new sessions.'}</Text>
+                </Box>
+                <Box flexDirection="column">
+                  <Text dimColor>✓ An isolated branch and folder</Text>
+                  <Text dimColor>✓ Safe to discard</Text>
+                  <Text dimColor>✓ The main checkout stays as it is</Text>
+                </Box>
+                <Box justifyContent="flex-end">
+                  <Button key="worktree-create" label="Create worktree now" variant="primary" onPress={() => void claimNow($, options)} />
+                </Box>
+              </Box>
+            </Box>,
+          ])}
+          {list.length > 0 && <Text dimColor>{list.length} slots on disk for this repository.</Text>}
         </Box>,
       )
     }
 
+
+    const stage = stageOf(state)
+    const { Svg } = ui
+    const rich = Svg !== undefined
+    const isReady = state.phase === 'ready'
+    const showSteps = !isReady || (await read($, isStepsShown))
+    const stepperWidth = Math.max(320, (e.props.bodyColumns - 4) * 8)
+    const isTimed = state.steps.some(step => step.at !== first)
+    const detail = (label: string, value: string) => (
+      <Box gap={1}>
+        <Box width={8} flexShrink={0}>
+          <Text dimColor>{label}</Text>
+        </Box>
+        <Text wrap="truncate-start">{value}</Text>
+      </Box>
+    )
     return frame(
       ui,
       'worktree',
       e.props.bodyColumns,
       select,
       <Box flexDirection="column" gap={1}>
-        <Box flexDirection="column">
-          <Text>
-            <Text color={phase.color} bold>● {phase.label}</Text>
-            <Text dimColor> · {state.step}</Text>
-          </Text>
-          {state.steps.map(step => (
-            <Text color={step.isWarning ? 'warning' : undefined} dimColor={!step.isWarning}>
-              {`+${((step.at - first) / 1000).toFixed(1)}s`.padEnd(8)}
-              {step.label}
-            </Text>
-          ))}
-        </Box>
-
-        <Box flexDirection="column">
-          <Text wrap="truncate-start">
-            <Text dimColor>Main     </Text>
-            {state.main ?? '–'}
-          </Text>
-          <Text wrap="truncate-start">
-            <Text dimColor>Slot     </Text>
-            {state.path ?? '–'}
-          </Text>
-          <Text>
-            <Text dimColor>Branch   </Text>
-            {state.branch ?? '–'}
-          </Text>
-          <Text>
-            <Text dimColor>Base     </Text>
-            {state.base ?? '–'}
-            {state.baseSha === null ? '' : ` @ ${state.baseSha.slice(0, 7)}`}
-          </Text>
-        </Box>
-
-        <Box gap={1}>
-          <Button key="slots-refresh" label="Refresh" hotkey="r" onPress={() => void refreshSlots($, options)} />
-          {state.phase === 'failed' && (
-            <Button key="worktree-retry" label="Retry" variant="primary" onPress={() => void beginWorktree($, options)} />
-          )}
-        </Box>
-
-        <Box flexDirection="column">
-          <Text bold>Slots</Text>
-          {list.length === 0 && <Text dimColor>No slots yet.</Text>}
-          {list.map(slot => (
-            <Box flexDirection="column">
+        {autoCard}
+        {card(
+          ui,
+          'worktree-status',
+          [
+            <Box justifyContent="space-between" alignItems="center" gap={1}>
               <Text>
-                <Text bold>#{slot.path.split('/').pop()}</Text> {slot.branch ?? 'detached'}{' '}
-                <Text color={slot.isMine ? 'success' : slot.isLeased ? 'warning' : 'inactive'}>
-                  {slot.isMine ? 'this session' : slot.isLeased ? 'leased' : 'free'}
+                <Text color={phase.color} bold>
+                  ● {phase.label}
                 </Text>
+                <Text dimColor> · {isReady ? (state.branch ?? '') : state.steps.length === 0 ? shortPath(state.main ?? '') : state.step}</Text>
               </Text>
               <Box gap={1}>
-                <Button
-                  key={`slot-copy-${slot.path}`}
-                  label="Copy path"
-                  dimColor
-                  onPress={press => void $.ui.copy({ text: slot.path, surface: press.surface })}
-                />
-                {slot.isLeased && !slot.isMine && (
-                  <Button
-                    key={`slot-release-${slot.path}`}
-                    label="Release"
-                    dimColor
-                    onPress={() => void releaseAndRefresh($, slot.path, options)}
-                  />
-                )}
+                {isReady && <Button key="steps-toggle" label={showSteps ? 'Hide steps' : 'Show steps'} dimColor onPress={() => void update($, isStepsShown, now => !now)} />}
+                {state.phase !== 'preparing' && <Button key="slots-refresh" label="Refresh" hotkey="r" dimColor onPress={() => void refreshSlots($, options)} />}
+                {state.phase === 'failed' && <Button key="worktree-retry" label="Retry" variant="primary" onPress={() => void beginWorktree($, options)} />}
               </Box>
-            </Box>
-          ))}
-        </Box>
+            </Box>,
+            showSteps &&
+              (rich ? (
+                <Box marginTop={1}>{svg(ui, stepper(stage, state.phase, stepperWidth), `Stage ${Math.min(stage + 1, 4)} of 4: ${STAGES[Math.min(stage, 3)]}`, stepperWidth, 58)}</Box>
+              ) : (
+                <Text>
+                  {STAGES.map((name, index) => (
+                    <Text color={index < stage || isReady ? 'success' : index === stage ? phase.color : undefined} dimColor={index > stage && !isReady}>
+                      {index < stage || isReady ? '✓' : index === stage ? '●' : '○'} {name}
+                      {index < STAGES.length - 1 ? '  ─  ' : ''}
+                    </Text>
+                  ))}
+                </Text>
+              )),
+            state.phase === 'preparing' && (
+              <Box marginTop={1}>
+                <Text dimColor>Prompts work now: the agent reads, searches and plans in the main checkout, and edits once it moves in.</Text>
+              </Box>
+            ),
+            showSteps && state.steps.length > 0 && (
+              <Box flexDirection="column" marginTop={1}>
+                {state.steps.map(step => (
+                  <Text color={step.isWarning ? 'warning' : undefined} dimColor={!step.isWarning}>
+                    {isTimed ? `+${((step.at - first) / 1000).toFixed(1)}s  ` : '·  '}
+                    {step.label}
+                  </Text>
+                ))}
+              </Box>
+            ),
+          ],
+          { tone: state.phase === 'failed' ? 'danger' : isReady ? 'plain' : 'warning' },
+        )}
+
+        {state.path === null
+          ? null
+          : card(
+              ui,
+              'worktree-facts',
+              [
+                detail('Main', shortPath(state.main ?? '')),
+                detail('Slot', shortPath(state.path)),
+                detail('Branch', state.branch ?? ''),
+                detail('Base', `${state.base ?? ''}${state.baseSha === null ? '' : ` @ ${state.baseSha.slice(0, 7)}`}`),
+              ],
+              { tone: 'muted' },
+            )}
+
+        {list.length > 0 && (
+          <Box flexDirection="column" gap={rich ? 1 : 0}>
+            {label(ui, `Slots · ${list.length}`)}
+            {list.map(slot =>
+              card(
+                ui,
+                `slot-${slot.path}`,
+                [
+                  <Box justifyContent="space-between" alignItems="center" gap={1}>
+                    <Text wrap="truncate-end">
+                      <Text bold>#{slot.path.split('/').pop()}</Text> {slot.branch ?? 'detached'}{' '}
+                      <Text color={slot.isMine ? 'success' : slot.isLeased ? 'warning' : 'inactive'}>{slot.isMine ? '● this session' : slot.isLeased ? '● leased' : '○ free'}</Text>
+                    </Text>
+                    <Box gap={1}>
+                      <Button key={`slot-copy-${slot.path}`} label="Copy path" dimColor onPress={press => void $.ui.copy({ text: slot.path, surface: press.surface })} />
+                      {slot.isLeased && !slot.isMine && (
+                        <Button key={`slot-release-${slot.path}`} label="Release" dimColor onPress={() => void releaseAndRefresh($, slot.path, options)} />
+                      )}
+                    </Box>
+                  </Box>,
+                ],
+                { tone: slot.isMine ? 'selected' : 'plain' },
+              ),
+            )}
+          </Box>
+        )}
       </Box>,
     )
   })
+}
+
+// A home folder spelled ~, as the terminal shows paths.
+function shortPath(path: string): string {
+  return path.replace(/^\/(Users|home)\/[^/]+/, '~')
+}
+
+const STAGES = ['Fetch', 'Claim a slot', 'Seed', 'Move in']
+
+// Which of the four stages the steps so far have reached.
+function stageOf(state: Worktree): number {
+  if (state.phase === 'ready') return STAGES.length
+  const patterns = [/^Fetching|^Could not fetch/, /^Claiming|^Reusing slot|^Creating a new worktree/, /^Cloning|^Could not clone|^Running/, /^Ready; moving/]
+  let reached = 0
+  for (const step of state.steps) {
+    patterns.forEach((pattern, index) => {
+      if (pattern.test(step.label)) reached = Math.max(reached, index)
+    })
+  }
+  return reached
+}
+
+function stepper(stage: number, phase: WorktreePhase, width: number): string {
+  const gap = width / STAGES.length
+  const parts = STAGES.map((name, index) => {
+    const x = gap * index + gap / 2
+    const isDone = index < stage
+    const isCurrent = index === stage
+    const color = isDone ? '#3fb6a8' : isCurrent ? (phase === 'failed' ? '#e5534b' : '#d6a24a') : '#8b949e'
+    const line =
+      index < STAGES.length - 1
+        ? `<line x1="${x + 13}" y1="16" x2="${x + gap - 13}" y2="16" stroke="${isDone ? '#3fb6a8' : '#8b949e'}" stroke-opacity="${isDone ? 0.9 : 0.35}" stroke-width="2" stroke-dasharray="${isDone ? '' : '3 4'}"/>`
+        : ''
+    const mark = isDone
+      ? `<path d="M${x - 4.5} 16.5l3 3 6-6.5" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`
+      : `<text x="${x}" y="20.5" text-anchor="middle" font-family="-apple-system, system-ui, sans-serif" font-size="12" font-weight="600" fill="${isCurrent ? '#fff' : '#8b949e'}">${index + 1}</text>`
+    const halo = isCurrent ? `<circle cx="${x}" cy="16" r="15" fill="${color}" fill-opacity="0.2"/>` : ''
+    return `${line}${halo}<circle cx="${x}" cy="16" r="11" fill="${isDone || isCurrent ? color : 'none'}" stroke="${color}" stroke-opacity="${isDone || isCurrent ? 1 : 0.5}" stroke-width="1.6"/>${mark}<text x="${x}" y="48" text-anchor="middle" font-family="-apple-system, system-ui, sans-serif" font-size="12" font-weight="${isCurrent ? 600 : 400}" fill="${isCurrent ? color : isDone ? '#9aa1ab' : '#6e7681'}">${name}</text>`
+  }).join('')
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="58" viewBox="0 0 ${width} 58">${parts}</svg>`
 }
 
 async function releaseAndRefresh($: $, path: string, options: PluginOptions): Promise<void> {

@@ -8,6 +8,28 @@ async function dialsSection($: Engine) {
   return composed.sections.find(section => section.id === 'craft-shop:dials')?.text ?? ''
 }
 
+test('dragging a dot on the desktop radar sets that dial, and the agent is told', async ($, on) => {
+  world(on, { isRepo: false })
+  await startSession($)
+  const ui = await mountPane($, 'desktop')
+  await ui.press({ key: 'tab-dials' })
+  // The radar is 360 by 300 pixels; laid out at 45 by 15 cells, a cell is 8 by 20.
+  await ui.resize({ columns: 45, rows: 15, in: 'radar-drag' })
+
+  // Tenacity's spoke points down and right; press near the centre, then drag out.
+  await ui.pointer({ type: 'down', x: 24, y: 8, button: 'left', in: 'radar-drag' })
+  expect(await dialsSection($)).toContain('Tenacity (One pass)')
+  await ui.pointer({ type: 'move', x: 33, y: 10, button: 'left', in: 'radar-drag' })
+  await ui.pointer({ type: 'up', x: 33, y: 10, button: 'left', in: 'radar-drag' })
+  expect(await dialsSection($)).toContain('Tenacity (Goal mode)')
+  expect(await ui.find({ text: /What the agent is told at/ })).toBeDefined()
+
+  // Arrow keys move the focus to Autonomy and lower it.
+  await ui.key({ key: 'right', in: 'radar-drag' })
+  await ui.key({ key: 'down', in: 'radar-drag' })
+  expect(await dialsSection($)).toContain('Autonomy (Check in)')
+})
+
 test('the working style the model is told follows the dials', async ($, on) => {
   world(on, { isRepo: false })
   await startSession($)

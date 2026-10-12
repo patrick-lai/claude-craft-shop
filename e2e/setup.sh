@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds the end-to-end fixture: a bare origin and a clone of it holding a
 # small JSON API and its openapi.json, plus settings that point Craft Shop's
-# worktree root and API base into the fixture.
+# worktree root into the fixture.
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -26,8 +26,8 @@ git -C "$root/app" push -q origin main
 cat > "$root/settings.json" <<JSON
 {
   "pluginConfigs": {
-    "craft-shop": { "options": { "worktreeRoot": "$root/slots", "apiBase": "http://localhost:$port", "setupCommand": "sleep ${CRAFT_SETUP_SECONDS:-25}" } },
-    "craft-shop@inline": { "options": { "worktreeRoot": "$root/slots", "apiBase": "http://localhost:$port", "setupCommand": "sleep ${CRAFT_SETUP_SECONDS:-25}" } }
+    "craft-shop": { "options": { "autoWorktree": true, "worktreeRoot": "$root/slots", "setupCommand": "sleep ${CRAFT_SETUP_SECONDS:-25}" } },
+    "craft-shop@inline": { "options": { "autoWorktree": true, "worktreeRoot": "$root/slots", "setupCommand": "sleep ${CRAFT_SETUP_SECONDS:-25}" } }
   }
 }
 JSON

@@ -6,15 +6,28 @@ export const PANE = 'craft-shop'
 export const PANE_TITLE = 'Craft Shop'
 
 // The elements the pane draws with, so it draws on every surface: mobile has
-// no Input or Select, and the tabs leave those out where they are missing.
-export type Ui = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button' | 'Markdown'> &
-  Partial<Pick<Elements['terminal'], 'Input' | 'Select'>>
+// no Input or Select, the terminal no Svg, and the tabs leave those out where
+// they are missing.
+export type Ui = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button' | 'Markdown' | 'Code'> &
+  Partial<Pick<Elements['terminal'], 'Input' | 'Select'>> &
+  Partial<Pick<Elements['desktop'], 'Svg'>>
+
+// $.ui.resolve completes every table with stand-ins that draw nothing; this
+// leaves out what the surface lacks, so the tabs can test for it: the
+// terminal draws no Svg, mobile no Input or Select.
+export function resolveUi(table: Ui, surface: string): Ui {
+  return {
+    ...table,
+    Svg: surface === 'terminal' ? undefined : table.Svg,
+    Input: surface === 'mobile' ? undefined : table.Input,
+    Select: surface === 'mobile' ? undefined : table.Select,
+  }
+}
 
 export const TABS: { id: Tab; label: string }[] = [
-  { id: 'worktree', label: 'Worktree' },
+  { id: 'worktree', label: 'Perm worktree' },
   { id: 'dials', label: 'Dials' },
   { id: 'context', label: 'Context' },
-  { id: 'api', label: 'API' },
 ]
 
 export function isTab(value: string): value is Tab {
@@ -25,23 +38,37 @@ export function isTab(value: string): value is Tab {
 // crosses an import, so a tab cannot be drawn from another file); this is
 // the frame they share.
 export function frame(ui: Ui, current: Tab, columns: number, onSelect: (id: Tab) => void, body: RenderElement) {
-  const { Box, Button } = ui
+  const { Box, Button, Text } = ui
+  const rich = ui.Svg !== undefined
+  // The tabs sit in one rounded tray, the current one filled: a segmented
+  // control, as CommissionAI's Stage tabs read.
   return (
     <Box flexDirection="column" width={columns} gap={1}>
-      <Box gap={1}>
-        {TABS.map((one, index) => (
-          <Button
-            key={`tab-${one.id}`}
-            label={one.label}
-            hotkey={String(index + 1)}
-            variant={one.id === current ? 'primary' : undefined}
-            onPress={() => onSelect(one.id)}
-          />
-        ))}
+      <Box justifyContent="space-between" alignItems="center">
+        <Box gap={1} backgroundColor={rich ? 'rgba(140,140,150,0.10)' : undefined} paddingX={rich ? 1 : 0}>
+          {TABS.map((one, index) => (
+            <Button
+              key={`tab-${one.id}`}
+              label={one.label}
+              hotkey={String(index + 1)}
+              variant={one.id === current ? 'primary' : undefined}
+              dimColor={one.id !== current}
+              onPress={() => onSelect(one.id)}
+            />
+          ))}
+        </Box>
+        <Text dimColor>Craft Shop</Text>
       </Box>
       {body}
     </Box>
   )
+}
+
+// How wide each card of a grid is, so the cards fill the row: as many as fit
+// at `least` columns each, with one column between them.
+export function gridWidth(columns: number, least: number): number {
+  const perRow = Math.max(1, Math.floor((columns + 1) / (least + 1)))
+  return Math.floor((columns - (perRow - 1)) / perRow)
 }
 
 export function bar(fraction: number, width: number): string {

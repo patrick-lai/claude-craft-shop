@@ -16,12 +16,8 @@ test('the tabs switch on press and each draws its empty state', async ($, on) =>
 
     await ui.press({ key: 'tab-context' })
     expect(await ui.find({ text: /No sources yet/ }), surface).toBeDefined()
+    expect(await ui.find({ type: 'Input', key: 'add-input' }), surface).toBeDefined()
 
-    await ui.press({ key: 'tab-api' })
-    await ui.press({ key: 'lens-reference' })
-    expect(await ui.find({ text: /No openapi.json found/ }), surface).toBeDefined()
-    await ui.press({ key: 'lens-log' })
-    expect(await ui.find({ text: /No requests yet/ }), surface).toBeDefined()
     await ui.unmount()
   }
 })

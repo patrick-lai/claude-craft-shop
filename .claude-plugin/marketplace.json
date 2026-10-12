@@ -4,13 +4,13 @@
     "name": "Patrick Lai"
   },
   "metadata": {
-    "description": "Craft Shop: a Claude Code mod with a worktree head start, crew dials, a context library and an API workbench."
+    "description": "Craft Shop: a Claude Code mod with a perm worktree head start, crew dials and a context library."
   },
   "plugins": [
     {
       "name": "craft-shop",
       "source": "./",
-      "description": "Worktree head start, crew dials, a context library and an API workbench in one Craft Shop pane."
+      "description": "Perm worktree head start, crew dials and a context library in one Craft Shop pane."
     }
   ]
 }

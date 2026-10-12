@@ -1,4 +1,4 @@
-export type Tab = 'worktree' | 'dials' | 'context' | 'api'
+export type Tab = 'worktree' | 'dials' | 'context'
 
 export type WorktreePhase = 'off' | 'preparing' | 'ready' | 'failed'
 
@@ -24,47 +24,37 @@ export type DialValues = Record<DialKey, number>
 
 export type SourceMode = 'off' | 'guidance' | 'strict'
 
+export type SourceKind = 'note' | 'link' | 'file'
+
 export type Source = {
   id: string
-  kind: 'note' | 'link'
+  kind: SourceKind
   title: string
   text: string
   url: string | null
+  // A file's path, relative to the checkout's top.
+  path: string | null
   mode: SourceMode
+  folderId: string | null
 }
 
-export type NoteDraft = { title: string; text: string }
+export type Folder = { id: string; name: string }
 
-export type Exchange = {
-  id: string
-  actor: 'you' | 'agent'
-  method: string
-  path: string
-  url: string
-  status: number | null
-  ms: number
-  isPass: boolean
-  expectStatus: number | null
-  request: string
-  response: string
+// Where the Context tab is: which folders are open, which source shows its
+// details, which folder new sources go into, and which form or confirmation
+// shows.
+export type ContextView = {
+  openFolders: string[]
+  openId: string | null
+  target: string | null
+  isNamingFolder: boolean
+  menuFolder: string | null
+  renamingFolder: string | null
+  deletingFolder: string | null
+  isEditingText: boolean
 }
 
-export type ApiParam = { name: string; in: string; isRequired: boolean; type: string }
-
-export type ApiOp = {
-  id: string
-  method: string
-  path: string
-  tag: string
-  summary: string
-  params: ApiParam[]
-  example: string | null
-  responses: { status: string; description: string }[]
-}
-
-export type ApiLens = 'reference' | 'send' | 'log'
-
-export type SendDraft = { method: string; path: string; body: string }
+export type ContextDraft = { input: string; name: string }
 
 declare module 'claude-code' {
   interface PluginState {
@@ -74,22 +64,18 @@ declare module 'claude-code' {
       slots: Slot[]
       isTurnRunning: boolean
       isBandHidden: boolean
+      isStepsShown: boolean
       isHeadStartPrompted: boolean
       toldStyle: string | null
       dials: DialValues
       selectedDial: DialKey | null
       isBriefShown: boolean
       sources: Source[]
-      noteDraft: NoteDraft
-      linkStatus: string
-      exchanges: Exchange[]
-      apiLens: ApiLens
-      selectedOp: string | null
-      selectedExchange: string | null
-      ops: ApiOp[]
-      specStatus: string
-      isApiUp: boolean | null
-      sendDraft: SendDraft
+      folders: Folder[]
+      contextView: ContextView
+      contextDraft: ContextDraft
+      contextStatus: string
+      isWindowShown: boolean
     }
   }
 }

@@ -2,10 +2,12 @@
 // per-level prompts reworded for a Claude Code session: no task_blocked or
 // task_complete tools, no board check command, no $COMMISSION_DEV_PORT.
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, On } from 'claude-code'
+import type { ClientProps, ElementConstructor, EngineInterface, On } from 'claude-code'
 
 import type { DialKey, DialValues, Tab } from '../types'
-import { frame, PANE } from './ui'
+import { card, chip, dialIcon, isRich, presetGlyph, segmented, svg, track } from './kit'
+import { bar, frame, PANE, resolveUi } from './ui'
+import type { Ui } from './ui'
 
 export const BALANCED: DialValues = { foresight: 3, crew: 3, tenacity: 3, autonomy: 3, proof: 3, voice: 3 }
 
@@ -133,83 +135,321 @@ async function setDials($: EngineInterface, change: (values: DialValues) => Dial
   await $.store.set(DIALS_STORE_KEY, await read($, dials))
 }
 
+// CommissionAI's dial hues (Radar.tsx HUES), as hex an SVG image draws on any
+// theme, and its spend and pace weights for the six dials kept here.
+const COLOR: Record<DialKey, string> = {
+  foresight: '#8f9cff',
+  crew: '#5aaeff',
+  tenacity: '#22c4dc',
+  autonomy: '#2fcfa6',
+  proof: '#74d16f',
+  voice: '#d8bf45',
+}
+
+const SPEND: Record<DialKey, number[]> = {
+  foresight: [0.9, 0.95, 1, 1.08, 1.15],
+  crew: [0.9, 0.95, 1, 1.3, 1.7],
+  tenacity: [0.7, 0.85, 1, 1.25, 1.6],
+  autonomy: [1, 1, 1, 1, 1],
+  proof: [0.9, 0.95, 1, 1.1, 1.25],
+  voice: [0.95, 0.97, 1, 1.05, 1.1],
+}
+
+const PACE: Record<DialKey, number[]> = {
+  foresight: [0.9, 0.95, 1, 1.1, 1.2],
+  crew: [1.05, 1.02, 1, 0.9, 0.8],
+  tenacity: [0.7, 0.85, 1, 1.2, 1.5],
+  autonomy: [1.4, 1.2, 1, 0.95, 0.9],
+  proof: [0.9, 0.95, 1, 1.15, 1.3],
+  voice: [1, 1, 1, 1.03, 1.06],
+}
+
+const ASKS = ['Often', 'On big calls', 'When unsure', 'Rarely', 'Almost never']
+
+export function estimate(values: DialValues): { spend: number; pace: number; paceLabel: string; asks: string } {
+  const spend = Math.max(0.4, 1 + 0.5 * DIALS.reduce((total, dial) => total + SPEND[dial.key][values[dial.key] - 1]! - 1, 0))
+  const pace = DIALS.reduce((total, dial) => total * PACE[dial.key][values[dial.key] - 1]!, 1)
+  const paceLabel = pace < 0.8 ? 'Quick' : pace < 1.15 ? 'Normal' : pace < 1.6 ? 'Longer' : 'Long haul'
+  return { spend, pace, paceLabel, asks: ASKS[values.autonomy - 1]! }
+}
+
+function spendText(spend: number): string {
+  const percent = Math.round((spend - 1) * 100)
+  return percent === 0 ? 'Baseline' : `${percent > 0 ? '+' : '−'}${Math.abs(percent)}%`
+}
+
+const RADAR_W = 360
+const RADAR_H = 300
+const RADIUS = 104
+
+function point(index: number, level: number): [number, number] {
+  const angle = ((-90 + (index * 360) / DIALS.length) * Math.PI) / 180
+  const reach = RADIUS * (level / 5)
+  return [RADAR_W / 2 + Math.cos(angle) * reach, RADAR_H / 2 + Math.sin(angle) * reach]
+}
+
+function polygon(levels: number[]): string {
+  return levels.map((level, index) => point(index, level).map(n => n.toFixed(1)).join(',')).join(' ')
+}
+
+// The radar of CommissionAI's Dials page: rings per level, the dial shape
+// filled with the dials' hues, a dot per dial and its name and level.
+export function radar(values: DialValues, selected: DialKey | null): string {
+  const levels = DIALS.map(dial => values[dial.key])
+  const rings = [1, 2, 3, 4, 5]
+    .map(ring => `<polygon points="${polygon(DIALS.map(() => ring))}" fill="none" stroke="#8b949e" stroke-opacity="${ring === 5 ? 0.45 : 0.2}" stroke-dasharray="${ring === 5 ? '' : '2 3'}"/>`)
+    .join('')
+  const spokes = DIALS.map((_, index) => {
+    const [x, y] = point(index, 5)
+    return `<line x1="${RADAR_W / 2}" y1="${RADAR_H / 2}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" stroke="#8b949e" stroke-opacity="0.22"/>`
+  }).join('')
+  const stops = DIALS.map((dial, index) => `<stop offset="${((index / (DIALS.length - 1)) * 100).toFixed(0)}%" stop-color="${COLOR[dial.key]}"/>`).join('')
+  const edges = DIALS.map((dial, index) => {
+    const [x1, y1] = point(index, levels[index]!)
+    const [x2, y2] = point((index + 1) % DIALS.length, levels[(index + 1) % DIALS.length]!)
+    return `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${COLOR[dial.key]}" stroke-width="2.4" stroke-linecap="round"/>`
+  }).join('')
+  const dots = DIALS.map((dial, index) => {
+    const [x, y] = point(index, levels[index]!)
+    const isSelected = dial.key === selected
+    const halo = isSelected ? `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="11" fill="${COLOR[dial.key]}" fill-opacity="0.25"/>` : ''
+    return `${halo}<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${isSelected ? 7 : 5.5}" fill="${COLOR[dial.key]}" stroke="#1b1d22" stroke-width="2"/>`
+  }).join('')
+  const labels = DIALS.map((dial, index) => {
+    const [x, y] = point(index, 6.3)
+    const anchor = Math.abs(x - RADAR_W / 2) < 4 ? 'middle' : x < RADAR_W / 2 ? 'end' : 'start'
+    const isSelected = dial.key === selected
+    return `<text x="${x.toFixed(1)}" y="${(y + 4).toFixed(1)}" text-anchor="${anchor}" font-family="-apple-system, system-ui, sans-serif" font-size="13" font-weight="${isSelected ? 600 : 400}" fill="${isSelected ? COLOR[dial.key] : '#9aa1ab'}">${dial.name} <tspan fill="${isSelected ? COLOR[dial.key] : '#6e7681'}">${levels[index]}</tspan></text>`
+  }).join('')
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${RADAR_W}" height="${RADAR_H}" viewBox="0 0 ${RADAR_W} ${RADAR_H}"><defs><linearGradient id="fill" x1="0" y1="0" x2="1" y2="1">${stops}</linearGradient><radialGradient id="glow"><stop offset="0%" stop-color="#8f9cff" stop-opacity="0.10"/><stop offset="100%" stop-color="#8f9cff" stop-opacity="0"/></radialGradient></defs><circle cx="${RADAR_W / 2}" cy="${RADAR_H / 2}" r="${RADIUS * 1.25}" fill="url(#glow)"/>${rings}${spokes}<polygon points="${polygon(levels)}" fill="url(#fill)" fill-opacity="0.28"/>${edges}${dots}${labels}</svg>`
+}
+
+function pips(level: number, color: string): string {
+  const cells = [1, 2, 3, 4, 5]
+    .map(index => `<rect x="${(index - 1) * 22}" y="0" width="18" height="18" rx="5" fill="${index <= level ? color : '#8b949e'}" fill-opacity="${index <= level ? 1 : 0.22}"/>`)
+    .join('')
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="106" height="18" viewBox="0 0 106 18">${cells}</svg>`
+}
+
+const LEVELS = [1, 2, 3, 4, 5].map(level => ({ value: String(level), label: String(level) }))
+
+// What the radar's Client posts: a dial and its level, and whether the press
+// selects that dial. Posted by code, so checked before it moves anything.
+function isRadarPost(data: unknown): data is { dial: number; level: number; select?: number } {
+  const post = data as { dial?: unknown; level?: unknown } | null
+  return (
+    post !== null &&
+    typeof post === 'object' &&
+    Number.isInteger(post.dial) &&
+    Number.isInteger(post.level) &&
+    (post.dial as number) >= 0 &&
+    (post.dial as number) < DIALS.length &&
+    (post.level as number) >= 1 &&
+    (post.level as number) <= 5
+  )
+}
+
 export function registerDials(on: On): void {
+  on('ui.message', async ($, e, next) => {
+    if (e.element !== 'radar-drag' || !isRadarPost(e.data)) return next(e)
+    const dial = DIALS[e.data.dial]!
+    const level = e.data.level
+    if (e.data.select !== undefined) await update($, selectedDial, () => dial.key)
+    await setDials($, now => ({ ...now, [dial.key]: level }))
+    return next(e)
+  })
+
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
     if ((await read($, tab)) !== 'dials') return next(e)
-    const ui = $.ui.resolve(e)
+    const ui: Ui = resolveUi($.ui.resolve(e), e.surface)
     const { Box, Text, Button, Markdown } = ui
+    const { Client } = $.ui.resolve(e) as { Client?: ElementConstructor<ClientProps> }
+    const rich = isRich(ui)
     const values = await read($, dials)
     const selected = await read($, selectedDial)
     const isShown = await read($, isBriefShown)
     const current = presetName(values)
+    const columns = e.props.bodyColumns
+    const isWide = columns >= 86
+    const guess = estimate(values)
+    // The estimate cards take what the radar leaves of the row.
+    const trackWidth = isWide ? Math.max(140, columns * 8 - RADAR_W - 16 - 4 * 8) : Math.max(140, (columns - 4) * 8)
+    const pick = (key: DialKey, level: number) => void setDials($, now => ({ ...now, [key]: Math.min(5, Math.max(1, level)) }))
+
+    const estimateCard = (key: string, title: string, value: string, fraction: number) =>
+      card(
+        ui,
+        key,
+        [
+          <Text dimColor>{title}</Text>,
+          <Text bold>{value}</Text>,
+          rich ? (
+            <Box marginBottom={1}>{svg(ui, track(fraction, trackWidth), `${title} ${value}`, trackWidth, 6)}</Box>
+          ) : (
+            <Text color="suggestion">{bar(fraction, 16)}</Text>
+          ),
+        ],
+        { grow: 1 },
+      )
+
+    const estimates = (
+      <Box flexDirection="column" gap={1} flexGrow={1}>
+        {estimateCard('est-spend', 'Spend', spendText(guess.spend), (guess.spend - 0.4) / 2)}
+        {estimateCard('est-time', 'Time to done', guess.paceLabel, Math.min(1, guess.pace / 2))}
+        {estimateCard('est-asks', 'Asks you', guess.asks, (6 - values.autonomy) / 5)}
+      </Box>
+    )
+
+    const overview = rich ? (
+      <Box flexDirection={isWide ? 'row' : 'column'} gap={2} alignItems={isWide ? 'center' : 'stretch'}>
+        <Box justifyContent="center">
+          {/* The radar is a picture; a Client laid over it takes the drags. */}
+          <Box key="radar" position="relative">
+            {svg(ui, radar(values, selected), `Dials: ${summaryOf(values)}. Drag a dot to change its level.`, RADAR_W, RADAR_H)}
+            {Client !== undefined && (
+              <Box position="absolute" top={0} left={0} right={0} bottom={0}>
+                <Client
+                  key="radar-drag"
+                  module="./radar-drag.tsx"
+                  props={{ levels: DIALS.map(dial => values[dial.key]), width: RADAR_W, height: RADAR_H, radius: RADIUS }}
+                  width="100%"
+                  height="100%"
+                />
+              </Box>
+            )}
+          </Box>
+        </Box>
+        {estimates}
+      </Box>
+    ) : (
+      <Text>
+        <Text dimColor>Spend </Text>
+        <Text bold>{spendText(guess.spend)}</Text>
+        <Text dimColor> · Time to done </Text>
+        <Text bold>{guess.paceLabel}</Text>
+        <Text dimColor> · Asks you </Text>
+        <Text bold>{guess.asks}</Text>
+      </Text>
+    )
+
+    const dialCard = (dial: Dial) => {
+      const level = levelOf(dial, values)
+      const value = values[dial.key]
+      const isSelected = selected === dial.key
+      const color = COLOR[dial.key]
+      return card(
+        ui,
+        `card-${dial.key}`,
+        [
+          <Box justifyContent="space-between" alignItems="center" gap={1}>
+            <Box gap={2} alignItems="center" flexShrink={1}>
+              {svg(ui, dialIcon(dial.key, color), dial.name, 18, 18)}
+              <Button key={`dial-${dial.key}`} plain onPress={() => void update($, selectedDial, now => (now === dial.key ? null : dial.key))}>
+                <Text bold color={isSelected ? color : undefined}>
+                  {dial.name.padEnd(10)}
+                </Text>
+              </Button>
+              {rich ? (
+                svg(ui, pips(value, color), `${dial.name} ${value} of 5`, 106, 18)
+              ) : (
+                <Box>
+                  {dial.levels.map((_, index) => (
+                    <Button key={`pip-${dial.key}-${index + 1}`} plain onPress={() => pick(dial.key, index + 1)}>
+                      {index < value ? <Text color={color}>■</Text> : <Text dimColor>□</Text>}
+                    </Button>
+                  ))}
+                </Box>
+              )}
+            </Box>
+            {!isSelected && (
+              <Box gap={1} alignItems="center">
+                <Button key={`less-${dial.key}`} label="−" dimColor onPress={() => pick(dial.key, value - 1)} />
+                <Button key={`more-${dial.key}`} label="+" dimColor onPress={() => pick(dial.key, value + 1)} />
+              </Box>
+            )}
+          </Box>,
+          <Box>
+            <Text wrap="wrap">
+              <Text bold color={color}>
+                {level.label}.
+              </Text>{' '}
+              <Text dimColor>{level.summary}</Text>
+            </Text>
+          </Box>,
+          isSelected && (
+            <Box flexDirection="column" gap={1} marginTop={1}>
+              <Box justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1}>
+                <Text dimColor>{dial.question}</Text>
+                {segmented(ui, `level-${dial.key}`, LEVELS, String(value), picked => pick(dial.key, Number(picked)))}
+              </Box>
+              {card(
+                ui,
+                `told-${dial.key}`,
+                [
+                  <Box>
+                    <Text dimColor>
+                      What the agent is told at{' '}
+                      <Text color={color} bold>
+                        {level.label}
+                      </Text>
+                    </Text>
+                  </Box>,
+                  <Box>
+                    <Text wrap="wrap">{level.prompt}</Text>
+                  </Box>,
+                ],
+                { tone: 'muted' },
+              )}
+            </Box>
+          ),
+        ],
+        { tone: isSelected ? 'selected' : 'plain' },
+      )
+    }
 
     return frame(
       ui,
       'dials',
-      e.props.bodyColumns,
+      columns,
       (id: Tab) => void update($, tab, () => id),
       <Box flexDirection="column" gap={1}>
-        <Box gap={1} flexWrap="wrap">
-          {PRESETS.map(preset => (
-            <Button
-              key={`preset-${preset.name}`}
-              label={preset.name}
-              variant={preset.name === current ? 'primary' : undefined}
-              onPress={() => void setDials($, () => preset.values)}
-            />
-          ))}
-          {current === 'Custom' && <Text color="claude">Custom</Text>}
-        </Box>
-
-        <Box flexDirection="column">
-          {DIALS.map(dial => {
-            const level = levelOf(dial, values)
-            const isSelected = selected === dial.key
-            return (
-              <Box flexDirection="column">
-                <Box>
-                  <Button
-                    key={`dial-${dial.key}`}
-                    plain
-                    onPress={() => void update($, selectedDial, now => (now === dial.key ? null : dial.key))}
-                  >
-                    <Text bold={isSelected}>{(isSelected ? '▾ ' : '▸ ') + dial.name.padEnd(10)}</Text>
-                  </Button>
-                  {dial.levels.map((_, index) => (
-                    <Button
-                      key={`pip-${dial.key}-${index + 1}`}
-                      plain
-                      onPress={() => void setDials($, now => ({ ...now, [dial.key]: index + 1 }))}
-                    >
-                      {index < values[dial.key] ? <Text color="claude">●</Text> : <Text dimColor>○</Text>}
-                    </Button>
-                  ))}
-                  <Text wrap="truncate-end">
-                    {'  '}
-                    {level.label}. <Text dimColor>{level.summary}</Text>
-                  </Text>
-                </Box>
-                {isSelected && (
-                  <Box flexDirection="column" paddingLeft={2} marginBottom={1}>
-                    <Text dimColor>{dial.question}</Text>
-                    <Text>{level.prompt}</Text>
-                  </Box>
-                )}
-              </Box>
-            )
-          })}
-        </Box>
-
-        <Box flexDirection="column">
+        <Box justifyContent="space-between" alignItems="flex-start" gap={1}>
+          <Box flexDirection="column" flexShrink={1}>
+            <Text bold>How the agent works</Text>
+            <Text dimColor>Six dials for how it plans, delegates, persists, asks, proves and talks.</Text>
+          </Box>
           <Button
             key="brief-toggle"
-            label={isShown ? 'Hide what agents are told' : 'What agents are told'}
+            label={isShown ? 'Hide brief' : 'What agents are told'}
             hotkey="w"
+            dimColor
             onPress={() => void update($, isBriefShown, now => !now)}
           />
-          {isShown && <Markdown text={brief(values)} />}
+        </Box>
+        {isShown && card(ui, 'brief', [<Markdown text={brief(values)} />], { tone: 'muted' })}
+        <Box gap={3} flexWrap="wrap" alignItems="center">
+          {PRESETS.map(preset => (
+            <Box key={`preset-box-${preset.name}`} gap={0} alignItems="center">
+              {svg(ui, presetGlyph(DIALS.map(dial => preset.values[dial.key]), preset.name === current ? '#8f9cff' : '#8f9cff99'), preset.name, 18, 18)}
+              <Button
+                key={`preset-${preset.name}`}
+                label={preset.name}
+                variant={preset.name === current ? 'primary' : 'secondary'}
+                onPress={() => void setDials($, () => preset.values)}
+              />
+            </Box>
+          ))}
+          {current === 'Custom' && chip(ui, 'Custom', 'claude')}
+        </Box>
+        {overview}
+        <Box flexDirection="column" gap={rich ? 1 : 0}>
+          {DIALS.map(dialCard)}
         </Box>
       </Box>,
     )
   })
+}
+
+function summaryOf(values: DialValues): string {
+  return DIALS.map(dial => `${dial.name} ${values[dial.key]}`).join(', ')
 }

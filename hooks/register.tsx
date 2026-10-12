@@ -1,6 +1,5 @@
 import type { Register } from 'claude-code'
 
-import { registerApi } from './api'
 import { registerContext } from './context'
 import { registerDials } from './dials'
 import { registerGuard } from './guard'
@@ -14,6 +13,5 @@ export const register: Register = (on, options) => {
   registerWorktree(on, options)
   registerDials(on)
   registerContext(on)
-  registerApi(on, options)
   registerPane(on)
 }

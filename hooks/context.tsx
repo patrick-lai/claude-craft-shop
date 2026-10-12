@@ -1,37 +1,99 @@
-// The Context tab, after CommissionAI's context ring and knowledge library:
-// the live context window, and the notes and links the user shares with the
-// agent (session.ts puts the enabled ones in the system prompt).
+// The Context tab, after CommissionAI's context library: the sources the user
+// shares with the agent (notes, links, files from the repository), each On or
+// Off and On ones optionally Strict, kept loose or grouped in folders that
+// switch as one. The live context window sits in a footer. session.ts puts
+// the sources that are on in the system prompt.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 
-import type { Source, SourceMode, Tab } from '../types'
-import { bar, frame, PANE, tokens } from './ui'
+import type { ContextView, Folder, Source, SourceMode, Tab } from '../types'
+import { card, chip, folderArt, glyph, GLYPH_COLOR, isRich, svg, tickMeter, track } from './kit'
+import { bar, frame, PANE, resolveUi, tokens } from './ui'
 import type { Ui } from './ui'
 
+const contextDraft = atom({ plugin: 'craft-shop', key: 'contextDraft' } as const, { input: '', name: '' })
+const contextStatus = atom({ plugin: 'craft-shop', key: 'contextStatus' } as const, '')
+const contextView = atom({ plugin: 'craft-shop', key: 'contextView' } as const, {
+  openFolders: [],
+  openId: null,
+  target: null,
+  isNamingFolder: false,
+  menuFolder: null,
+  renamingFolder: null,
+  deletingFolder: null,
+  isEditingText: false,
+})
+const folders = atom({ plugin: 'craft-shop', key: 'folders' } as const, [])
 const isTurnRunning = atom({ plugin: 'craft-shop', key: 'isTurnRunning' } as const, false)
-const linkStatus = atom({ plugin: 'craft-shop', key: 'linkStatus' } as const, '')
-const noteDraft = atom({ plugin: 'craft-shop', key: 'noteDraft' } as const, { title: '', text: '' })
+const isWindowShown = atom({ plugin: 'craft-shop', key: 'isWindowShown' } as const, false)
 const sources = atom({ plugin: 'craft-shop', key: 'sources' } as const, [])
 const tab = atom({ plugin: 'craft-shop', key: 'tab' } as const, 'worktree')
 
 type $ = EngineInterface
 
 export const CONTEXT_SECTION_ID = 'craft-shop:context'
-const LINK_CHAR_CAP = 12_000
+const CHAR_CAP = 12_000
 const TOKEN_BUDGET = 12_000
+const IMPORT_CAP = 40
+const TEXT_FILE = /\.(md|mdx|markdown|txt|rst|adoc|json|ya?ml|toml|graphql|proto|sql|csv)$/i
+const SKIPPED_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.next', 'vendor', 'target'])
 
-const MODES: { value: SourceMode; label: string }[] = [
-  { value: 'off', label: 'Off' },
-  { value: 'guidance', label: 'Guidance' },
-  { value: 'strict', label: 'Strict' },
-]
 
-export function sourcesStoreKey(root: string): string {
+const KIND_LABEL: Record<Source['kind'], string> = { note: 'Note', link: 'Link', file: 'File' }
+
+// What a source looks like in the library, and what it costs the agent.
+export function libraryStoreKey(root: string): string {
+  return `context:${root}`
+}
+
+// The store key the library used before folders, read once to carry it over.
+export function legacyStoreKey(root: string): string {
   return `sources:${root}`
+}
+
+export function parseLibrary(stored: unknown, legacy: unknown): { sources: Source[]; folders: Folder[] } {
+  const library = stored as { sources?: unknown; folders?: unknown } | undefined
+  if (library !== undefined && library !== null && Array.isArray(library.sources)) {
+    return {
+      sources: (library.sources as Source[]).map(normalize),
+      folders: Array.isArray(library.folders) ? (library.folders as Folder[]) : [],
+    }
+  }
+  return { sources: Array.isArray(legacy) ? (legacy as Source[]).map(normalize) : [], folders: [] }
+}
+
+function normalize(one: Source): Source {
+  return { ...one, path: one.path ?? null, folderId: one.folderId ?? null }
 }
 
 function approxTokens(chars: number): number {
   return Math.ceil(chars / 4)
+}
+
+function chars(count: number): string {
+  return count >= 1_000 ? `${(count / 1_000).toFixed(1)}k chars` : `${count} chars`
+}
+
+// A title cut to fit its row at a word, the whole one kept in the store.
+function shorten(text: string, room: number): string {
+  return text.length <= room ? text : `${text.slice(0, room - 1).replace(/\s+\S*$/, '').replace(/[.,;:]$/, '')}…`
+}
+
+function host(url: string): string {
+  return /^https?:\/\/([^/]+)/.exec(url)?.[1] ?? url
+}
+
+function facts(source: Source): string {
+  if (source.kind === 'link' && source.url !== null) return `Link · ${host(source.url)} · ${chars(source.text.length)}`
+  if (source.kind === 'file' && source.path !== null) return `File · ${source.path} · ${chars(source.text.length)}`
+  return `${KIND_LABEL[source.kind]} · ${chars(source.text.length)}`
+}
+
+// One mode for a folder's members, or 'mixed' when they differ.
+export function folderMode(members: Source[]): SourceMode | 'mixed' {
+  if (members.length === 0) return 'off'
+  const first = members[0]!.mode
+  return members.every(one => one.mode === first) ? first : 'mixed'
 }
 
 function htmlToText(html: string): { title: string | null; text: string } {
@@ -52,15 +114,19 @@ function htmlToText(html: string): { title: string | null; text: string } {
   return { title, text }
 }
 
-export function contextSection(list: Source[]): string | null {
+export function contextSection(list: Source[], groups: Folder[] = []): string | null {
   const enabled = list.filter(one => one.mode !== 'off')
   if (enabled.length === 0) return null
+  const folderName = new Map(groups.map(one => [one.id, one.name]))
   const blocks = enabled.map(one => {
-    const origin = one.url === null ? '' : ` (${one.url})`
-    const weight = one.mode === 'strict'
-      ? 'STRICT: binding ground truth. Follow it over your own assumptions, and say so if the code disagrees.'
-      : 'Guidance: weigh it, but the code and the user win when they disagree.'
-    return `### ${one.title}${origin}\n${weight}\n\n${one.text}`
+    const group = one.folderId === null ? undefined : folderName.get(one.folderId)
+    const heading = group === undefined ? one.title : `${group} › ${one.title}`
+    const origin = one.url !== null ? ` (${one.url})` : one.path !== null ? ` (${one.path})` : ''
+    const weight =
+      one.mode === 'strict'
+        ? 'STRICT: binding ground truth. Follow it over your own assumptions, and say so if the code disagrees.'
+        : 'Guidance: weigh it, but the code and the user win when they disagree.'
+    return `### ${heading}${origin}\n${weight}\n\n${one.text}`
   })
   return ['## Project context the user shared', ...blocks].join('\n\n')
 }
@@ -70,182 +136,556 @@ function fillColor(percent: number): string {
   return percent >= 85 ? 'error' : percent >= 65 ? 'warning' : 'success'
 }
 
+async function libraryRoot($: $): Promise<string> {
+  const repo = await $.session.repo()
+  return repo?.root ?? (await $.session.root())
+}
+
+async function save($: $): Promise<void> {
+  await $.store.set(libraryStoreKey(await libraryRoot($)), {
+    sources: await read($, sources),
+    folders: await read($, folders),
+  })
+}
+
 async function saveSources($: $, change: (list: Source[]) => Source[]): Promise<void> {
   await update($, sources, change)
-  const repo = await $.session.repo()
-  await $.store.set(sourcesStoreKey(repo?.root ?? (await $.session.root())), await read($, sources))
+  await save($)
 }
 
 async function newId($: $): Promise<string> {
   return `${(await $.clock.now()).toString(36)}-${crypto.randomUUID().slice(0, 4)}`
 }
 
-async function addNote($: $, text: string): Promise<void> {
-  const { title } = await read($, noteDraft)
-  const id = await newId($)
-  const note: Source = { id, kind: 'note', title: title.trim() || 'Note', text: text.trim(), url: null, mode: 'guidance' }
-  await saveSources($, list => [...list, note])
-  await update($, noteDraft, () => ({ title: '', text: '' }))
+async function setView($: $, change: Partial<ContextView>): Promise<void> {
+  await update($, contextView, now => ({ ...now, ...change }))
 }
 
-async function addLink($: $, url: string): Promise<void> {
-  const trimmed = url.trim()
-  if (!/^https?:\/\//.test(trimmed)) {
-    await update($, linkStatus, () => 'A link starts with http:// or https://.')
-    return
-  }
-  await update($, linkStatus, () => `Fetching ${trimmed}`)
+async function say($: $, text: string): Promise<void> {
+  await update($, contextStatus, () => text)
+}
+
+async function addSource($: $, source: Omit<Source, 'id' | 'mode' | 'folderId'>): Promise<Source> {
+  const { target } = await read($, contextView)
+  const added: Source = { ...source, id: await newId($), mode: 'guidance', folderId: target }
+  await saveSources($, list => [...list, added])
+  // A source added into a folder shows there: the folder opens.
+  if (target !== null) await update($, contextView, now => ({ ...now, openFolders: [...new Set([...now.openFolders, target])] }))
+  return added
+}
+
+async function fetchLink($: $, url: string): Promise<{ title: string; text: string } | string> {
   let response
   try {
-    response = await $.http.fetch(trimmed)
+    response = await $.http.fetch(url)
   } catch (error) {
-    $.ui.log(`fetch ${trimmed} failed: ${String(error)}`, { to: 'debug' })
-    await update($, linkStatus, () => 'Could not reach that link.')
-    return
+    $.ui.log(`fetch ${url} failed: ${String(error)}`, { to: 'debug' })
+    return 'Could not reach that link.'
   }
-  if (!response.ok) {
-    await update($, linkStatus, () => `That link answered ${response.status}.`)
-    return
-  }
+  if (!response.ok) return `That link answered ${response.status}.`
   const isHtml = (response.headers['content-type'] ?? '').includes('html')
   const page = isHtml ? htmlToText(response.text) : { title: null, text: response.text.trim() }
-  const id = await newId($)
-  const link: Source = {
-    id,
-    kind: 'link',
-    title: page.title || trimmed,
-    text: page.text.slice(0, LINK_CHAR_CAP),
-    url: trimmed,
-    mode: 'guidance',
+  return { title: page.title || url.replace(/^https?:\/\//, '').replace(/\/$/, ''), text: page.text.slice(0, CHAR_CAP) }
+}
+
+async function readText($: $, path: string): Promise<string> {
+  const text = await $.fs.read(path)
+  return typeof text === 'string' ? text.slice(0, CHAR_CAP) : ''
+}
+
+// The text files under a directory, breadth first, at most IMPORT_CAP.
+async function textFiles($: $, top: string, relative: string): Promise<string[]> {
+  const found: string[] = []
+  const queue = [relative]
+  while (queue.length > 0 && found.length < IMPORT_CAP) {
+    const dir = queue.shift()!
+    const entries = await $.fs.list(`${top}/${dir}`)
+    for (const entry of [...entries].sort((a, b) => a.name.localeCompare(b.name))) {
+      if (entry.name.startsWith('.')) continue
+      const path = `${dir}/${entry.name}`
+      if (entry.kind === 'dir' && !SKIPPED_DIRS.has(entry.name)) queue.push(path)
+      else if (entry.kind === 'file' && TEXT_FILE.test(entry.name) && found.length < IMPORT_CAP) found.push(path)
+    }
   }
-  await saveSources($, list => [...list, link])
-  await update($, linkStatus, () => '')
+  return found
+}
+
+// The one add field: a link is fetched, a path in the repository is read (a
+// directory becomes a folder of its text files), anything else is a note.
+async function addFromInput($: $, raw: string): Promise<void> {
+  const text = raw.trim()
+  if (text === '') return say($, 'Paste a link, type a path in the repository, or write a note.')
+  if (/^https?:\/\/\S+$/.test(text)) {
+    await say($, `Fetching ${text}`)
+    const page = await fetchLink($, text)
+    if (typeof page === 'string') return say($, page)
+    await addSource($, { kind: 'link', title: page.title, text: page.text, url: text, path: null })
+    return clearInput($, `Added ${page.title}`)
+  }
+  const looksLikePath = !/\s/.test(text) && /[/.]/.test(text)
+  if (looksLikePath) {
+    const path = text.replace(/^\.\//, '').replace(/\/+$/, '')
+    const top = await $.session.root()
+    const stat = await $.fs.stat(`${top}/${path}`).catch(() => undefined)
+    if (stat?.kind === 'dir') return importDirectory($, top, path)
+    if (stat?.kind === 'file') {
+      const body = await readText($, `${top}/${path}`).catch(() => null)
+      if (body === null) return say($, `Could not read ${path}.`)
+      await addSource($, { kind: 'file', title: path.split('/').pop() ?? path, text: body, url: null, path })
+      return clearInput($, `Added ${path}`)
+    }
+  }
+  const firstLine = text.split('\n')[0]!
+  const title = firstLine.slice(0, 120)
+  await addSource($, { kind: 'note', title, text, url: null, path: null })
+  return clearInput($, 'Added a note. Open it to rename it or add more.')
+}
+
+async function clearInput($: $, status: string): Promise<void> {
+  await update($, contextDraft, now => ({ ...now, input: '' }))
+  await say($, status)
+}
+
+async function importDirectory($: $, top: string, path: string): Promise<void> {
+  const files = await textFiles($, top, path)
+  if (files.length === 0) return say($, `No text files under ${path}.`)
+  const folder: Folder = { id: await newId($), name: path.split('/').pop() || path }
+  const added: Source[] = []
+  for (const file of files) {
+    added.push({
+      id: await newId($),
+      kind: 'file',
+      title: file.split('/').pop() ?? file,
+      text: await readText($, `${top}/${file}`),
+      url: null,
+      path: file,
+      mode: 'guidance',
+      folderId: folder.id,
+    })
+  }
+  await update($, folders, list => [...list, folder])
+  await saveSources($, list => [...list, ...added])
+  await update($, contextView, now => ({ ...now, openFolders: [...now.openFolders, folder.id] }))
+  await clearInput($, `Added ${path} as a folder of ${files.length} files`)
+}
+
+async function addFolder($: $, raw: string): Promise<void> {
+  const name = raw.trim()
+  if (name === '') return setView($, { isNamingFolder: false })
+  const folder: Folder = { id: await newId($), name }
+  await update($, folders, list => [...list, folder])
+  await save($)
+  await update($, contextDraft, now => ({ ...now, name: '' }))
+  await setView($, { isNamingFolder: false, target: folder.id })
+  await update($, contextView, now => ({ ...now, openFolders: [...now.openFolders, folder.id] }))
+  await say($, `Made ${name}. New sources go into ${name} until you pick another folder.`)
+}
+
+async function refresh($: $, source: Source): Promise<void> {
+  await say($, `Refreshing ${source.title}`)
+  let text: string | null = null
+  if (source.kind === 'link' && source.url !== null) {
+    const page = await fetchLink($, source.url)
+    if (typeof page === 'string') return say($, page)
+    text = page.text
+  } else if (source.kind === 'file' && source.path !== null) {
+    text = await readText($, `${await $.session.root()}/${source.path}`).catch(() => null)
+  }
+  if (text === null) return say($, `Could not refresh ${source.title}.`)
+  await saveSources($, list => list.map(one => (one.id === source.id ? { ...one, text: text! } : one)))
+  await say($, `Refreshed ${source.title}`)
 }
 
 async function setMode($: $, id: string, mode: SourceMode): Promise<void> {
   await saveSources($, list => list.map(one => (one.id === id ? { ...one, mode } : one)))
 }
 
+// A folder's switch: everything on (strict members stay strict), or all off.
+async function setFolderOn($: $, folderId: string, isOn: boolean): Promise<void> {
+  await saveSources($, list =>
+    list.map(one => (one.folderId !== folderId ? one : { ...one, mode: isOn ? (one.mode === 'off' ? 'guidance' : one.mode) : 'off' })),
+  )
+}
+
+async function moveSource($: $, id: string, folderId: string | null): Promise<void> {
+  await saveSources($, list => list.map(one => (one.id === id ? { ...one, folderId } : one)))
+  if (folderId !== null) await update($, contextView, now => ({ ...now, openFolders: [...new Set([...now.openFolders, folderId])] }))
+}
+
+async function renameSource($: $, id: string, title: string): Promise<void> {
+  if (title.trim() === '') return
+  await saveSources($, list => list.map(one => (one.id === id ? { ...one, title: title.trim() } : one)))
+}
+
+async function editNote($: $, id: string, text: string): Promise<void> {
+  await saveSources($, list => list.map(one => (one.id === id ? { ...one, text } : one)))
+  await setView($, { isEditingText: false })
+}
+
 async function removeSource($: $, id: string): Promise<void> {
   await saveSources($, list => list.filter(one => one.id !== id))
+  await setView($, { openId: null })
+}
+
+async function renameFolder($: $, id: string, name: string): Promise<void> {
+  if (name.trim() !== '') await update($, folders, list => list.map(one => (one.id === id ? { ...one, name: name.trim() } : one)))
+  await save($)
+  await setView($, { renamingFolder: null })
+}
+
+async function deleteFolder($: $, id: string, isKeepingSources: boolean): Promise<void> {
+  await update($, sources, list =>
+    isKeepingSources ? list.map(one => (one.folderId === id ? { ...one, folderId: null } : one)) : list.filter(one => one.folderId !== id),
+  )
+  await update($, folders, list => list.filter(one => one.id !== id))
+  await save($)
+  await update($, contextView, now => ({ ...now, deletingFolder: null, target: now.target === id ? null : now.target, openFolders: now.openFolders.filter(one => one !== id) }))
+}
+
+async function toggleFolderOpen($: $, id: string): Promise<void> {
+  await update($, contextView, now => ({
+    ...now,
+    openFolders: now.openFolders.includes(id) ? now.openFolders.filter(one => one !== id) : [...now.openFolders, id],
+  }))
 }
 
 export function registerContext(on: On): void {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
     if ((await read($, tab)) !== 'context') return next(e)
-    const ui: Ui = $.ui.resolve(e)
-    const { Box, Text, Button, Input, Select } = ui
-    // Reading isTurnRunning redraws the tab as each turn starts and ends, so
-    // the window figures below are read fresh then.
-    const isRunning = await read($, isTurnRunning)
-    const usage = await $.session.usage({ breakdown: 'summary' })
+    const ui: Ui = resolveUi($.ui.resolve(e), e.surface)
+    const { Box, Text, Button, Input, Select, Markdown } = ui
+    const rich = isRich(ui)
     const list = await read($, sources)
-    const draft = await read($, noteDraft)
-    const status = await read($, linkStatus)
+    const groups = await read($, folders)
+    const view = await read($, contextView)
+    const draft = await read($, contextDraft)
+    const status = await read($, contextStatus)
+    const columns = e.props.bodyColumns
+    const go = (change: Partial<ContextView>) => () => void setView($, change)
 
-    const breakdown = usage.context.breakdown
-    const used = breakdown?.totalTokens ?? usage.context.tokens ?? 0
-    const window = breakdown?.rawMaxTokens ?? usage.context.window
-    const percent = breakdown?.percentage ?? usage.context.percent ?? 0
-    const categories = (breakdown?.categories ?? []).filter(one => one.kind === 'used' && one.tokens > 0)
-    const last = breakdown?.apiUsage ?? null
-    const barWidth = Math.max(10, Math.min(40, e.props.bodyColumns - 24))
-    const enabledChars = list.filter(one => one.mode !== 'off').reduce((sum, one) => sum + one.text.length, 0)
-    const enabledTokens = approxTokens(enabledChars)
+    const sharedList = list.filter(one => one.mode !== 'off')
+    const sharedChars = sharedList.reduce((sum, one) => sum + one.text.length, 0)
+    const sharedTokens = approxTokens(sharedChars)
+    const isOver = sharedTokens > TOKEN_BUDGET
+    const loose = list.filter(one => one.folderId === null)
+    const targetName = view.target === null ? null : (groups.find(one => one.id === view.target)?.name ?? null)
+    const isThin = (source: Source) => source.kind === 'link' && source.text.length < 200
 
+    // On/Off is the main switch, drawn the same for a source and a folder.
+    const onOff = (key: string, state: 'on' | 'off' | 'some', onPress: () => void) => (
+      <Button key={key} onPress={onPress}>
+        {state === 'on' ? (
+          <Text color="success" bold>
+            ● On
+          </Text>
+        ) : state === 'some' ? (
+          <Text color="warning" bold>
+            ◐ Some on
+          </Text>
+        ) : (
+          <Text dimColor>○ Off</Text>
+        )}
+      </Button>
+    )
+
+    const sourceRow = (source: Source, isNested: boolean) => {
+      const isOn = source.mode !== 'off'
+      const isOpen = view.openId === source.id
+      const moveOptions = [{ value: '', label: 'No folder' }, ...groups.map(one => ({ value: one.id, label: one.name }))]
+      const parts = [
+              <Box justifyContent="space-between" alignItems="center" gap={1}>
+                <Box gap={1} alignItems="center" flexShrink={1}>
+                  {onOff(`toggle-${source.id}`, isOn ? 'on' : 'off', () => void setMode($, source.id, isOn ? 'off' : 'guidance'))}
+                  {rich ? svg(ui, glyph(source.kind), source.kind, 18, 18) : <Text color={GLYPH_COLOR[source.kind]}>{KIND_MARK[source.kind]}</Text>}
+                  <Button key={`open-${source.id}`} plain onPress={go({ openId: isOpen ? null : source.id, isEditingText: false })}>
+                    <Text dimColor>{isOpen ? '▾ ' : '▸ '}</Text>
+                    <Text bold dimColor={!isOn}>
+                      {shorten(source.title, Math.max(20, columns - (isNested ? 52 : 46)))}
+                    </Text>
+                  </Button>
+                </Box>
+                <Box gap={1} alignItems="center" flexShrink={0}>
+                  <Text dimColor>{facts(source).replace(/^\w+ · /, '')}</Text>
+                  {isThin(source) && <Text color="warning">may be empty</Text>}
+                  {isOn && (
+                    <Button key={`strict-${source.id}`} plain onPress={() => void setMode($, source.id, source.mode === 'strict' ? 'guidance' : 'strict')}>
+                      {source.mode === 'strict' ? chip(ui, 'Strict', 'suggestion') : <Text dimColor>Make strict</Text>}
+                    </Button>
+                  )}
+                </Box>
+              </Box>,
+              isOpen && (
+                <Box flexDirection="column" gap={1} marginTop={1}>
+                  {card(
+                    ui,
+                    `preview-${source.id}`,
+                    [
+                      source.kind === 'file' && /\.mdx?$/i.test(source.path ?? '') ? (
+                        <Markdown key={`text-${source.id}`} text={source.text.slice(0, 1_500)} />
+                      ) : (
+                        <Text wrap="wrap">{source.text.slice(0, 1_500) || 'No readable text.'}</Text>
+                      ),
+                      source.text.length > 1_500 && <Text dimColor>… {chars(source.text.length - 1_500)} more reach the agent</Text>,
+                    ],
+                    { tone: 'muted' },
+                  )}
+                  {view.isEditingText && source.kind === 'note' && Input !== undefined && (
+                    <Input key={`edit-text-${source.id}`} label="Text " value={source.text} submitLabel="save" autoFocus onSubmit={value => void editNote($, source.id, value)} />
+                  )}
+                  <Box gap={1} alignItems="center" flexWrap="wrap">
+                    {Input !== undefined && (
+                      <Box flexGrow={1}>
+                        <Input key={`rename-source-${source.id}`} label="Title " value={source.title} submitLabel="rename" onSubmit={value => void renameSource($, source.id, value)} />
+                      </Box>
+                    )}
+                    {Select !== undefined && (
+                      <Select key={`move-${source.id}`} label="Folder " options={moveOptions} value={source.folderId ?? ''} onSelect={value => void moveSource($, source.id, value === '' ? null : value)} />
+                    )}
+                  </Box>
+                  <Box gap={1} justifyContent="flex-end" alignItems="center">
+                    <Box flexGrow={1}>
+                      <Text dimColor>
+                        {!isOn ? 'Off: hidden from the agent.' : source.mode === 'strict' ? 'Strict: the agent must follow it.' : 'On: the agent weighs it.'}
+                      </Text>
+                    </Box>
+                    {source.kind === 'note' && Input !== undefined && (
+                      <Button key={`edit-text-start-${source.id}`} label={view.isEditingText ? 'Done' : 'Edit text'} dimColor onPress={go({ isEditingText: !view.isEditingText })} />
+                    )}
+                    {source.kind !== 'note' && <Button key={`refresh-${source.id}`} label="Refresh" dimColor onPress={() => void refresh($, source)} />}
+                    <Button key={`remove-${source.id}`} onPress={() => void removeSource($, source.id)}>
+                      <Text color="error">Delete</Text>
+                    </Button>
+                  </Box>
+                </Box>
+              ),
+            ]
+      return isNested ? (
+        <Box key={`row-${source.id}`} flexDirection="column" marginTop={1} paddingLeft={2}>
+          {parts}
+        </Box>
+      ) : (
+        card(ui, `row-card-${source.id}`, parts, { tone: source.mode === 'strict' ? 'accent' : isOn ? 'plain' : 'muted' })
+      )
+    }
+
+    const folderBlock = (folder: Folder) => {
+      const members = list.filter(one => one.folderId === folder.id)
+      const onCount = members.filter(one => one.mode !== 'off').length
+      const state = members.length === 0 || onCount === 0 ? 'off' : onCount === members.length ? 'on' : 'some'
+      const isOpen = view.openFolders.includes(folder.id)
+      const isMenuOpen = view.menuFolder === folder.id
+      return card(
+        ui,
+        `folder-card-${folder.id}`,
+        [
+          <Box justifyContent="space-between" alignItems="center" gap={1}>
+            <Box gap={1} alignItems="center" flexShrink={1}>
+              <Button key={`fold-${folder.id}`} plain onPress={() => void toggleFolderOpen($, folder.id)}>
+                <Text dimColor>{isOpen ? '▾ ' : '▸ '}</Text>
+                <Text bold>{folder.name}</Text>
+                <Text dimColor>
+                  {members.length === 0 ? '  empty' : `  ${members.length} ${members.length === 1 ? 'source' : 'sources'} · ${onCount} on`}
+                </Text>
+              </Button>
+              {rich && svg(ui, glyph('folder'), 'folder', 18, 18)}
+            </Box>
+            <Box gap={1} alignItems="center" flexShrink={0}>
+              {members.length > 0 && onOff(`folder-toggle-${folder.id}`, state, () => void setFolderOn($, folder.id, state !== 'on'))}
+              <Button key={`folder-menu-${folder.id}`} label="⋯" dimColor onPress={go({ menuFolder: isMenuOpen ? null : folder.id, renamingFolder: null, deletingFolder: null })} />
+            </Box>
+          </Box>,
+          isMenuOpen && (
+            <Box gap={1} justifyContent="flex-end" marginTop={1}>
+              <Button key={`folder-rename-${folder.id}`} label="Rename" dimColor onPress={go({ renamingFolder: folder.id, deletingFolder: null })} />
+              <Button key={`folder-delete-${folder.id}`} onPress={go({ deletingFolder: folder.id, renamingFolder: null })}>
+                <Text color="error">Delete folder</Text>
+              </Button>
+            </Box>
+          ),
+          view.renamingFolder === folder.id && Input !== undefined && (
+            <Box marginTop={1}>
+              <Input key="rename-folder" label="Name " value={folder.name} submitLabel="rename" autoFocus onSubmit={value => void renameFolder($, folder.id, value)} />
+            </Box>
+          ),
+          view.deletingFolder === folder.id && (
+            <Box flexDirection="column" marginTop={1} gap={1}>
+              <Text>
+                Delete <Text bold>{folder.name}</Text>? <Text dimColor>The agent stops receiving its {members.length} sources.</Text>
+              </Text>
+              <Box gap={1} justifyContent="flex-end" flexWrap="wrap">
+                <Button key="delete-cancel" label="Cancel" dimColor onPress={go({ deletingFolder: null, menuFolder: null })} />
+                <Button key="delete-folder-keep" label="Keep its sources" onPress={() => void deleteFolder($, folder.id, true)} />
+                <Button key="delete-folder" label="Delete folder and sources" variant="primary" onPress={() => void deleteFolder($, folder.id, false)} />
+              </Box>
+            </Box>
+          ),
+          ...(isOpen ? members.map(source => sourceRow(source, true)) : []),
+          isOpen && members.length === 0 && (
+            <Box marginTop={1} paddingLeft={2}>
+              <Text dimColor>Pick {folder.name} in "to" above and add a source, or move one in from its details.</Text>
+            </Box>
+          ),
+        ],
+        { tone: view.deletingFolder === folder.id ? 'danger' : state === 'off' ? 'muted' : 'plain' },
+      )
+    }
+
+    const targetOptions = [{ value: '', label: 'No folder' }, ...groups.map(one => ({ value: one.id, label: one.name }))]
+    const adder = (
+      <Box flexDirection="column" gap={1}>
+        <Box gap={1} alignItems="center">
+          {Input !== undefined && (
+            <Box flexGrow={1}>
+              <Input
+                key="add-input"
+                placeholder="Paste a link, type a repo path like docs/, or write a note"
+                value={draft.input}
+                submitLabel="add"
+                autoFocus={list.length === 0 ? true : undefined}
+                onInput={value => void update($, contextDraft, now => ({ ...now, input: value }))}
+                onSubmit={value => void addFromInput($, value)}
+              />
+            </Box>
+          )}
+          {Select !== undefined && groups.length > 0 && (
+            <Select key="add-target" label="to " options={targetOptions} value={view.target ?? ''} onSelect={value => void setView($, { target: value === '' ? null : value })} />
+          )}
+          <Button key="add-go" label="Add" variant="primary" onPress={() => void read($, contextDraft).then(now => addFromInput($, now.input))} />
+          <Button key="folder-new" label="New folder" variant={view.isNamingFolder ? 'primary' : undefined} dimColor={!view.isNamingFolder} onPress={go({ isNamingFolder: !view.isNamingFolder })} />
+        </Box>
+        {view.isNamingFolder && Input !== undefined && (
+          <Box gap={1} alignItems="center">
+            <Box flexGrow={1}>
+              <Input key="folder-name" placeholder="Folder name, e.g. Payments" value={draft.name} submitLabel="create" autoFocus onInput={value => void update($, contextDraft, now => ({ ...now, name: value }))} onSubmit={value => void addFolder($, value)} />
+            </Box>
+            <Button key="folder-cancel" label="Cancel" dimColor onPress={go({ isNamingFolder: false })} />
+            <Button key="folder-create" label="Create" variant="primary" onPress={() => void read($, contextDraft).then(now => addFolder($, now.name))} />
+          </Box>
+        )}
+        <Text color={status.startsWith('Could') || status.startsWith('That link') || status.startsWith('No text') ? 'warning' : undefined} dimColor={!(status.startsWith('Could') || status.startsWith('That link'))}>
+          {status !== '' ? status : targetName !== null ? `New sources go into ${targetName}.` : list.length === 0 ? '' : 'New sources start On.'}
+        </Text>
+      </Box>
+    )
+
+    const meter = (
+      <Box justifyContent="space-between" alignItems="center" gap={1} flexWrap="wrap">
+        <Box gap={1} alignItems="center">
+          {rich ? (
+            svg(ui, tickMeter(list.length === 0 ? 0 : sharedList.length / list.length, 160), `${sharedList.length} of ${list.length} on`, 160, 10)
+          ) : (
+            <Text color="success">{bar(list.length === 0 ? 0 : sharedList.length / list.length, 16)}</Text>
+          )}
+          <Text>
+            <Text bold>{sharedList.length}</Text>
+            <Text dimColor> of </Text>
+            <Text bold>{list.length}</Text>
+            <Text dimColor> sources on</Text>
+          </Text>
+        </Box>
+        <Text color={isOver ? 'error' : undefined} dimColor={!isOver}>
+          about {tokens(sharedTokens)} of {tokens(TOKEN_BUDGET)} tokens{isOver ? ' · over budget, switch some off' : ''}
+        </Text>
+      </Box>
+    )
+
+    const isEmpty = list.length === 0 && groups.length === 0
     return frame(
       ui,
       'context',
-      e.props.bodyColumns,
+      columns,
       (id: Tab) => void update($, tab, () => id),
       <Box flexDirection="column" gap={1}>
         <Box flexDirection="column">
-          <Box gap={1}>
-            <Text bold>Context window</Text>
-            <Button key="usage-refresh" label="Refresh" hotkey="r" dimColor onPress={() => $.ui.invalidate('ui.render')} />
-            {!isRunning && (
-              <Button key="usage-compact" label="Compact" dimColor onPress={() => void $.session.compact({})} />
-            )}
-          </Box>
-          <Text>
-            <Text color={fillColor(percent)}>{bar(percent / 100, barWidth)}</Text> {percent}% · {tokens(used)} /{' '}
-            {tokens(window)}
-          </Text>
-          {categories.map(category => (
-            <Text>
-              <Text dimColor>{category.name.slice(0, 18).padEnd(19)}</Text>
-              {tokens(category.tokens).padStart(6)}{' '}
-              <Text color="promptBorder">{bar(category.tokens / Math.max(1, used), 12)}</Text>
-            </Text>
-          ))}
-          {last !== null && (
-            <Text dimColor>
-              Last response: in {tokens(last.input_tokens)} · out {tokens(last.output_tokens)} · cache read{' '}
-              {tokens(last.cache_read_input_tokens)} · cache write {tokens(last.cache_creation_input_tokens)}
-              {usage.cost === undefined ? '' : ` · session $${usage.cost.usd.toFixed(2)}`}
-            </Text>
-          )}
+          <Text bold>Context the agent reads</Text>
+          <Text dimColor>Sources that are On go into every request. Group them in folders and switch a folder at once.</Text>
         </Box>
-
-        <Box flexDirection="column">
-          <Text bold>Library</Text>
-          <Text color={enabledTokens > TOKEN_BUDGET ? 'error' : undefined} dimColor={enabledTokens <= TOKEN_BUDGET}>
-            {enabledChars} chars · about {tokens(enabledTokens)} tokens of {tokens(TOKEN_BUDGET)} budget
-          </Text>
-          {list.length === 0 && <Text dimColor>No sources yet. Notes and links you add here reach the agent.</Text>}
-          {list.map(source => (
-            <Box flexDirection="column" marginTop={1}>
-              <Text wrap="truncate-end">
-                <Text bold>{source.title}</Text>
-                <Text dimColor>
-                  {' '}
-                  {source.kind} · {source.text.length} chars
-                </Text>
-              </Text>
-              <Box gap={1}>
-                {Select === undefined ? (
-                  <Text dimColor>{source.mode}</Text>
-                ) : (
-                  <Select
-                    key={`mode-${source.id}`}
-                    options={MODES}
-                    value={source.mode}
-                    onSelect={mode => void setMode($, source.id, mode as SourceMode)}
-                  />
-                )}
-                <Button key={`remove-${source.id}`} label="Remove" dimColor onPress={() => void removeSource($, source.id)} />
-              </Box>
-            </Box>
-          ))}
-        </Box>
-
-        {Input !== undefined && (
-          <Box flexDirection="column">
-            <Text bold>Add note</Text>
-            <Input
-              key="note-title"
-              label="Title "
-              placeholder="API conventions"
-              value={draft.title}
-              submitLabel="next"
-              onInput={title => void update($, noteDraft, now => ({ ...now, title }))}
-              onSubmit={title => void update($, noteDraft, now => ({ ...now, title }))}
-            />
-            <Input
-              key="note-text"
-              label="Text  "
-              placeholder="What the agent should know"
-              value={draft.text}
-              submitLabel="add"
-              onInput={text => void update($, noteDraft, now => ({ ...now, text }))}
-              onSubmit={text => void (text.trim() === '' ? undefined : addNote($, text))}
-            />
-            <Text bold>Add link</Text>
-            <Input key="link-url" label="URL   " placeholder="https://…" submitLabel="fetch" onSubmit={url => void addLink($, url)} />
-            {status !== '' && <Text dimColor>{status}</Text>}
+        {adder}
+        {!isEmpty && meter}
+        {isEmpty ? (
+          card(
+            ui,
+            'empty',
+            [
+              <Box gap={2} alignItems="center">
+                {svg(ui, folderArt(0, 0, 120, 70), 'An empty folder', 120, 70)}
+                <Box flexDirection="column" flexShrink={1}>
+                  <Text bold>No sources yet</Text>
+                  <Text dimColor>Try a link to your API docs, a path such as docs/ or README.md, or a note like "Amounts are integer cents".</Text>
+                </Box>
+              </Box>,
+            ],
+            { tone: 'muted' },
+          )
+        ) : (
+          <Box flexDirection="column" gap={rich ? 1 : 0}>
+            {groups.map(folderBlock)}
+            {loose.map(source => sourceRow(source, false))}
           </Box>
         )}
+        {!isEmpty && (await drawWindow($, ui, columns))}
       </Box>,
     )
   })
+}
+
+const FILL_HEX: Record<string, string> = { success: '#3fb6a8', warning: '#d6a24a', error: '#e5534b' }
+
+const KIND_MARK: Record<Source['kind'], string> = { note: '¶', link: '↗', file: '▢' }
+
+// The live context window, folded to one line under the library.
+async function drawWindow($: $, ui: Ui, columns: number) {
+  const { Box, Text, Button } = ui
+  // Reading isTurnRunning redraws the tab as each turn starts and ends, so
+  // the window figures below are read fresh then.
+  const isRunning = await read($, isTurnRunning)
+  const isShown = await read($, isWindowShown)
+  const usage = await $.session.usage({ breakdown: 'summary' })
+  const breakdown = usage.context.breakdown
+  const used = breakdown?.totalTokens ?? usage.context.tokens ?? 0
+  const window = breakdown?.rawMaxTokens ?? usage.context.window
+  const percent = breakdown?.percentage ?? usage.context.percent ?? 0
+  const categories = (breakdown?.categories ?? []).filter(one => one.kind === 'used' && one.tokens > 0)
+  const last = breakdown?.apiUsage ?? null
+  const barWidth = Math.max(10, Math.min(30, columns - 50))
+  return card(
+    ui,
+    'window',
+    [
+      <Box justifyContent="space-between" alignItems="center" gap={1}>
+        <Box gap={1} alignItems="center" flexShrink={1}>
+          <Text dimColor>Context window</Text>
+          {isRich(ui) ? (
+            svg(ui, track(percent / 100, Math.max(120, (columns - 52) * 8), FILL_HEX[fillColor(percent)]), `${percent}% of the context window`, Math.max(120, (columns - 52) * 8), 6)
+          ) : (
+            <Text color={fillColor(percent)}>{bar(percent / 100, barWidth)}</Text>
+          )}
+          <Text>
+            <Text bold>{percent}%</Text>
+            <Text dimColor> · {tokens(used)} of {tokens(window)}</Text>
+          </Text>
+        </Box>
+        <Box gap={1}>
+          <Button key="window-details" label={isShown ? 'Hide' : 'Details'} dimColor onPress={() => void update($, isWindowShown, now => !now)} />
+          {!isRunning && <Button key="usage-compact" label="Compact" dimColor onPress={() => void $.session.compact({})} />}
+        </Box>
+      </Box>,
+      ...(isShown
+        ? categories.map(category => (
+            <Text>
+              <Text dimColor>{category.name.slice(0, 18).padEnd(19)}</Text>
+              {tokens(category.tokens).padStart(6)} <Text color="promptBorder">{bar(category.tokens / Math.max(1, used), 12)}</Text>
+            </Text>
+          ))
+        : []),
+      isShown && last !== null && (
+        <Text dimColor>
+          Last response: in {tokens(last.input_tokens)} · out {tokens(last.output_tokens)} · cache read {tokens(last.cache_read_input_tokens)} · cache write{' '}
+          {tokens(last.cache_creation_input_tokens)}
+          {usage.cost === undefined ? '' : ` · session $${usage.cost.usd.toFixed(2)}`}
+        </Text>
+      ),
+    ],
+    { tone: 'muted' },
+  )
 }

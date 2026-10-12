@@ -193,13 +193,14 @@ async function readText($: $, path: string): Promise<string> {
   return typeof text === 'string' ? text.slice(0, CHAR_CAP) : ''
 }
 
-// The text files under a directory, breadth first, at most IMPORT_CAP.
-async function textFiles($: $, top: string, relative: string): Promise<string[]> {
+// The text files under a directory, breadth first, at most IMPORT_CAP, as
+// absolute paths.
+async function textFiles($: $, directory: string): Promise<string[]> {
   const found: string[] = []
-  const queue = [relative]
+  const queue = [directory]
   while (queue.length > 0 && found.length < IMPORT_CAP) {
     const dir = queue.shift()!
-    const entries = await $.fs.list(`${top}/${dir}`)
+    const entries = await $.fs.list(dir)
     for (const entry of [...entries].sort((a, b) => a.name.localeCompare(b.name))) {
       if (entry.name.startsWith('.')) continue
       const path = `${dir}/${entry.name}`
@@ -214,7 +215,7 @@ async function textFiles($: $, top: string, relative: string): Promise<string[]>
 // directory becomes a folder of its text files), anything else is a note.
 async function addFromInput($: $, raw: string): Promise<void> {
   const text = raw.trim()
-  if (text === '') return say($, 'Paste a link, type a path in the repository, or write a note.')
+  if (text === '') return say($, 'Paste a link or write a note, or choose files.')
   if (/^https?:\/\/\S+$/.test(text)) {
     await say($, `Fetching ${text}`)
     const page = await fetchLink($, text)
@@ -227,7 +228,7 @@ async function addFromInput($: $, raw: string): Promise<void> {
     const path = text.replace(/^\.\//, '').replace(/\/+$/, '')
     const top = await $.session.root()
     const stat = await $.fs.stat(`${top}/${path}`).catch(() => undefined)
-    if (stat?.kind === 'dir') return importDirectory($, top, path)
+    if (stat?.kind === 'dir') return importDirectory($, `${top}/${path}`, path)
     if (stat?.kind === 'file') {
       const body = await readText($, `${top}/${path}`).catch(() => null)
       if (body === null) return say($, `Could not read ${path}.`)
@@ -241,13 +242,63 @@ async function addFromInput($: $, raw: string): Promise<void> {
   return clearInput($, 'Added a note. Open it to rename it or add more.')
 }
 
+// The macOS file dialog, run through osascript on the machine Claude Code
+// runs on: the picked paths, [] when the person cancels, null when there is
+// no dialog to show (not macOS, or osascript failed).
+async function pickPaths($: $, kind: 'file' | 'folder'): Promise<string[] | null> {
+  const top = (await $.session.root()).replace(/"/g, '')
+  const chooser =
+    kind === 'file'
+      ? `choose file with prompt "Add files to Craftshop context" default location (POSIX file "${top}") with multiple selections allowed`
+      : `choose folder with prompt "Add folders to Craftshop context" default location (POSIX file "${top}") with multiple selections allowed`
+  const ran = await $.process
+    .run(['osascript', '-e', 'activate', '-e', `set picked to ${chooser}`, '-e', 'set out to ""', '-e', 'repeat with one in picked', '-e', 'set out to out & POSIX path of one & linefeed', '-e', 'end repeat', '-e', 'return out'], { timeoutMs: 600_000 })
+    .catch(() => null)
+  if (ran === null) return null
+  if (ran.exitCode !== 0) return /-128/.test(ran.stderr) ? [] : null
+  return ran.stdout
+    .split('\n')
+    .map(line => line.trim().replace(/\/$/, ''))
+    .filter(line => line !== '')
+}
+
+// A path as a source keeps it: relative to the checkout when inside it.
+function relativePath(top: string, path: string): string {
+  return path.startsWith(`${top}/`) ? path.slice(top.length + 1) : path
+}
+
+async function choose($: $, kind: 'file' | 'folder'): Promise<void> {
+  await say($, kind === 'file' ? 'Choosing files…' : 'Choosing a folder…')
+  const picked = await pickPaths($, kind)
+  if (picked === null) return say($, 'Could not open the file dialog here. Type a path in the field instead.')
+  if (picked.length === 0) return say($, '')
+  const top = await $.session.root()
+  const added: string[] = []
+  for (const path of picked) {
+    if (kind === 'folder') {
+      await importDirectory($, path, relativePath(top, path))
+      added.push(relativePath(top, path))
+      continue
+    }
+    const body = await readText($, path).catch(() => null)
+    if (body === null || body.includes('\u0000')) {
+      await say($, `Skipped ${path.split('/').pop()}: only text files can be sources.`)
+      continue
+    }
+    await addSource($, { kind: 'file', title: path.split('/').pop() ?? path, text: body, url: null, path: relativePath(top, path) })
+    added.push(path.split('/').pop() ?? path)
+  }
+  if (kind === 'file' && added.length > 0) await say($, `Added ${added.join(', ')}`)
+}
+
 async function clearInput($: $, status: string): Promise<void> {
   await update($, contextDraft, now => ({ ...now, input: '' }))
   await say($, status)
 }
 
-async function importDirectory($: $, top: string, path: string): Promise<void> {
-  const files = await textFiles($, top, path)
+async function importDirectory($: $, directory: string, path: string): Promise<void> {
+  const top = await $.session.root()
+  const files = await textFiles($, directory)
   if (files.length === 0) return say($, `No text files under ${path}.`)
   const folder: Folder = { id: await newId($), name: path.split('/').pop() || path }
   const added: Source[] = []
@@ -256,9 +307,9 @@ async function importDirectory($: $, top: string, path: string): Promise<void> {
       id: await newId($),
       kind: 'file',
       title: file.split('/').pop() ?? file,
-      text: await readText($, `${top}/${file}`),
+      text: await readText($, file),
       url: null,
-      path: file,
+      path: relativePath(top, file),
       mode: 'guidance',
       folderId: folder.id,
     })
@@ -289,7 +340,8 @@ async function refresh($: $, source: Source): Promise<void> {
     if (typeof page === 'string') return say($, page)
     text = page.text
   } else if (source.kind === 'file' && source.path !== null) {
-    text = await readText($, `${await $.session.root()}/${source.path}`).catch(() => null)
+    const file = source.path.startsWith('/') ? source.path : `${await $.session.root()}/${source.path}`
+    text = await readText($, file).catch(() => null)
   }
   if (text === null) return say($, `Could not refresh ${source.title}.`)
   await saveSources($, list => list.map(one => (one.id === source.id ? { ...one, text: text! } : one)))
@@ -531,40 +583,40 @@ export function registerContext(on: On): void {
     }
 
     const targetOptions = [{ value: '', label: 'No folder' }, ...groups.map(one => ({ value: one.id, label: one.name }))]
+    const isWarning = /^(Could|That link|No text|Skipped)/.test(status)
     const adder = (
       <Box flexDirection="column" gap={1}>
-        <Box gap={1} alignItems="center">
-          {Input !== undefined && (
-            <Box flexGrow={1}>
-              <Input
-                key="add-input"
-                placeholder="Paste a link, type a repo path like docs/, or write a note"
-                value={draft.input}
-                submitLabel="add"
-                autoFocus={list.length === 0 ? true : undefined}
-                onInput={value => void update($, contextDraft, now => ({ ...now, input: value }))}
-                onSubmit={value => void addFromInput($, value)}
-              />
-            </Box>
-          )}
+        <Box justifyContent="space-between" alignItems="center" gap={1} flexWrap="wrap">
+          <Box gap={1} alignItems="center" flexWrap="wrap">
+            <Button key="pick-files" label="Choose files…" variant="primary" onPress={() => void choose($, 'file')} />
+            <Button key="pick-folder" label="Choose folder…" onPress={() => void choose($, 'folder')} />
+            <Button key="folder-new" label="New folder" variant={view.isNamingFolder ? 'secondary' : undefined} dimColor={!view.isNamingFolder} onPress={go({ isNamingFolder: !view.isNamingFolder })} />
+          </Box>
           {Select !== undefined && groups.length > 0 && (
-            <Select key="add-target" label="to " options={targetOptions} value={view.target ?? ''} onSelect={value => void setView($, { target: value === '' ? null : value })} />
+            <Select key="add-target" label="Into " options={targetOptions} value={view.target ?? ''} onSelect={value => void setView($, { target: value === '' ? null : value })} />
           )}
-          <Button key="add-go" label="Add" variant="primary" onPress={() => void read($, contextDraft).then(now => addFromInput($, now.input))} />
-          <Button key="folder-new" label="New folder" variant={view.isNamingFolder ? 'primary' : undefined} dimColor={!view.isNamingFolder} onPress={go({ isNamingFolder: !view.isNamingFolder })} />
         </Box>
         {view.isNamingFolder && Input !== undefined && (
           <Box gap={1} alignItems="center">
-            <Box flexGrow={1}>
-              <Input key="folder-name" placeholder="Folder name, e.g. Payments" value={draft.name} submitLabel="create" autoFocus onInput={value => void update($, contextDraft, now => ({ ...now, name: value }))} onSubmit={value => void addFolder($, value)} />
-            </Box>
+            <Input key="folder-name" placeholder="Folder name, e.g. Payments" value={draft.name} submitLabel="create" autoFocus onInput={value => void update($, contextDraft, now => ({ ...now, name: value }))} onSubmit={value => void addFolder($, value)} />
             <Button key="folder-cancel" label="Cancel" dimColor onPress={go({ isNamingFolder: false })} />
-            <Button key="folder-create" label="Create" variant="primary" onPress={() => void read($, contextDraft).then(now => addFolder($, now.name))} />
           </Box>
         )}
-        <Text color={status.startsWith('Could') || status.startsWith('That link') || status.startsWith('No text') ? 'warning' : undefined} dimColor={!(status.startsWith('Could') || status.startsWith('That link'))}>
-          {status !== '' ? status : targetName !== null ? `New sources go into ${targetName}.` : list.length === 0 ? '' : 'New sources start On.'}
-        </Text>
+        {Input !== undefined && (
+          <Input
+            key="add-input"
+            placeholder="Or paste a link, or write a note"
+            value={draft.input}
+            submitLabel="add"
+            onInput={value => void update($, contextDraft, now => ({ ...now, input: value }))}
+            onSubmit={value => void addFromInput($, value)}
+          />
+        )}
+        {(status !== '' || targetName !== null) && (
+          <Text color={isWarning ? 'warning' : undefined} dimColor={!isWarning}>
+            {status !== '' ? status : `New sources go into ${targetName}.`}
+          </Text>
+        )}
       </Box>
     )
 
@@ -611,7 +663,7 @@ export function registerContext(on: On): void {
                 {svg(ui, folderArt(0, 0, 120, 70), 'An empty folder', 120, 70)}
                 <Box flexDirection="column" flexShrink={1}>
                   <Text bold>No sources yet</Text>
-                  <Text dimColor>Try a link to your API docs, a path such as docs/ or README.md, or a note like "Amounts are integer cents".</Text>
+                  <Text dimColor>Choose files or a folder from your Mac, paste a link to your API docs, or write a note like "Amounts are integer cents".</Text>
                 </Box>
               </Box>,
             ],

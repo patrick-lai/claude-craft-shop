@@ -121,3 +121,22 @@ test('a link is fetched, and a repository directory imports as a folder of file 
   expect(await ui.find({ text: /logo\.png/ })).toBeUndefined()
   expect(await contextSection($)).toContain('### docs › api.md (docs/api.md)')
 })
+
+test('Choose files and Choose folder add what the macOS dialog picks', async ($, on) => {
+  world(on, { isRepo: false })
+  on('fs.list', () => ({ value: [{ name: 'adr.md', kind: 'file', size: 10, mtimeMs: 0, isLink: false }] }))
+  on('fs.read', ($, e) => ({ value: `contents of ${e.path}` }))
+  await startSession($)
+  const ui = await mountPane($, 'desktop')
+  await ui.press({ key: 'tab-context' })
+
+  await ui.press({ key: 'pick-files' })
+  expect(await ui.find({ text: /Added api\.md, style\.md/ })).toBeDefined()
+  const section = await contextSection($)
+  expect(section).toContain('### api.md (docs/api.md)')
+  expect(section).toContain('### style.md (/Users/me/notes/style.md)')
+
+  await ui.press({ key: 'pick-folder' })
+  expect(await ui.find({ text: /1 source · 1 on/ })).toBeDefined()
+  expect(await contextSection($)).toContain('### docs › adr.md (docs/adr.md)')
+})

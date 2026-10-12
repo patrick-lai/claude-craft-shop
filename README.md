@@ -68,12 +68,12 @@ The brief is added to the system prompt as a "Working style" section. Claude Cod
 
 The Context tab holds the sources the agent reads. It is kept per repository.
 
-- **Add.** One field takes all three kinds:
-  - A link (`https://…`) is fetched as text, 12,000 characters at most.
-  - A repository path is read. A file adds one source, and a directory (`docs/`) adds a folder of its text files, up to 40.
-  - Anything else becomes a note.
+- **Add.**
+  - **Choose files…** opens the macOS file dialog. Pick one or more text files, in the repository or anywhere on your Mac.
+  - **Choose folder…** imports a folder's text files (up to 40) as a Craftshop folder.
+  - The field below takes the rest. A link (`https://…`) is fetched as text, 12,000 characters at most. A repository path is read too. Anything else becomes a note.
 
-  **to** picks the folder new sources go into.
+  **Into** picks the folder new sources go into. The dialogs run through `osascript`, so they need Claude Code running on a Mac. Elsewhere, type a path in the field.
 - **On or Off.** Each source has a switch. A source that is On also has a **Strict** pill. Strict sources are binding ground truth, and the agent must say so if the code disagrees. The others guide the agent.
 - **Folders.** **New folder** makes a group. A folder's switch turns all its sources on or off at once, and reads **Some on** when they differ. **Add here** sends new sources into the folder. You can also rename a folder, or delete it with or without its sources.
 - **Details.** Click a source's title to see its text, rename it, move it to another folder, edit a note, refresh a link or file, or delete it.

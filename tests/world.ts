@@ -38,13 +38,15 @@ export function world(on: On, { isRepo = true } = {}): World {
   })
   on('ui.panes', () => ({ value: panes.map(id => ({ id, title: id, isShown: true, isFocused: false, isPlaced: true })) }))
   on('fs.exists', () => ({ value: false }))
-  on('fs.stat', ($, e) => ({ value: { kind: 'dir', size: 0, mtimeMs: 0, isLink: false, realPath: e.path } }))
+  on('fs.stat', ($, e) => ({ value: { kind: /\.\w+$/.test(e.path) ? 'file' : 'dir', size: 0, mtimeMs: 0, isLink: false, realPath: e.path } }))
   on('http.fetch', ($, e) => {
     fetched.push(e.url)
     return { value: { status: 200, ok: true, headers: { 'content-type': 'application/json' }, text: '[{"id":1}]' } }
   })
   on('process.run', ($, e) => {
     const command = e.argv.join(' ')
+    // The macOS file dialog: what picked files come back as.
+    if (e.argv[0] === 'osascript') return ran(command.includes('choose folder') ? `${REPO}/docs/\n` : `${REPO}/docs/api.md\n/Users/me/notes/style.md\n`)
     if (command === 'git rev-parse --show-toplevel') return ran(`${REPO}\n`)
     if (command === 'git symbolic-ref --short refs/remotes/origin/HEAD') return ran('origin/main\n')
     if (command === 'git fetch -q origin main') return ran()

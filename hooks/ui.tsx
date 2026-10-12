@@ -50,7 +50,7 @@ export function frame(ui: Ui, current: Tab, columns: number, onSelect: (id: Tab)
     const art = tabsArt(TABS, current)
     return (
       <Box flexDirection="column" width={columns} gap={1}>
-        <Box key="tabs-art" position="relative">
+        <Box key="tabs-art" position="relative" alignSelf="flex-start">
           <Svg source={art.source} alt={`Craftshop tabs: ${TABS.map(one => one.label).join(', ')}; ${current} shown`} width={art.width} height={art.height} />
           <Box position="absolute" top={0} left={0} right={0} bottom={0}>
             <Client key="tabs-click" module="./rail-click.tsx" props={{ width: art.width, segments: art.segments }} width="100%" height="100%" />

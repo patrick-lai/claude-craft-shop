@@ -12,7 +12,9 @@ export type RailArtFigures = {
   cacheSecondsLeft: number | null
   isWorking: boolean
   cachePercent: number | null
-  costUsd: number | null
+  // Tokens this session sent and received, summed from each turn's usage;
+  // null before the first turn ends.
+  tokens: { input: number; output: number } | null
   preset: string
   presetLevels: number[]
   sourcesOn: number
@@ -38,6 +40,20 @@ function textWidth(text: string, size: number, isBold = false): number {
 
 function clock(seconds: number): string {
   return `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`
+}
+
+// A token count as the status line spells one: 812, 48.2k, 1.4M.
+function compact(count: number): string {
+  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`
+  if (count >= 1_000) return `${(count / 1_000).toFixed(count >= 100_000 ? 0 : 1)}k`
+  return String(count)
+}
+
+// Sent tokens go up (blue), received come down (green).
+function arrow(x: number, mid: number, isUp: boolean): string {
+  const color = isUp ? '#5aaeff' : '#3fb950'
+  const path = isUp ? 'M5 11V2M1.5 5.5 5 2l3.5 3.5' : 'M5 2v9M1.5 7.5 5 11l3.5-3.5'
+  return `<path transform="translate(${x} ${mid - 6.5})" d="${path}" fill="none" stroke="${color}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>`
 }
 
 function anvil(x: number, y: number): string {
@@ -68,7 +84,7 @@ function branch(x: number, y: number, isOn: boolean): string {
   return `<g transform="translate(${x} ${y})" fill="none" stroke="${color}" stroke-width="1.4" stroke-linecap="round"><circle cx="3.5" cy="2.5" r="1.8"/><circle cx="3.5" cy="12" r="1.8"/><circle cx="11" cy="4.5" r="1.8"/><path d="M3.5 4.3v5.9M11 6.3c0 3-3.2 2.8-6.3 4.2"/></g>`
 }
 
-export function railArt(figures: RailArtFigures, hover: number | null, showsBrand: boolean): RailArt {
+export function railArt(figures: RailArtFigures, hover: number | null): RailArt {
   const parts: string[] = []
   const segments: RailSegment[] = []
   const mid = HEIGHT / 2
@@ -83,7 +99,7 @@ export function railArt(figures: RailArtFigures, hover: number | null, showsBran
     x += width + 6
   }
 
-  if (showsBrand) {
+  {
     const word = 'Craftshop'
     const width = 12 + 18 + 7 + textWidth(word, 13.5, true) + 14
     segment(width, 'pane', 'Open Craftshop', left => `${anvil(left + 12, mid - 8)}<text x="${left + 12 + 18 + 7}" y="${mid + 4.6}" font-family="${ROUNDED}" font-size="13.5" font-weight="700" fill="url(#brandText)" letter-spacing="0.1">${word}</text>`)
@@ -105,10 +121,14 @@ export function railArt(figures: RailArtFigures, hover: number | null, showsBran
     })
   }
 
-  if (figures.costUsd !== null) {
-    const label = `$${figures.costUsd.toFixed(2)}`
-    const width = 12 + textWidth(label, 12.5, true) + 12
-    segment(width, 'context', `This session has cost ${label} so far.`, left => `<text x="${left + 12}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5" font-weight="600" fill="var(--text)" class="num">${label}</text>`)
+  if (figures.tokens !== null) {
+    const sent = compact(figures.tokens.input)
+    const received = compact(figures.tokens.output)
+    const width = 12 + 10 + 4 + textWidth(sent, 12.5, true) + 12 + 10 + 4 + textWidth(received, 12.5, true) + 12
+    segment(width, 'context', `This session sent ${sent} tokens and received ${received}.`, left => {
+      const outX = left + 12 + 10 + 4 + textWidth(sent, 12.5, true) + 12
+      return `${arrow(left + 12, mid, true)}<text x="${left + 12 + 14}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5" font-weight="600" fill="var(--text)" class="num">${sent}</text>${arrow(outX, mid, false)}<text x="${outX + 14}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5" font-weight="600" fill="var(--text)" class="num">${received}</text>`
+    })
   }
 
   {

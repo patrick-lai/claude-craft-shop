@@ -37,6 +37,7 @@ const dials = atom({ plugin: 'craft-shop', key: 'dials' } as const, BALANCED)
 const sources = atom({ plugin: 'craft-shop', key: 'sources' } as const, [])
 const lastReplyAt = atom({ plugin: 'craft-shop', key: 'lastReplyAt' } as const, null)
 const railHover = atom({ plugin: 'craft-shop', key: 'railHover' } as const, null)
+const tokenTotals = atom({ plugin: 'craft-shop', key: 'tokenTotals' } as const, null)
 
 type $ = EngineInterface
 
@@ -455,6 +456,15 @@ export function registerWorktree(on: On, options: PluginOptions): void {
 
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
+    // Every turn's tokens count, a subagent's too: the session has no total of
+    // its own, and /cost's dollars are list price, not what anyone is billed.
+    const used = e.usage
+    if (used !== undefined) {
+      await update($, tokenTotals, now => ({
+        input: (now?.input ?? 0) + used.input_tokens + used.cache_read_input_tokens + used.cache_creation_input_tokens,
+        output: (now?.output ?? 0) + used.output_tokens,
+      }))
+    }
     if (e.agentId !== undefined) return done
     const repliedAt = await $.clock.now()
     await update($, lastReplyAt, () => repliedAt)
@@ -519,11 +529,10 @@ export function registerWorktree(on: On, options: PluginOptions): void {
       return drawRail(
         ui,
         {
-          isPaneOpen: (await $.ui.panes()).some(one => one.id === PANE),
           isWorking,
           cacheSecondsLeft,
           cachePercent: last === null || input === 0 ? null : Math.round((last.cache_read_input_tokens / input) * 100),
-          costUsd: usage.cost?.usd ?? null,
+          tokens: await read($, tokenTotals),
           preset: presetName(values),
           presetLevels: [values.foresight, values.crew, values.tenacity, values.autonomy, values.proof, values.voice],
           sourcesOn: list.filter(one => one.mode !== 'off').length,

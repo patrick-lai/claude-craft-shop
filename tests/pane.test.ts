@@ -77,12 +77,17 @@ test('with no worktree news the band is a status rail whose items open their tab
   const pane = await mountPane($, 'desktop')
   expect(await pane.find({ type: 'Button', key: 'dial-foresight' })).toBeDefined()
   await band.redraw()
-  expect(await band.find({ type: 'Button', key: 'open-craftshop' })).toBeUndefined()
+  expect(await band.find({ type: 'Button', key: 'open-craftshop' })).toBeDefined()
 })
 
 test('on the desktop the rail is one picture: hovering lights a pill without moving it, pressing opens its tab', async ($, on) => {
   world(on, { isRepo: false })
+  on('turn.complete', ($, e) => ({ text: e.answer }))
   await startSession($)
+  // Two turns' tokens, one of them a subagent's: the rail sums them all.
+  const usage = { input_tokens: 1_200, output_tokens: 800, cache_read_input_tokens: 52_000, cache_creation_input_tokens: 3_000, model: 'claude-opus-5-5' }
+  await $.turn.complete({ turnId: 't1', answer: 'done', durationMs: 1_000, reason: 'answer', isAborted: false, usage } as never)
+  await $.turn.complete({ turnId: 't2', agentId: 'a1', answer: 'done', durationMs: 1_000, reason: 'answer', isAborted: false, usage } as never)
   const band = await $.ui.mount({
     plugin: 'craft-shop',
     surface: 'desktop',
@@ -94,11 +99,14 @@ test('on the desktop the rail is one picture: hovering lights a pill without mov
     props: { width: number; segments: { x0: number; x1: number; tab: string }[] }
   }
   const { width, segments } = overlay.props
-  expect(segments.map(one => one.tab)).toEqual(['pane', 'context', 'dials', 'context', 'worktree'])
+  expect(segments.map(one => one.tab)).toEqual(['pane', 'context', 'context', 'dials', 'context', 'worktree'])
+  const drawn = (await band.find({ type: 'Svg' }))!.props as { source: string }
+  expect(drawn.source).toContain('>112k<')
+  expect(drawn.source).toContain('>1.6k<')
 
   // Lay the overlay out at 60 cells and point at the middle of the Dials pill.
   await band.resize({ columns: 60, rows: 2, in: 'rail-click' })
-  const dials = segments[2]!
+  const dials = segments[3]!
   const x = Math.floor(((dials.x0 + dials.x1) / 2 / width) * 60)
   await band.pointer({ type: 'move', x, y: 0, in: 'rail-click' })
   await band.redraw()

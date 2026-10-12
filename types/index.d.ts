@@ -62,6 +62,7 @@ declare module 'claude-code' {
       isTurnRunning: boolean
       lastReplyAt: number | null
       railHover: number | null
+      tokenTotals: { input: number; output: number } | null
       isBandHidden: boolean
       isStepsShown: boolean
       isHeadStartPrompted: boolean

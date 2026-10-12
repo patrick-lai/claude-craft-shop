@@ -57,7 +57,7 @@ test('every tab draws on the desktop with content in it', async ($, on) => {
   await activate(ui, 'tab-worktree')
   await show(ui, 'worktree-off')
 
-  await $.turn.complete({ turnId: 't1', answer: 'done', durationMs: 1_000, reason: 'answer', isAborted: false })
+  await $.turn.complete({ turnId: 't1', answer: 'done', durationMs: 1_000, reason: 'answer', isAborted: false, usage: { input_tokens: 1_200, output_tokens: 3_400, cache_read_input_tokens: 48_000, cache_creation_input_tokens: 2_100, model: 'claude-opus-5-5' } } as never)
   const band = await $.ui.mount({
     plugin: 'craft-shop',
     surface: 'desktop',

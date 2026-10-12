@@ -13,7 +13,7 @@ async function told($: Engine) {
 
 async function isAutoShown($: Engine) {
   const pane = await mountPane($, 'desktop')
-  return JSON.stringify(await pane.drawn()).includes('"alt":"Perm worktree on"')
+  return JSON.stringify(await pane.drawn()).includes('"alt":"Use worktrees: on"')
 }
 
 test("the first session after the rename brings Craftshop's saved dials and Perm worktree switch over", async ($, on) => {

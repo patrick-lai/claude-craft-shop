@@ -29,7 +29,7 @@ export function resolveUi(table: Ui, surface: string): Ui {
 }
 
 export const TABS: { id: Tab; label: string }[] = [
-  { id: 'worktree', label: 'Perm worktree' },
+  { id: 'worktree', label: 'Worktrees' },
   { id: 'dials', label: 'Dials' },
   { id: 'context', label: 'Context' },
 ]

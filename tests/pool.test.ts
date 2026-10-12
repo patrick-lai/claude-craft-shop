@@ -214,6 +214,31 @@ test('a session in a worktree fishStack does not manage is told where it is, and
   expect(await ui.find({ type: 'Button', key: 'worktree-create' })).toBeUndefined()
 })
 
+test('the pool is listed whatever the session does, and Warm one more adds a slot to it', { options: { autoWorktree: true, worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
+  const dir = await repoDir()
+  const { clock, commands } = world(on, { slots: [1, 2, 3].map(n => `${dir}/${n}`) })
+  // This session works in a worktree of its own, not one of the pool's.
+  await $.session.start({ cwd: '/other/wt', surface: 'terminal', isInteractive: true })
+  await clock.advance(1)
+  expect(created(commands)).toEqual([])
+  const ui = await mountPane($, 'terminal')
+  await activate(ui, 'tab-worktree')
+  expect(await ui.find({ text: /This session already works in a worktree/ })).toBeDefined()
+  expect(await ui.find({ text: /Slots · 3/ })).toBeDefined()
+  expect(await ui.find({ text: /#3 detached ○ free/ })).toBeDefined()
+  await activate(ui, 'pool-more')
+  await clock.advance(1)
+  expect(created(commands)).toEqual([`${REPO}$ git -c core.hooksPath=/dev/null worktree add -q --detach --no-checkout ${dir}/4 0123456789abcdef`])
+  await ui.redraw()
+  expect(await ui.find({ text: /Pool: 4 slots, 4 ready/ })).toBeDefined()
+  expect(await ui.find({ text: /Slots · 4/ })).toBeDefined()
+  // The pool's size is back to three for the next top-up: nothing more is made.
+  await activate(ui, 'auto-worktree-off')
+  await activate(ui, 'auto-worktree-on')
+  await clock.advance(1)
+  expect(created(commands).length).toBe(1)
+})
+
 test('after /clear the session keeps its slot, its lease and its dials', { options: { worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
   const dir = await repoDir()
   const state = world(on, { slots: [`${dir}/2`] })

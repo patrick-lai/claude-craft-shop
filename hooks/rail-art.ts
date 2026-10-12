@@ -199,7 +199,7 @@ export function railArt(figures: RailArtFigures, iconOnly: ReadonlySet<Compactab
     const label = figures.branch ?? 'No worktree'
     const isIcon = iconOnly.has('worktree')
     const width = isIcon ? 12 + 14 + 12 : 12 + 14 + 7 + textWidth(label, 12.5, figures.branch !== null) + 14
-    pill('worktree', width, 'worktree', figures.branch === null ? 'Perm worktree is off' : `Working in perm worktree ${figures.branch}`, left => isIcon ? branch(left + 12, mid - 7, figures.branch !== null) : `${branch(left + 12, mid - 7, figures.branch !== null)}<text x="${left + 12 + 14 + 7}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5" font-weight="${figures.branch === null ? 500 : 600}" fill="${figures.branch === null ? 'var(--dim)' : 'var(--text)'}">${escape(label)}</text>`)
+    pill('worktree', width, 'worktree', figures.branch === null ? 'No worktree for this session' : `Working in worktree ${figures.branch}`, left => isIcon ? branch(left + 12, mid - 7, figures.branch !== null) : `${branch(left + 12, mid - 7, figures.branch !== null)}<text x="${left + 12 + 14 + 7}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5" font-weight="${figures.branch === null ? 500 : 600}" fill="${figures.branch === null ? 'var(--dim)' : 'var(--text)'}">${escape(label)}</text>`)
   }
 
   return pills

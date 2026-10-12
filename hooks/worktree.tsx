@@ -48,7 +48,7 @@ type RailKept = { sessionId: string; repliedAt: number | null; tokens: { input: 
 // The worktree this session works in when it is not ours to manage (another
 // tool's, or one made by hand); null in the main checkout or a slot of ours.
 const elsewhere = atom({ plugin: 'fishstack', key: 'elsewhere' } as const, null)
-// What the pool's background warming is doing, for the Perm worktree tab.
+// What the pool's background warming is doing, for the Worktrees tab.
 const poolNote = atom({ plugin: 'fishstack', key: 'poolNote' } as const, '')
 const tokenTotals = atom({ plugin: 'fishstack', key: 'tokenTotals' } as const, null)
 // Autopilot answering for a person who is away (session.ts sets it).
@@ -177,10 +177,15 @@ async function refreshSlots($: $, options: PluginOptions): Promise<void> {
   if (main !== null) await refreshSlotsFor($, options, main)
 }
 
-// The main checkout of the session's repository, or null outside one.
+// The main checkout of the session's repository, or null outside one: the
+// folder holding the repository's .git, so a session working in a linked
+// worktree finds the same pool as one in the main checkout.
 async function repoMain($: $): Promise<string | null> {
   const repo = await $.session.repo()
-  return repo === null ? null : realPath($, repo.root)
+  if (repo === null) return null
+  const common = await git($, ['rev-parse', '--path-format=absolute', '--git-common-dir'], repo.root)
+  const dir = common.stdout.trim()
+  return realPath($, common.exitCode === 0 && dir.endsWith('/.git') ? dir.slice(0, -'/.git'.length) : repo.root)
 }
 
 async function refreshSlotsFor($: $, options: PluginOptions, main: string): Promise<void> {
@@ -404,6 +409,9 @@ let isWarming = false
 // A top-up asked for while one runs: run once more when it ends, as a claim
 // made meanwhile may have taken the spare it was counting on.
 let isWarmAgain = false
+// Slots asked for beyond the pool's size by Warm one more, in this process:
+// the warming makes at least this many, then forgets it.
+let warmTo = 0
 async function prewarm($: $, options: PluginOptions, main: string): Promise<void> {
   if (isWarming) {
     isWarmAgain = true
@@ -417,7 +425,7 @@ async function prewarm($: $, options: PluginOptions, main: string): Promise<void
     const sha = await gitOut($, ['rev-parse', fetched.exitCode === 0 ? `origin/${branchName}` : branchName], main, 'Could not resolve the base.')
     const minFreeGb = Number(options.minFreeGb ?? DEFAULT_MIN_FREE_GB)
     let note = ''
-    for (let made = 0; made < POOL_SIZE; made++) {
+    for (let made = 0; made < Math.max(POOL_SIZE, warmTo); made++) {
       const listed = await worktreePaths($, main)
       let total = 0
       let idle = 0
@@ -426,7 +434,10 @@ async function prewarm($: $, options: PluginOptions, main: string): Promise<void
         total++
         if (!(await isLeaseLive($, await readLease($, path)))) idle++
       }
-      if (total >= POOL_SIZE && idle >= 1) break
+      if (total >= Math.max(POOL_SIZE, warmTo) && idle >= 1) {
+        warmTo = 0
+        break
+      }
       await $.process.run(['mkdir', '-p', repoDir])
       const free = await freeKb($, repoDir)
       if (free < minFreeGb * 1024 * 1024) {
@@ -442,7 +453,7 @@ async function prewarm($: $, options: PluginOptions, main: string): Promise<void
       } finally {
         await unlock($, repoDir)
       }
-      await update($, poolNote, () => `Warming slot ${path.split('/').pop()} of ${Math.max(POOL_SIZE, total + 1)}…`)
+      await update($, poolNote, () => `Warming slot ${path.split('/').pop()} of ${Math.max(POOL_SIZE, warmTo, total + 1)}…`)
       await createSlot($, main, path, sha)
       await seedDependencies($, options, main, path, SILENT)
       await refreshSlotsFor($, options, main)
@@ -575,8 +586,17 @@ async function carryOverClear($: $): Promise<void> {
 
 export const AUTO_WORKTREE_KEY = 'autoWorktree'
 
-// The Perm worktree tab's toggle, kept across sessions; until it is pressed,
+// The Worktrees tab's toggle, kept across sessions; until it is pressed,
 // the autoWorktree option decides, off unless set.
+// Warm one more: one slot past what the pool holds now, made in the
+// background like the rest, behind the same disk guard.
+async function warmOneMore($: $, options: PluginOptions, count: number): Promise<void> {
+  const main = (await read($, worktree)).main ?? (await repoMain($))
+  if (main === null) return
+  warmTo = Math.max(warmTo, count + 1)
+  await prewarm($, options, main)
+}
+
 async function isAutoOn($: $, options: PluginOptions): Promise<boolean> {
   const stored = await $.store.get(AUTO_WORKTREE_KEY)
   return typeof stored === 'boolean' ? stored : options.autoWorktree === true
@@ -940,22 +960,55 @@ export function registerWorktree(on: On, options: PluginOptions): void {
                 : "Off: fishStack leaves worktrees to Claude Code (the desktop's worktree option, claude --worktree, EnterWorktree)."}
             </Text>
             {isAuto && (
-              <Text key="pool-line">
-                <Text color={idle > 0 ? 'success' : 'warning'}>● </Text>
+              <Box key="pool-line" gap={1} alignItems="center" flexWrap="wrap">
                 <Text>
-                  Pool: {list.length} {list.length === 1 ? 'slot' : 'slots'}, {idle} ready
+                  <Text color={idle > 0 ? 'success' : 'warning'}>● </Text>
+                  <Text>
+                    Pool: {list.length} {list.length === 1 ? 'slot' : 'slots'}, {idle} ready
+                  </Text>
+                  {note !== '' && <Text dimColor> · {note}</Text>}
                 </Text>
-                {note !== '' && <Text dimColor> · {note}</Text>}
-              </Text>
+                <Button key="pool-more" label="Warm one more" dimColor onPress={() => void warmOneMore($, options, list.length)} />
+              </Box>
             )}
           </Box>
           <Box flexShrink={0} gap={1} alignItems="center">
-            <Text dimColor>Perm worktree</Text>
-            {drawnButton(ui, 'auto-worktree', switchArt(isAuto ? 'on' : 'off'), isAuto ? 'Perm worktree on' : 'Perm worktree off', 36, 22, () => void setAuto($, options, !isAuto)) ??
+            <Text dimColor>Use worktrees</Text>
+            {drawnButton(ui, 'auto-worktree', switchArt(isAuto ? 'on' : 'off'), isAuto ? 'Use worktrees: on' : 'Use worktrees: off', 36, 22, () => void setAuto($, options, !isAuto)) ??
               segmented(ui, 'auto-worktree', AUTO_CHOICES, isAuto ? 'on' : 'off', choice => void setAuto($, options, choice === 'on'))}
           </Box>
         </Box>
     )
+
+    // Every slot of this repository's pool, whatever this session is doing.
+    const rich = ui.Svg !== undefined
+    const slotList =
+      list.length === 0 ? null : (
+        <Box key="slot-list" flexDirection="column" gap={rich ? 1 : 0}>
+          {label(ui, `Slots · ${list.length}`)}
+          {list.map(slot =>
+            card(
+              ui,
+              `slot-${slot.path}`,
+              [
+                <Box justifyContent="space-between" alignItems="center" gap={1}>
+                  <Text wrap="truncate-end">
+                    <Text bold>#{slot.path.split('/').pop()}</Text> {slot.branch ?? 'detached'}{' '}
+                    <Text color={slot.isMine ? 'success' : slot.isLeased ? 'warning' : 'inactive'}>{slot.isMine ? '● this session' : slot.isLeased ? '● leased' : '○ free'}</Text>
+                  </Text>
+                  <Box gap={1}>
+                    <Button key={`slot-copy-${slot.path}`} label="Copy path" dimColor onPress={press => void $.ui.copy({ text: slot.path, surface: press.surface })} />
+                    {slot.isLeased && !slot.isMine && (
+                      <Button key={`slot-release-${slot.path}`} label="Release" dimColor onPress={() => void releaseAndRefresh($, slot.path, options)} />
+                    )}
+                  </Box>
+                </Box>,
+              ],
+              { tone: slot.isMine ? 'selected' : 'plain' },
+            ),
+          )}
+        </Box>
+      )
 
     const other = await read($, elsewhere)
     if (state.phase === 'off' && other !== null) {
@@ -975,12 +1028,12 @@ export function registerWorktree(on: On, options: PluginOptions): void {
               <Text wrap="truncate-start">{shortPath(other)}</Text>
             </Box>,
           ])}
+          {slotList}
         </Box>,
       )
     }
 
     if (state.phase === 'off') {
-      const rich = ui.Svg !== undefined
       return frame(
         ui,
         'worktree',
@@ -994,7 +1047,7 @@ export function registerWorktree(on: On, options: PluginOptions): void {
               <Box flexDirection="column" flexShrink={1} flexGrow={1} gap={1}>
                 <Box flexDirection="column">
                   <Text bold>No worktree for this session</Text>
-                  <Text dimColor>{isAuto ? 'This session started before the toggle was on, or outside a main checkout.' : 'Create one for this session now, or turn Perm worktree on for new sessions.'}</Text>
+                  <Text dimColor>{isAuto ? 'This session started before the toggle was on, or outside a main checkout.' : 'Create one for this session now, or turn Use worktrees on for new sessions.'}</Text>
                 </Box>
                 <Box flexDirection="column">
                   <Text dimColor>✓ An isolated branch and folder</Text>
@@ -1007,7 +1060,7 @@ export function registerWorktree(on: On, options: PluginOptions): void {
               </Box>
             </Box>,
           ])}
-          {list.length > 0 && <Text dimColor>{list.length} slots on disk for this repository.</Text>}
+          {slotList}
         </Box>,
       )
     }
@@ -1015,7 +1068,6 @@ export function registerWorktree(on: On, options: PluginOptions): void {
 
     const stage = stageOf(state)
     const { Svg } = ui
-    const rich = Svg !== undefined
     const isReady = state.phase === 'ready'
     const showSteps = !isReady || (await read($, isStepsShown))
     const stepperWidth = Math.max(320, (e.props.bodyColumns - 4) * 8)
@@ -1092,32 +1144,7 @@ export function registerWorktree(on: On, options: PluginOptions): void {
           { tone: state.phase === 'failed' ? 'danger' : isReady ? 'plain' : 'warning' },
         )}
 
-        {list.length > 0 && (
-          <Box flexDirection="column" gap={rich ? 1 : 0}>
-            {label(ui, `Slots · ${list.length}`)}
-            {list.map(slot =>
-              card(
-                ui,
-                `slot-${slot.path}`,
-                [
-                  <Box justifyContent="space-between" alignItems="center" gap={1}>
-                    <Text wrap="truncate-end">
-                      <Text bold>#{slot.path.split('/').pop()}</Text> {slot.branch ?? 'detached'}{' '}
-                      <Text color={slot.isMine ? 'success' : slot.isLeased ? 'warning' : 'inactive'}>{slot.isMine ? '● this session' : slot.isLeased ? '● leased' : '○ free'}</Text>
-                    </Text>
-                    <Box gap={1}>
-                      <Button key={`slot-copy-${slot.path}`} label="Copy path" dimColor onPress={press => void $.ui.copy({ text: slot.path, surface: press.surface })} />
-                      {slot.isLeased && !slot.isMine && (
-                        <Button key={`slot-release-${slot.path}`} label="Release" dimColor onPress={() => void releaseAndRefresh($, slot.path, options)} />
-                      )}
-                    </Box>
-                  </Box>,
-                ],
-                { tone: slot.isMine ? 'selected' : 'plain' },
-              ),
-            )}
-          </Box>
-        )}
+        {slotList}
       </Box>,
     )
   })

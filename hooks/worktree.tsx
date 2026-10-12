@@ -43,7 +43,7 @@ let railHover: string | null = null
 const railTick = atom({ plugin: 'fishstack', key: 'railTick' } as const, 0)
 // The rail's figures for one session, kept in the store under one key.
 const RAIL_STORE_KEY = 'rail'
-type RailKept = { sessionId: string; repliedAt: number | null; tokens: { input: number; output: number } | null }
+type RailKept = { sessionId: string; repliedAt: number | null; tokens: { input: number; output: number; cacheRead?: number; cacheWrite?: number } | null }
 // The worktree this session works in when it is not ours to manage (another
 // tool's, or one made by hand); null in the main checkout or a slot of ours.
 const elsewhere = atom({ plugin: 'fishstack', key: 'elsewhere' } as const, null)
@@ -798,9 +798,13 @@ export function registerWorktree(on: On, options: PluginOptions): void {
           await update($, tokenTotals, () => (kept as RailKept).tokens)
         }
       }
+      // Claude's own counts, as each response reported them: what the cache
+      // served and what was written to it, inside the input sent.
       await update($, tokenTotals, now => ({
         input: (now?.input ?? 0) + used.input_tokens + used.cache_read_input_tokens + used.cache_creation_input_tokens,
         output: (now?.output ?? 0) + used.output_tokens,
+        cacheRead: (now?.cacheRead ?? 0) + used.cache_read_input_tokens,
+        cacheWrite: (now?.cacheWrite ?? 0) + used.cache_creation_input_tokens,
       }))
     }
     const sessionId = await $.session.id()

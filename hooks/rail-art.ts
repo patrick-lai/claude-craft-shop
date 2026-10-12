@@ -21,9 +21,10 @@ export type RailArtFigures = {
   cacheSecondsLeft: number | null
   isWorking: boolean
   cachePercent: number | null
-  // Tokens this session sent and received, summed from each turn's usage;
-  // null before the first turn ends.
-  tokens: { input: number; output: number } | null
+  // Tokens this session sent and received, summed from each turn's usage
+  // (Claude's own counts), with how much of what was sent the prompt cache
+  // served and how much was written to it; null before the first turn ends.
+  tokens: { input: number; output: number; cacheRead?: number; cacheWrite?: number } | null
   // Claude Code's own estimate (/cost): each response priced at its model's
   // API list price. Not what a subscription or plan is billed.
   costUsd: number | null
@@ -60,8 +61,20 @@ function clock(seconds: number): string {
   return `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`
 }
 
+// The cache's hit rate as Claude reported it: the last response's share of
+// input read from the cache, and the session's, summed over its turns.
+export function cacheStats(figures: Pick<RailArtFigures, 'cachePercent' | 'tokens'>): string[] {
+  const stats: string[] = []
+  if (figures.cachePercent !== null) stats.push(`last reply ${figures.cachePercent}% from cache`)
+  const tokens = figures.tokens
+  if (tokens !== null && tokens.cacheRead !== undefined && tokens.input > 0) {
+    stats.push(`session ${Math.round((tokens.cacheRead / tokens.input) * 100)}% (${compact(tokens.cacheRead)} of ${compact(tokens.input)} input tokens)`)
+  }
+  return stats
+}
+
 // A token count as the status line spells one: 812, 48.2k, 1.4M.
-function compact(count: number): string {
+export function compact(count: number): string {
   if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`
   if (count >= 1_000) return `${(count / 1_000).toFixed(count >= 100_000 ? 0 : 1)}k`
   return String(count)
@@ -141,13 +154,14 @@ export function railArt(figures: RailArtFigures, iconOnly: ReadonlySet<Compactab
     const isWarm = figures.isWorking || (left !== null && left > 0)
     const lit = figures.isWorking ? 5 : left === null ? 0 : Math.ceil(left / 60)
     const width = 12 + 14 + 7 + 5 * 6 + 4 * 3 + 12
-    const caption = figures.isWorking
+    const state = figures.isWorking
       ? 'Prompt cache in use'
       : left === null
         ? 'Prompt cache: the gauge starts with the next reply'
         : isWarm
           ? `Cache warm, ${clock(left)} left: replies now are cheaper`
           : 'Cache cold: the next message rereads the chat'
+    const caption = [state, ...cacheStats(figures)].join(' · ')
     pill('cache', width, null, caption, left => {
       const bars = BARS.map((color, index) => `<rect x="${left + 12 + 14 + 7 + index * 9}" y="${mid - 7}" width="6" height="14" rx="3" fill="${index < lit ? color : 'var(--track)'}"/>`).join('')
       return `${flame(left + 12, mid - 7.5, isWarm)}${bars}`
@@ -163,7 +177,9 @@ export function railArt(figures: RailArtFigures, iconOnly: ReadonlySet<Compactab
     const label = cost ?? sent ?? ''
     const width = 12 + 12 + 7 + textWidth(label, 12.5, true) + 14
     const counted = sent === null ? null : `↑ ${sent} sent · ↓ ${received} received`
-    const caption = [counted, cost === null ? null : counted === null ? `${cost} at API list price, not your bill` : 'API list price, not your bill'].filter(Boolean).join(' · ')
+    // Claude Code's /cost prices every response at its model's API list
+    // price, cache reads and writes included at their own rates.
+    const caption = [counted, cost === null ? null : `${counted === null ? `${cost} ` : ''}API list price, cache reads and writes included; not your bill`].filter(Boolean).join(' · ')
     pill('tokens', width, null, caption, left => `${updown(left + 12, mid)}<text x="${left + 12 + 12 + 7}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5" font-weight="600" fill="var(--text)" class="num">${escape(label)}</text>`)
   }
 

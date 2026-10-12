@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { activate, keysOf, mountPane, startSession, world } from './world'
+import { activate, keysOf, mountBand, mountPane, startSession, world } from './world'
 
 test('the tabs switch on press and each draws its empty state', async ($, on) => {
   world(on, { isRepo: false })
@@ -53,10 +53,10 @@ test("the rail's cache gauge runs down for 5 minutes after a reply, then goes co
 
   await $.turn.complete({ turnId: 't1', answer: 'done', durationMs: 1_000, reason: 'answer', isAborted: false })
   await band.redraw()
-  expect(await cache()).toBe('Cache warm 5:00')
+  expect(await cache()).toBe('Cache warm 5:00 · 93% hit')
   await clock.advance(3 * 60_000 + 10_000)
   await band.redraw()
-  expect(await cache()).toBe('Cache warm 1:50')
+  expect(await cache()).toBe('Cache warm 1:50 · 93% hit')
   await clock.advance(2 * 60_000)
   await band.redraw()
   expect(await cache()).toBe('Cache cold')
@@ -126,7 +126,7 @@ test('on the desktop each rail pill is a picture whose hover the surface lights 
     await band.redraw()
   }
   await point('tokens', 'enter')
-  expect(await lit()).toEqual({ hot: ['tokens'], caption: '↑ 112k sent · ↓ 1.6k received · API list price, not your bill' })
+  expect(await lit()).toEqual({ hot: ['tokens'], caption: '↑ 112k sent · ↓ 1.6k received · API list price, cache reads and writes included; not your bill' })
   // One row: the caption sits beside the pills, and nothing wraps.
   const row = byKey(await band.drawn(), 'rail-row') as { props: Record<string, unknown>; children: { props: { key?: string } }[] }
   expect(row.props).toMatchObject({ flexWrap: 'nowrap', overflow: 'hidden' })
@@ -188,7 +188,7 @@ test('on the desktop the rail fits its one row: the least needed pills give up t
   expect(narrow.width).toBeLessThanOrEqual((55 - 3) * 7)
   expect(narrow.worded).toEqual({ brand: false, cache: false, tokens: true, dials: false, sources: false, worktree: false })
   expect(narrow.svgs[2]!.source).toContain('>≈ $0.42<')
-  expect(narrow.svgs[2]!.alt).toBe('↑ 14.7M sent · ↓ 67.0k received · API list price, not your bill')
+  expect(narrow.svgs[2]!.alt).toBe('↑ 14.7M sent · ↓ 67.0k received · API list price, cache reads and writes included; not your bill')
   // An icon still says what it stands for when hovered.
   expect(narrow.svgs[3]!.alt).toBe('Dials: Balanced · tune how the agent works')
 })
@@ -206,9 +206,28 @@ test('the cache gauge and the cost stay on the rail when the state starts over, 
   })
   const tree = await band.drawn()
   const alt = (id: string) => (byKey(tree, `drawn-rail-${id}-press`) as { children: { props: { alt: string; source: string } }[] }).children[0]!.props
-  expect(alt('cache').alt).toBe('Cache warm, 4:00 left: replies now are cheaper')
+  expect(alt('cache').alt).toBe('Cache warm, 4:00 left: replies now are cheaper · last reply 93% from cache')
   expect(alt('tokens').source).toContain('>≈ $0.42<')
-  expect(alt('tokens').alt).toBe('↑ 20.1M sent · ↓ 86.7k received · API list price, not your bill')
+  expect(alt('tokens').alt).toBe('↑ 20.1M sent · ↓ 86.7k received · API list price, cache reads and writes included; not your bill')
+})
+
+test("the cache's hit rate, the last reply's and the session's, is what Claude reported", async ($, on) => {
+  world(on, { isRepo: false })
+  on('turn.complete', ($, e) => ({ text: e.answer }))
+  await startSession($)
+  // Two turns: 48k of 51.3k read from the cache, then 90k of 100k.
+  for (const usage of [
+    { input_tokens: 1_200, output_tokens: 3_400, cache_read_input_tokens: 48_000, cache_creation_input_tokens: 2_100 },
+    { input_tokens: 4_000, output_tokens: 1_000, cache_read_input_tokens: 90_000, cache_creation_input_tokens: 6_000 },
+  ]) {
+    await $.turn.complete({ turnId: 't', answer: 'done', durationMs: 1_000, reason: 'answer', isAborted: false, usage: { ...usage, model: 'claude-opus-5-5' } } as never)
+  }
+  const band = await mountBand($, 'desktop')
+  const tree = await band.drawn()
+  const caption = (byKey(tree, 'drawn-rail-cache-press') as { children: { props: { alt: string } }[] }).children[0]!.props.alt
+  // The last reply's share is the session's live window (the world reports
+  // 93%); the session's is summed over both turns: 138k of 151.3k.
+  expect(caption).toBe('Cache warm, 5:00 left: replies now are cheaper · last reply 93% from cache · session 91% (138k of 151k input tokens)')
 })
 
 test("another session's kept figures are not this one's: the gauge waits, the cost still shows", async ($, on) => {
@@ -222,8 +241,8 @@ test("another session's kept figures are not this one's: the gauge waits, the co
   })
   const tree = await band.drawn()
   const alt = (id: string) => (byKey(tree, `drawn-rail-${id}-press`) as { children: { props: { alt: string; source: string } }[] }).children[0]!.props
-  expect(alt('cache').alt).toBe('Prompt cache: the gauge starts with the next reply')
-  expect(alt('tokens').alt).toBe('≈ $0.42 at API list price, not your bill')
+  expect(alt('cache').alt).toBe('Prompt cache: the gauge starts with the next reply · last reply 93% from cache')
+  expect(alt('tokens').alt).toBe('≈ $0.42 API list price, cache reads and writes included; not your bill')
 })
 
 test('each rail pill opens its own pane, and the cache and cost open nothing', async ($, on) => {

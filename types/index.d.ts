@@ -73,7 +73,7 @@ declare module 'claude-code' {
       isDialsOn: boolean
       isContextOn: boolean
       lastReplyAt: number | null
-      tokenTotals: { input: number; output: number } | null
+      tokenTotals: { input: number; output: number; cacheRead?: number; cacheWrite?: number } | null
       isBandHidden: boolean
       isStepsShown: boolean
       isHeadStartPrompted: boolean

@@ -16,7 +16,7 @@ export type RailFigures = {
   cacheSecondsLeft: number | null
   // Share of the last request's input the prompt cache served, null before one.
   cachePercent: number | null
-  tokens: { input: number; output: number } | null
+  tokens: { input: number; output: number; cacheRead?: number; cacheWrite?: number } | null
   costUsd: number | null
   preset: string
   presetLevels: number[]
@@ -116,6 +116,7 @@ export function drawRail(ui: Ui, figures: RailFigures, open: (tab: Tab | null) =
               <Text>
                 <Text dimColor>Cache warm </Text>
                 <Text bold>{clock}</Text>
+                {figures.cachePercent !== null && <Text dimColor> · {figures.cachePercent}% hit</Text>}
               </Text>
             ) : (
             <Text dimColor>Cache cold</Text>

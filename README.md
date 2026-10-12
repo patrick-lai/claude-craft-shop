@@ -1,123 +1,198 @@
-# <img src="assets/icon.svg" width="28" height="28" alt=""> Claude fishStack
+<p align="center">
+  <img src="assets/icon.svg" width="84" height="84" alt="fishStack's mark: two pale koi circling a ripple on night blue">
+</p>
 
-A Claude Code mod that adds a **fishStack** pane with three tabs (**Perm worktree · Dials · Context**). It brings three CommissionAI features into Claude Code:
+<h1 align="center">fishStack</h1>
 
-1. **Perm worktree with a read-only head start.** When it is on, each new session claims a lasting worktree slot. The agent reads, searches and plans while the slot is prepared, then the session moves in and the lock lifts. It is off by default.
-2. **Crew dials.** Six dials set how the agent works: Foresight, Crew, Tenacity, Autonomy, Proof and Voice.
-3. **Context.** A library of notes, links and files you share with the agent, each switched On or Off.
+<p align="center">
+  <b>A Claude Code plugin: a worktree for every session, a working style you set once,<br>
+  and notes the agent always reads.</b>
+</p>
 
-![The dials in the desktop app](shots/desktop/dials.png)
+<p align="center">
+  <a href="https://www.npmjs.com/package/claude-fish-stack-mod"><img src="https://img.shields.io/npm/v/claude-fish-stack-mod?color=2fcfa6&label=npm" alt="npm version"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-8f9cff" alt="MIT license"></a>
+  <img src="https://img.shields.io/badge/Claude%20Code-2.1.296%2B-d97757" alt="Claude Code 2.1.296 or newer">
+</p>
+
+<p align="center">
+  <img src="docs/media/rail.gif" width="100%" alt="The fishStack rail above the prompt: prompt cache bars running down, the cost, the dials pill turning amber while Autopilot waits on a question, then green once it answered">
+</p>
+
+If you run Claude Code all day, a few things keep getting in the way:
+
+- **Sessions trip over each other.** Two agents in one checkout edit the same files, and a fresh worktree has no `node_modules`.
+- **You keep repeating yourself.** "Write a spec first." "Don't ask, just decide." "Run the tests." You type it every session.
+- **The agent forgets what matters.** API conventions, the design doc, the ticket: pasted in again and again.
+
+fishStack adds one pane with three tabs, and a status rail above the prompt.
+
+| Tab | What it does |
+| - | - |
+| **[Perm worktree](#perm-worktree)** | Every new session moves into a worktree of its own, already set up, typically in about three seconds. |
+| **[Dials](#dials)** | Six dials set how the agent plans, delegates, persists, asks, proves and talks. On **Autopilot**, a question nobody answers is settled after 15 minutes. |
+| **[Context](#context)** | Notes, links and files the agent reads in every request. Mark one Strict and the agent treats it as ground truth. |
 
 ## Install
 
-At the prompt of a Claude Code terminal session (2.1.296 or newer):
+In Claude Code 2.1.296 or newer:
 
 ```
-/plugin install fishstack --marketplace patrick-lai/claude-fish-stack-mod
+/plugin marketplace add patrick-lai/claude-fish-stack-mod
+/plugin install fishstack@claude-fish-stack-mod
 ```
 
-Answer `y` to add the marketplace, then pick a scope (user scope is first). Next you get a screen of options. The defaults work as they are.
+Or the same from your shell:
 
-fishStack was called Craftshop. Its first session copies what Craftshop saved (dials, context libraries, the Perm worktree switch) into its own store, once, and never over anything fishStack already holds. Options set under `pluginConfigs["craft-shop"]` do not carry over: set them again in `/config`.
+```bash
+claude plugin marketplace add patrick-lai/claude-fish-stack-mod
+claude plugin install fishstack@claude-fish-stack-mod
+```
 
-Open the pane with `/fishstack` (or `/fs` for short), or `/fishstack worktree|dials|context` to go straight to a tab. The pane opens by itself where the surface docks panes: the desktop app, and the terminal's fullscreen layout (`/tui fullscreen`). Keys `1`–`3` switch tabs while the pane has focus.
+Restart Claude Code, then open the pane with **`/fs`** (or `/fishstack`). `/fs dials` goes straight to a tab. Keys <kbd>1</kbd>–<kbd>3</kbd> switch tabs.
 
-The rail above the prompt shows fishStack's status at a glance:
-- the prompt cache: a flame and five bars that run down over the 5 minutes after each reply, as in CommissionAI. While they last, your next message reuses the cached chat, so it is faster and cheaper. Hover it for details;
-- tokens sent and received, with Claude Code's ≈ $ estimate at API list prices (not a plan's bill);
-- the dials preset;
-- how many sources are on;
-- the worktree's branch.
-
-In the desktop app each pill is drawn with its icon; hover one and it lights, with a line about it in the row above (always there, so nothing moves), and click it to open its tab. In the terminal it is text, and each item opens its tab too. The rail starts with **fishStack**, which opens the pane. While a worktree is being prepared, the rail shows its progress instead.
-
-## Options
-
-| Option | Default | What it does |
-| - | - | - |
-| `autoWorktree` | `false` | The Perm worktree toggle's starting value. Once you press the toggle, your choice is kept across sessions. |
-| `worktreeRoot` | `~/.fishstack/worktrees` | Where slots live: `<root>/<repo>-<hash>/<n>`. |
-| `setupCommand` | empty | Runs in a new slot before the session moves in (`pnpm install`, say). Times out after 10 minutes. |
-
-Change them in `/config`. They are also stored in settings under `pluginConfigs["fishstack"].options`.
+fishStack is built and tested on macOS: copy-on-write cloning and the file pickers use macOS tools.
 
 ## Perm worktree
 
-![Perm worktree tab after the move](shots/desktop/worktree-ready.png)
+<p align="center">
+  <img src="docs/media/claim.gif" width="100%" alt="Real Claude Code in a terminal: a new session claims a warm slot, moves in on its own branch, and answers a question">
+</p>
 
-The tab's toggle is **Off** by default. While it is off, fishStack leaves worktrees to Claude Code: the desktop app's worktree option, `claude --worktree` and `EnterWorktree` work as they always do, and the session is never locked. **Create worktree now** claims a slot for the current session.
+Perm worktree (as in permanent) gives each new session a worktree of its own, on its own `fish/…` branch, and keeps the worktrees around to reuse. Your main checkout stays untouched. It is off until you turn it on.
 
-While it is **On**:
+It's fast because the work happens before you need it:
 
-- **A session started in a repository's main checkout** claims a slot in the background. Prompts work right away, but the session is read-only until the slot is ready.
-- **A worktree Claude Code creates** goes to fishStack too. `claude --worktree <name>` and the desktop app's **worktree** option make theirs (`.claude/worktrees/<name>`) before any mod loads, so a session that starts in one is adopted: it claims a slot on `fish/<name>`, stays read-only until the slot is ready, then moves in. `EnterWorktree` with a name mid-session goes through the mod's `WorktreeCreate` hook, and Claude Code enters a claimed slot instead of a throwaway worktree.
-- **A warm pool**, as CommissionAI keeps one. Turning the toggle on makes three slots in the background, one at a time, each seeded and set up before any session needs it; after every claim the pool tops up so one spare waits. It pauses below 20 GB of free disk. The tab shows **Pool: N slots, M ready**.
+- **A warm pool.** fishStack keeps a pool of slots in the background (three to start, with one always free), each checked out, with dependencies in place and your setup command already run. A new session takes one and moves in. In the run above that took about three seconds from launch.
+- **A head start.** While the slot is prepared, the agent can already read, search and plan. Anything that writes waits until it has moved in.
+- **No copying.** `node_modules` is cloned copy-on-write (APFS), so a slot costs almost no disk until something changes.
+- **Nothing lost.** A slot is reused once its session ends. Anything left uncommitted is saved under `refs/fish/backup/` first.
 
-Preparing a slot takes four steps, made the way CommissionAI makes them:
+It works with Claude Code's own worktrees too. `claude --worktree feat-x` and the desktop app's worktree option land in a slot on `fish/feat-x`.
 
-1. **Fetch.** Runs `git fetch origin <default>`. If the fetch fails, it starts from the local default branch and shows a warning.
-2. **Claim a slot.** Under a per-repository lock (an atomic `mkdir`, broken after 30 s if its holder died), picks an idle slot (no live lease, listed in `git worktree list`) or the next number. A new slot is `git worktree add --detach --no-checkout` at the base, then `reset --hard` with `core.checkStat=minimal`, then its index is warmed. A used one is scrubbed first: anything left uncommitted is kept under `refs/fish/backup/<slot>-<time>` (`git stash create`), then `reset --hard`, `clean -fd` (ignored files such as `node_modules` stay) and `checkout --detach`. Then `git checkout -B fish/<name>`. Git hooks never run on these writes.
-3. **Seed dependencies.** Every `node_modules` (six folders deep at most) missing from the slot is cloned copy-on-write (`cp -c -p -R`, APFS `clonefile`, so it costs no disk until a file changes) into a staging folder and renamed into place, from an idle sibling slot pinned to the same lockfiles or else the main checkout. Then `setupCommand` runs, unless it already ran in this slot with these lockfiles.
-4. **Move in.** Calls `EnterWorktree` on the slot as soon as it is ready, even mid-turn, as the agent could itself. Claude Code asks you once to confirm the move, because the slot is outside `.claude/worktrees/`. If you prompted during the head start, the agent then gets a note to carry on from its plan.
+<p align="center">
+  <img src="docs/media/worktree-desktop.png" width="760" alt="The Perm worktree tab in the desktop app: the switch on, the pool's status, this session's slot and branch, and the slots list">
+</p>
 
-![An early prompt during the head start](shots/02-early-prompt.png)
+<details>
+<summary><b>How a slot is made</b></summary>
 
-While the session is read-only, the guard refuses Edit, Write, MultiEdit, NotebookEdit, ExitPlanMode and any Bash command that is not a known read. Allowed reads include `ls`, `cat`, `rg`, read-only `git` subcommands, `find` without `-exec` or `-delete`, and `sed -n`. Chaining is allowed only between such reads. A redirect anywhere except `/dev/null` is refused. The band above the prompt shows the current step, and a failure gets a **Retry** button.
+1. **Fetch.** `git fetch origin <default>`. If that fails, it starts from the local branch and says so.
+2. **Claim.** Under a per-repository lock (an atomic `mkdir`, broken after 30 s if its holder died), it takes an idle slot or makes the next one. A new slot is `git worktree add --detach --no-checkout`, then `reset --hard` with `core.checkStat=minimal`, then an index warm-up. A used slot is scrubbed: uncommitted work goes to `refs/fish/backup/<slot>-<time>`, then `reset --hard`, `clean -fd` (ignored files such as `node_modules` stay) and `checkout -B fish/<name>`. Git hooks never run on these writes.
+3. **Seed.** Each missing `node_modules` (up to six folders deep) is cloned with `cp -c` into a staging folder, then renamed into place. The source is an idle sibling slot with the same lockfiles, or else the main checkout. Then `setupCommand` runs, unless this slot already ran it with these lockfiles.
+4. **Move in.** The session enters the slot (`EnterWorktree`) as soon as it is ready, even mid-turn. Claude Code asks you once to confirm, because the slot sits outside `.claude/worktrees/`.
 
-A slot's lease ends with its session. The branch and the work stay on disk, and the tab lists every slot with **Copy path** and **Release**.
+The pool stops warming when free disk drops under `minFreeGb` (20 GB), and the tab says why. During the head start, the guard refuses Edit, Write, MultiEdit, NotebookEdit and ExitPlanMode. It also refuses any shell command that is not a known read (`ls`, `cat`, `rg`, read-only `git`, `sed -n` and the like). A redirect anywhere but `/dev/null` counts as a write.
+</details>
 
 ## Dials
 
-Pick a preset (**Balanced**, **Quick**, **Deep work**, **Autopilot**), or set each dial with **−** and **+**. In the desktop app, a radar chart shows the six dials. Drag a dial's dot in or out along its spoke to set its level. Click the radar, then use ← and → to move between dials and ↑ and ↓ to change a level. Beside the radar are CommissionAI's estimates of **Spend**, **Time to done** and how often the agent asks you.
+<p align="center">
+  <img src="docs/media/dials.gif" width="100%" alt="The Dials tab in the desktop app: the radar reshapes as the presets change from Balanced to Quick, Deep work and Autopilot">
+</p>
 
-Select a dial to see the instruction its level gives, and preview the other levels. **What agents are told** shows the whole brief. The levels carry over between sessions.
+Six dials, each with five levels, become a short **Working style** brief in the agent's system prompt:
 
-The brief is added to the system prompt as a "Working style" section. Claude Code keeps a session's first system prompt for every request, so a change made mid-session reaches the agent as a note on your next prompt. Setting **Crew** to Solo also refuses the Agent tool.
+| Dial | 1 | 2 · 3 · 4 | 5 |
+| - | - | - | - |
+| **Foresight** | Dive in | Sketch · Plan steps · Write a spec | Deep spec |
+| **Crew** | Solo | Scouts · Helpers · Squads | Swarm |
+| **Tenacity** | One pass | Retry once · Push through · Checklist | Goal mode |
+| **Autonomy** | Ask first | Check in · When unsure · Decide, note | Autopilot |
+| **Proof** | Trust | Compile · Run tests · Component QA | Full QA |
+| **Voice** | Silent | Terse · Normal · Explain | Teach |
 
-**Autopilot answers when you are away.** With Autonomy on **Autopilot**, a question the agent asks (AskUserQuestion) that nobody answers within `autoAnswerMinutes` (15 by default) is answered for you: each choice takes the option labelled *(Recommended)*, or else the first; a number takes its default; free text is left open. The agent is told no person chose (the answer carries `afkTimeoutMs`), and you get a notification saying what was picked. Answer first, or lower the dial, and nothing is picked. Autopilot's brief tells the agent to put its recommended option first.
+Start from a preset (**Balanced**, **Quick**, **Deep work**, **Autopilot**), then nudge single dials. On the desktop you can drag the radar's points. The estimates beside the radar show what a setting costs you in spend, time to done, and how often the agent will ask you.
+
+A change takes effect right away, even mid-turn: the agent picks it up before its next request. **What agents are told** shows the exact brief.
+
+### Autopilot answers when you're away
+
+<p align="center">
+  <img src="docs/media/autopilot.gif" width="100%" alt="Real Claude Code: on Autopilot the agent asks a question, a line under it counts down, nobody answers, and Autopilot picks the recommended option">
+</p>
+
+Autopilot is the top Autonomy level: the agent works as if you're away. It decides open questions itself, clears its own blockers, may use other apps and connected tools, and never deletes data.
+
+If it still asks you something and nobody answers, the question isn't left hanging overnight. After 15 minutes (`autoAnswerMinutes`), Autopilot picks the option marked *(Recommended)*, or the first one. The agent is told that no person chose, and carries on.
+
+While Autopilot waits, the dials pill on the rail turns amber with a ring that runs down, and its tooltip says what it will pick. Once it has answered, the pill turns green with a check until you type again. Answer yourself, or lower the dial, and nothing is picked.
 
 ## Context
 
-![Context tab with a chosen folder](shots/desktop/context-library.png)
+<p align="center">
+  <img src="docs/media/context.gif" width="100%" alt="Real Claude Code: a note added in the Context tab and marked Strict, then the agent names a new field in snake_case because of it">
+</p>
 
-The Context tab holds the sources the agent reads. It is kept per repository.
+Add the things the agent should always know: a note, a link (fetched as text), a file, or a whole folder from **Choose folder…**. Each source has an **On/Off** switch. A **Strict** source is binding: if the code disagrees, the agent has to say so. A meter keeps the total near a 12k-token budget, and a footer shows how full the context window is.
 
-- **Add.**
-  - **Choose files…** opens the macOS file dialog. Pick one or more text files, in the repository or anywhere on your Mac.
-  - **Choose folder…** brings a folder's text files (up to 40) in as one group. It is a group in fishStack only; nothing is made on disk.
-  - The field below takes the rest. A link (`https://…`) is fetched as text, 12,000 characters at most. A repository path is read too. Anything else becomes a note.
+Libraries are kept per repository and reach the agent as a **Project context** section, every request.
 
-  The dialogs run through `osascript`, so they need Claude Code running on a Mac. Elsewhere, type a path in the field.
-- **On or Off.** Each source has a switch. A source that is On also has a **Strict** pill. Strict sources are binding ground truth, and the agent must say so if the code disagrees. The others guide the agent.
-- **Folders.** A folder you chose is one group with one switch: it turns all its sources on or off, and reads **Some on** when they differ. **Remove** takes the group and its sources out of fishStack; the files on disk stay.
-- **Details.** Click a source's title to see its text, rename it, edit a note, refresh a link or file, or delete it.
-- **Meter and window.** The meter counts the sources that are On against a budget of about 12k tokens. A footer shows the live context window (amber from 65%, red from 85%), with **Details** for tokens per category and **Compact**.
+<p align="center">
+  <img src="docs/media/context-desktop.png" width="760" alt="The Context tab in the desktop app: a folder group and notes, each with its switch, the token meter and the context window">
+</p>
 
-The agent gets the sources that are On as a "Project context" section. Each is headed `Folder › Title` and marked Strict or Guidance. A change made mid-session reaches the agent with your next prompt.
+## The rail
 
-In the desktop app the pane draws its meters, icons and charts as SVG. The terminal draws them as text.
+The rail is one row of pills above the prompt, and it stays one row at any window width. In the desktop app, hover a pill for details (nothing shifts) and click it to open its tab.
+
+| Pill | Shows |
+| - | - |
+| **Mark** | Opens fishStack. |
+| **Cache** | The prompt cache. Five bars run down over the five minutes after a reply. While any are lit, your next message reuses the cache, so it's faster and cheaper. |
+| **Cost** | Claude Code's own estimate at API list prices, which isn't your plan's bill. Tokens in and out on hover. |
+| **Dials** | The preset. Amber while Autopilot waits to answer for you, green once it has. |
+| **Context** | How many sources are on. |
+| **Worktree** | The branch this session works on. |
+
+In the terminal the rail is plain text, and the same items open the same tabs.
+
+## Options
+
+Set them in `/config`. They're stored under `pluginConfigs["fishstack"].options`.
+
+| Option | Default | What it does |
+| - | - | - |
+| `autoWorktree` | `false` | Perm worktree's starting value. Once you flip the switch, your choice sticks. |
+| `worktreeRoot` | `~/.fishstack/worktrees` | Where slots live: `<root>/<repo>-<hash>/<n>`. |
+| `setupCommand` | empty | Runs in a new slot before the session moves in, `pnpm install` say. Times out after 10 minutes. |
+| `minFreeGb` | `20` | The pool stops warming below this much free disk. |
+| `autoAnswerMinutes` | `15` | How long Autopilot waits before answering for you. |
+
+<details>
+<summary><b>Coming from Craftshop?</b></summary>
+
+fishStack was called Craftshop. Its first session copies what Craftshop saved (dials, context libraries, the Perm worktree switch) into its own store, once, and never over anything fishStack already holds. Options set under `pluginConfigs["craft-shop"]` don't carry over, so set them again in `/config`.
+</details>
 
 ## Develop
 
-```sh
-claude plugin validate .        # manifest, marketplace and hooks module
-claude plugin test .            # tests/*.test.ts, UI on terminal and desktop
-claude --plugin-dir .           # run it; saves hot-reload
-tsc -p .                        # once Claude Code has loaded the mod and laid its types
-e2e/drive.sh                    # end to end in tmux (needs tmux and node)
-e2e/shots.sh                    # turn its captures into HTML pages (needs aha)
-e2e/shoot.sh                    # draw every tab on the desktop surface and screenshot it (needs Chrome)
+```bash
+claude plugin test .
 ```
 
-`tests/desktop.test.ts` draws every tab on the desktop surface with real content and fails if the desktop would refuse any tree. `tests/dials.test.ts` drags the radar's dots with pointer events, as a person on the desktop would. `e2e/shoot.sh` turns those trees into pages laid out like the desktop pane and screenshots them into `e2e/out/preview/png`. The page is an approximation of the desktop's own paint, close enough to judge layout. `shots/desktop/` holds the latest set.
+That runs the tests in `tests/`, drawing the UI on both the terminal and the desktop. More:
 
-`e2e/setup.sh` builds a fixture: a bare origin, plus a clone of it. `e2e/drive.sh` starts Claude Code with this mod in a 200×50 tmux session, in the fullscreen layout, with Perm worktree on. It then checks each feature as a person would: the read-only band and the held-back early write, the move into the slot, the dials echoed back by the agent, a strict note, and the agent citing it.
+```sh
+claude plugin validate .      # manifest, marketplace and hooks module
+claude --plugin-dir .         # run it; saving hot-reloads
+e2e/drive.sh                  # end to end against real Claude Code in tmux
+e2e/shoot.sh                  # every desktop tab, screenshotted
+e2e/reel/scenes.sh            # record this README's terminal scenes from real Claude Code
+e2e/reel/media.sh             # draw every picture in docs/media
+```
+
+`e2e/drive.sh` checks every feature as a person would, against a fixture repository: the pool warms, a session claims a slot and its writes land there, the next session reuses it with a backup, dials (mid-turn too) and a Strict note reach the agent, Autopilot answers an unanswered question, and `claude --worktree` comes up in a slot.
+
+The README's media come from two places:
+
+- **Terminal GIFs** (`claim`, `autopilot`, `context`): real Claude Code with this plugin, recorded in tmux by `e2e/reel/scenes.sh`.
+- **Desktop pictures** (`rail`, `dials`, the two panes): the desktop's own UI trees, drawn by the tests in `tests/media.test.ts` and `tests/desktop.test.ts` and laid out as the desktop pane. These are close to the app's own paint, not screenshots of it.
 
 ## The mark
 
-fishStack's mark is "Moonlit": two pale koi chasing round a ripple on night water, a school of two. It is drawn in one place, `hooks/brand.ts`, and `node e2e/brand.mjs` writes it out:
+"Moonlit": two pale koi circling a ripple on night water, a school of two. It's drawn in code in `hooks/brand.ts`, and `node e2e/brand.mjs` writes [`assets/icon.svg`](assets/icon.svg) and a one-colour menu-bar version, [`assets/icon-template.svg`](assets/icon-template.svg).
 
-- `assets/icon.svg`: full colour. The koi have eyes where the mark is drawn at 32px or more.
-- `assets/icon-template.svg`: one colour, black on clear, with fuller fish and no eyes, for a macOS menu-bar (template) icon.
+## License
 
-The rail shows the mark alone; the name is in the pane.
+[MIT](LICENSE) © Patrick Lai

@@ -28,10 +28,27 @@ test('media: the dials, preset by preset', async ($, on) => {
   }
 })
 
-test('media: the rail, from a reply to an answer Autopilot gave', async ($, on) => {
-  const { clock } = world(on, { isRepo: false, store: { dials: AUTOPILOT } })
+// Three notes on, as a person's library might hold them.
+const LIBRARY = {
+  sources: ['Every JSON response uses snake_case keys.', 'Money is integer cents, never floats.', 'Errors are { error: string }.'].map((text, index) => ({
+    id: `n${index}`,
+    kind: 'note',
+    title: text,
+    text,
+    url: null,
+    path: null,
+    mode: index === 0 ? 'strict' : 'guidance',
+    folderId: null,
+  })),
+  folders: [],
+}
+
+test('media: the rail, from a reply to an answer Autopilot gave', { options: { autoWorktree: true } }, async ($, on) => {
+  const { clock } = world(on, { store: { dials: AUTOPILOT, 'context:/repo': LIBRARY } })
   on('turn.complete', ($, e) => ({ text: e.answer }))
   await startSession($)
+  // The session in its slot, its first reply in: the band gives way to the rail.
+  await clock.advance(1)
   await $.turn.complete(TURN as never)
   const band = await mountBand($, 'desktop')
   const point = async (id: string | null, last: string | null) => {

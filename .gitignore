@@ -4,3 +4,4 @@
 .claude-plugin/types/
 node_modules/
 e2e/out/
+e2e/reel/out/

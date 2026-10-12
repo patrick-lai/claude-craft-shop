@@ -80,7 +80,7 @@ test('with no worktree news the band is a status rail whose items open their tab
   expect(await band.find({ type: 'Button', key: 'open-craftshop' })).toBeUndefined()
 })
 
-test('on the desktop the rail is one picture: hovering a pill captions it, pressing opens its tab', async ($, on) => {
+test('on the desktop the rail is one picture: hovering lights a pill without moving it, pressing opens its tab', async ($, on) => {
   world(on, { isRepo: false })
   await startSession($)
   const band = await $.ui.mount({
@@ -102,7 +102,9 @@ test('on the desktop the rail is one picture: hovering a pill captions it, press
   const x = Math.floor(((dials.x0 + dials.x1) / 2 / width) * 60)
   await band.pointer({ type: 'move', x, y: 0, in: 'rail-click' })
   await band.redraw()
-  expect(await band.find({ text: /Dials: Balanced/ })).toBeDefined()
+  const lit = (await band.find({ type: 'Svg' }))!.props as { source: string }
+  expect(lit.source.match(/class="pill hot"/g)).toHaveLength(1)
+  expect(await band.find({ text: /Dials: Balanced/ })).toBeUndefined()
   await band.pointer({ type: 'down', x, y: 0, button: 'left', in: 'rail-click' })
   const pane = await mountPane($, 'desktop')
   expect(await pane.find({ type: 'Button', key: 'dial-foresight' })).toBeDefined()

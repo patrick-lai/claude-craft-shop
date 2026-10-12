@@ -93,8 +93,7 @@ export function railArt(figures: RailArtFigures, hover: number | null, showsBran
     const left = figures.cacheSecondsLeft
     const isWarm = figures.isWorking || left > 0
     const lit = figures.isWorking ? 5 : Math.ceil(left / 60)
-    const label = figures.isWorking ? 'In use' : isWarm ? clock(left) : 'Cold'
-    const width = 12 + 14 + 7 + 5 * 6 + 4 * 3 + 9 + textWidth(label, 12.5, true) + 14
+    const width = 12 + 14 + 7 + 5 * 6 + 4 * 3 + 12
     const caption = figures.isWorking
       ? 'Prompt cache in use: the agent is working, reusing your chat from the cache.'
       : isWarm
@@ -102,7 +101,7 @@ export function railArt(figures: RailArtFigures, hover: number | null, showsBran
         : 'Prompt cache cold: more than 5 minutes since the last reply, so the next message reads the whole chat again.'
     segment(width, 'context', caption + (figures.cachePercent === null ? '' : ` Last request: ${figures.cachePercent}% from the cache.`), left => {
       const bars = BARS.map((color, index) => `<rect x="${left + 12 + 14 + 7 + index * 9}" y="${mid - 7}" width="6" height="14" rx="3" fill="${index < lit ? color : 'var(--track)'}"/>`).join('')
-      return `${flame(left + 12, mid - 7.5, isWarm)}${bars}<text x="${left + 12 + 14 + 7 + 45 + 9}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5" font-weight="${isWarm ? 650 : 500}" fill="${isWarm ? 'var(--text)' : 'var(--dim)'}" class="num">${label}</text>`
+      return `${flame(left + 12, mid - 7.5, isWarm)}${bars}`
     })
   }
 

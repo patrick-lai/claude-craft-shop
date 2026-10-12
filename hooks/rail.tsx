@@ -24,7 +24,8 @@ export type RailFigures = {
 }
 
 // On the desktop the rail is one picture with a Client over it for presses
-// and hovers; the hovered segment's caption shows beneath it.
+// and hovers. A hover lights its pill and changes nothing else: a row that
+// came and went with it moved the rail under the pointer, which flickered.
 export function drawRail(
   ui: Ui,
   figures: RailFigures,
@@ -35,7 +36,6 @@ export function drawRail(
   const { Box, Text, Button, Svg } = ui
   if (Svg !== undefined && Client !== undefined) {
     const art = railArt(figures, hover, !figures.isPaneOpen)
-    const caption = hover === null ? null : (art.segments[hover]?.caption ?? null)
     return (
       <Box flexDirection="column">
         <Box key="rail-art" position="relative">
@@ -50,7 +50,6 @@ export function drawRail(
             />
           </Box>
         </Box>
-        {caption !== null && <Text dimColor>{caption}</Text>}
       </Box>
     )
   }

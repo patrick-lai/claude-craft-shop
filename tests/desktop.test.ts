@@ -70,6 +70,14 @@ test('every tab draws on the desktop with content in it', async ($, on) => {
   await band.pointer({ type: 'enter', x: 5, y: 0, in: 'rail-tokens-press' })
   await band.redraw()
   await show(band, 'rail-hover')
+  // About 490px, as a narrow window leaves the composer.
+  const narrow = await $.ui.mount({
+    plugin: 'craft-shop',
+    surface: 'desktop',
+    component: 'AbovePrompt',
+    props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 70, scroll: { offset: 0, bodyRows: 10 }, view: {} },
+  })
+  await show(narrow, 'rail-narrow')
 })
 
 test('the worktree tab draws its steps and slots on the desktop', { options: { autoWorktree: true } }, async ($, on) => {

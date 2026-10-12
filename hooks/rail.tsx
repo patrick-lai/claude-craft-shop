@@ -5,7 +5,8 @@ import type { RenderElement } from 'claude-code'
 
 import type { Tab } from '../types'
 import { cacheGauge, drawnButton } from './kit'
-import { railArt } from './rail-art'
+import { COMPACTABLE, railArt } from './rail-art'
+import type { Compactable, RailPill } from './rail-art'
 import { tokens } from './ui'
 import type { Ui } from './ui'
 
@@ -24,15 +25,36 @@ export type RailFigures = {
   branch: string | null
 }
 
+// A desktop cell's width in pixels, guessed low: the band is measured in the
+// code font's advance (about 7.8px at 13px), and a low guess compacts a pill
+// early where a high one would clip it.
+const CELL_PX = 7
+
+// The pills as wide as the band allows: the least needed give up their words,
+// one at a time, until the row fits with a few cells to spare. It reads only
+// the width and the figures, never the layout, so it cannot flap.
+export function fitPills(figures: RailFigures, columns: number): RailPill[] {
+  const budget = (columns - 3) * CELL_PX
+  const compact = new Set<Compactable>()
+  let pills = railArt(figures, compact)
+  const width = () => pills.reduce((sum, pill) => sum + pill.width, 0) + (pills.length - 1) * CELL_PX
+  for (const id of COMPACTABLE) {
+    if (width() <= budget) break
+    compact.add(id)
+    pills = railArt(figures, compact)
+  }
+  return pills
+}
+
 // On the desktop the rail is one row: each pill its own picture with a Client
 // over it for the press and the hover (kit.tsx's drawnButton), then the
 // hovered pill's caption in the room left. The lit pill is the same size and
 // the caption's box is sized by the row, not its text, so nothing moves. A
 // narrow row clips the last pills; it never wraps.
-export function drawRail(ui: Ui, figures: RailFigures, open: (tab: Tab | null) => void, hover: string | null, onHover: (id: string, isOn: boolean) => void) {
+export function drawRail(ui: Ui, figures: RailFigures, open: (tab: Tab | null) => void, hover: string | null, onHover: (id: string, isOn: boolean) => void, columns: number) {
   const { Box, Text, Button, Svg } = ui
   if (Svg !== undefined && ui.Client !== undefined) {
-    const pills = railArt(figures)
+    const pills = fitPills(figures, columns)
     const caption = pills.find(pill => pill.id === hover)?.caption ?? ''
     return (
       <Box key="rail-row" gap={1} alignItems="center" flexWrap="nowrap" overflow="hidden">

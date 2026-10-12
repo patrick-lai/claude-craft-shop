@@ -542,6 +542,7 @@ export function registerWorktree(on: On, options: PluginOptions): void {
           railHover = hovered
           $.ui.invalidate('ui.render')
         },
+        e.props.bodyColumns,
       )
     }
 

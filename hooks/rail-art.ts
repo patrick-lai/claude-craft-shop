@@ -86,7 +86,13 @@ function branch(x: number, y: number, isOn: boolean): string {
   return `<g transform="translate(${x} ${y})" fill="none" stroke="${color}" stroke-width="1.4" stroke-linecap="round"><circle cx="3.5" cy="2.5" r="1.8"/><circle cx="3.5" cy="12" r="1.8"/><circle cx="11" cy="4.5" r="1.8"/><path d="M3.5 4.3v5.9M11 6.3c0 3-3.2 2.8-6.3 4.2"/></g>`
 }
 
-export function railArt(figures: RailArtFigures): RailPill[] {
+// The pills that can give up their words for the rail to fit one row, in the
+// order they do: four to their icon, then the tokens to what was sent and the
+// cost (what came back moves to the caption). The cache gauge never does.
+export const COMPACTABLE = ['brand', 'worktree', 'sources', 'dials', 'tokens'] as const
+export type Compactable = (typeof COMPACTABLE)[number]
+
+export function railArt(figures: RailArtFigures, iconOnly: ReadonlySet<Compactable> = new Set()): RailPill[] {
   const pills: RailPill[] = []
   const mid = HEIGHT / 2
 
@@ -103,8 +109,9 @@ export function railArt(figures: RailArtFigures): RailPill[] {
 
   {
     const word = 'Craftshop'
-    const width = 12 + 18 + 7 + textWidth(word, 13.5, true) + 14
-    pill('brand', width, 'pane', 'Open Craftshop', left => `${anvil(left + 12, mid - 8)}<text x="${left + 12 + 18 + 7}" y="${mid + 4.6}" font-family="${ROUNDED}" font-size="13.5" font-weight="700" fill="url(#brandText)" letter-spacing="0.1">${word}</text>`)
+    const isIcon = iconOnly.has('brand')
+    const width = isIcon ? 12 + 18 + 10 : 12 + 18 + 7 + textWidth(word, 13.5, true) + 14
+    pill('brand', width, 'pane', 'Open Craftshop', left => isIcon ? anvil(left + 12, mid - 8) : `${anvil(left + 12, mid - 8)}<text x="${left + 12 + 18 + 7}" y="${mid + 4.6}" font-family="${ROUNDED}" font-size="13.5" font-weight="700" fill="url(#brandText)" letter-spacing="0.1">${word}</text>`)
   }
 
   if (figures.cacheSecondsLeft !== null) {
@@ -127,34 +134,42 @@ export function railArt(figures: RailArtFigures): RailPill[] {
     const sent = compact(figures.tokens.input)
     const received = compact(figures.tokens.output)
     const cost = figures.costUsd === null ? null : `≈ $${figures.costUsd.toFixed(2)}`
+    const isShort = iconOnly.has('tokens')
     const outX = 12 + 14 + textWidth(sent, 12.5, true) + 12
-    const costX = outX + 14 + textWidth(received, 12.5, true) + 10
+    const costX = isShort ? outX : outX + 14 + textWidth(received, 12.5, true) + 10
     const width = (cost === null ? costX - 10 : costX + 10 + textWidth(cost, 12.5)) + 12
-    const caption = cost === null ? `${sent} tokens sent, ${received} received` : `${cost} at API list prices, not your bill`
+    const caption = isShort
+      ? `↓ ${received} received` + (cost === null ? '' : ` · ${cost} at API list prices, not your bill`)
+      : cost === null
+        ? `${sent} tokens sent, ${received} received`
+        : `${cost} at API list prices, not your bill`
     pill('tokens', width, 'context', caption, left => {
       const text = (x: number, value: string) => `<text x="${left + x}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5" font-weight="600" fill="var(--text)" class="num">${value}</text>`
       const spend = cost === null ? '' : `<rect x="${left + costX - 0.5}" y="${mid - 7}" width="1" height="14" fill="var(--pillLine)"/><text x="${left + costX + 10}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5" fill="var(--dim)" class="num">${escape(cost)}</text>`
-      return `${arrow(left + 12, mid, true)}${text(12 + 14, sent)}${arrow(left + outX, mid, false)}${text(outX + 14, received)}${spend}`
+      const back = isShort ? '' : `${arrow(left + outX, mid, false)}${text(outX + 14, received)}`
+      return `${arrow(left + 12, mid, true)}${text(12 + 14, sent)}${back}${spend}`
     })
   }
 
   {
     const label = figures.preset
-    const width = 12 + 14 + 7 + textWidth(label, 12.5, true) + 14
-    pill('dials', width, 'dials', 'Tune how the agent works', left => `${radarMini(left + 12, mid - 7, figures.presetLevels)}<text x="${left + 12 + 14 + 7}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5" font-weight="600" fill="var(--text)">${escape(label)}</text>`)
+    const isIcon = iconOnly.has('dials')
+    const width = isIcon ? 12 + 14 + 12 : 12 + 14 + 7 + textWidth(label, 12.5, true) + 14
+    pill('dials', width, 'dials', `Dials: ${label} · tune how the agent works`, left => isIcon ? radarMini(left + 12, mid - 7, figures.presetLevels) : `${radarMini(left + 12, mid - 7, figures.presetLevels)}<text x="${left + 12 + 14 + 7}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5" font-weight="600" fill="var(--text)">${escape(label)}</text>`)
   }
 
   {
     const count = figures.sourcesTotal === figures.sourcesOn ? String(figures.sourcesOn) : `${figures.sourcesOn}/${figures.sourcesTotal}`
-    const word = figures.sourcesTotal === 1 ? ' source' : ' sources'
+    const word = iconOnly.has('sources') ? '' : figures.sourcesTotal === 1 ? ' source' : ' sources'
     const width = 12 + 14 + 7 + textWidth(count, 12.5, true) + textWidth(word, 12.5) + 14
     pill('sources', width, 'context', figures.sourcesTotal === 0 ? 'Add files, links or notes' : `${figures.sourcesOn} of ${figures.sourcesTotal} sources reach the agent`, left => `${pages(left + 12, mid - 7.5)}<text x="${left + 12 + 14 + 7}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5"><tspan font-weight="650" fill="var(--text)">${count}</tspan><tspan fill="var(--dim)">${word}</tspan></text>`)
   }
 
   {
     const label = figures.branch ?? 'No worktree'
-    const width = 12 + 14 + 7 + textWidth(label, 12.5, figures.branch !== null) + 14
-    pill('worktree', width, 'worktree', figures.branch === null ? 'Perm worktree is off' : `Working in perm worktree ${figures.branch}`, left => `${branch(left + 12, mid - 7, figures.branch !== null)}<text x="${left + 12 + 14 + 7}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5" font-weight="${figures.branch === null ? 500 : 600}" fill="${figures.branch === null ? 'var(--dim)' : 'var(--text)'}">${escape(label)}</text>`)
+    const isIcon = iconOnly.has('worktree')
+    const width = isIcon ? 12 + 14 + 12 : 12 + 14 + 7 + textWidth(label, 12.5, figures.branch !== null) + 14
+    pill('worktree', width, 'worktree', figures.branch === null ? 'Perm worktree is off' : `Working in perm worktree ${figures.branch}`, left => isIcon ? branch(left + 12, mid - 7, figures.branch !== null) : `${branch(left + 12, mid - 7, figures.branch !== null)}<text x="${left + 12 + 14 + 7}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5" font-weight="${figures.branch === null ? 500 : 600}" fill="${figures.branch === null ? 'var(--dim)' : 'var(--text)'}">${escape(label)}</text>`)
   }
 
   return pills

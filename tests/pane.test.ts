@@ -134,7 +134,7 @@ test('on the desktop each rail pill is a picture whose hover the surface lights 
   // Straight onto the next pill, its leave landing after: only the new one lit.
   await point('dials', 'enter')
   await point('tokens', 'leave')
-  expect(await lit()).toEqual({ hot: ['dials'], caption: 'Tune how the agent works' })
+  expect(await lit()).toEqual({ hot: ['dials'], caption: 'Dials: Balanced · tune how the agent works' })
   // A post that is not a hover changes nothing.
   await band.post({ hover: 'x' }, { in: 'rail-dials-press' })
   await band.redraw()
@@ -146,6 +146,47 @@ test('on the desktop each rail pill is a picture whose hover the surface lights 
   await activate(band, 'rail-dials-press')
   const pane = await mountPane($, 'desktop')
   expect(await pane.find({ type: 'Button', key: 'dial-foresight' })).toBeDefined()
+})
+
+test('on the desktop the rail fits its one row: the least needed pills give up their words first', async ($, on) => {
+  world(on, { isRepo: false })
+  on('turn.complete', ($, e) => ({ text: e.answer }))
+  await startSession($)
+  const usage = { input_tokens: 14_000_000, output_tokens: 67_000, cache_read_input_tokens: 700_000, cache_creation_input_tokens: 0, model: 'claude-opus-5-5' }
+  await $.turn.complete({ turnId: 't1', answer: 'done', durationMs: 1_000, reason: 'answer', isAborted: false, usage } as never)
+  const at = async (bodyColumns: number) => {
+    const band = await $.ui.mount({
+      plugin: 'craft-shop',
+      surface: 'desktop',
+      component: 'AbovePrompt',
+      props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns, scroll: { offset: 0, bodyRows: 10 }, view: {} },
+    })
+    const tree = await band.drawn()
+    const ids = ['brand', 'cache', 'tokens', 'dials', 'sources', 'worktree']
+    const svgs = ids.map(id => (byKey(tree, `drawn-rail-${id}-press`) as { children: { props: { source: string; width: number; alt: string } }[] }).children[0]!.props)
+    const width = svgs.reduce((sum, svg) => sum + svg.width, 0) + (svgs.length - 1) * 7
+    const worded = Object.fromEntries(ids.map((id, index) => [id, /<text/.test(svgs[index]!.source) && !(id === 'sources' && !svgs[index]!.source.includes(' sources'))]))
+    return { width, worded, svgs }
+  }
+  // Wide: every pill keeps its words.
+  const wide = await at(200)
+  expect(wide.worded).toEqual({ brand: true, cache: false, tokens: true, dials: true, sources: true, worktree: true })
+  // About 700px: the wordmark goes first, and the row fits.
+  const mid = await at(100)
+  expect(mid.width).toBeLessThanOrEqual((100 - 3) * 7)
+  expect(mid.worded.brand).toBe(false)
+  expect(mid.worded.tokens).toBe(true)
+  // Narrow: every pill that can is an icon, and the tokens keep what was
+  // sent and the cost; what came back moves to the caption. It still fits.
+  const narrow = await at(70)
+  expect(narrow.width).toBeLessThanOrEqual((70 - 3) * 7)
+  expect(narrow.worded).toEqual({ brand: false, cache: false, tokens: true, dials: false, sources: false, worktree: false })
+  expect(narrow.svgs[2]!.source).toContain('≈ $0.42')
+  expect(narrow.svgs[2]!.source).toContain('>14.7M<')
+  expect(narrow.svgs[2]!.source).not.toContain('>67.0k<')
+  expect(narrow.svgs[2]!.alt).toBe('↓ 67.0k received · ≈ $0.42 at API list prices, not your bill')
+  // An icon still says what it stands for when hovered.
+  expect(narrow.svgs[3]!.alt).toBe('Dials: Balanced · tune how the agent works')
 })
 
 // The element drawn under a key, hover and all (find leaves hover out).

@@ -591,6 +591,11 @@ export function registerContext(on: On): void {
               onPress={() => void choose($, 'folder')}
             />
           </Box>
+          {status !== '' && (
+            <Text color={isWarning ? 'warning' : undefined} dimColor={!isWarning} wrap="truncate-end">
+              {status}
+            </Text>
+          )}
         </Box>
         {Input !== undefined && (
           <Input
@@ -601,11 +606,6 @@ export function registerContext(on: On): void {
             onInput={value => void update($, contextDraft, now => ({ ...now, input: value }))}
             onSubmit={value => void addFromInput($, value)}
           />
-        )}
-        {status !== '' && (
-          <Text color={isWarning ? 'warning' : undefined} dimColor={!isWarning}>
-            {status}
-          </Text>
         )}
       </Box>
     )

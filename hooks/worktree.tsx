@@ -868,8 +868,8 @@ export function registerWorktree(on: On, options: PluginOptions): void {
         <Box flexDirection="column" gap={1}>
           {autoCard}
           {card(ui, 'worktree-empty', [
-            <Box gap={2} alignItems="center">
-              {svg(ui, branchArt(200, 108), 'A branch off the main line', 200, 108)}
+            <Box gap={2} alignItems="flex-start">
+              {svg(ui, branchArt(120, 72), 'A branch off the main line', 120, 72)}
               <Box flexDirection="column" flexShrink={1} flexGrow={1} gap={1}>
                 <Box flexDirection="column">
                   <Text bold>No worktree for this session</Text>
@@ -880,7 +880,7 @@ export function registerWorktree(on: On, options: PluginOptions): void {
                   <Text dimColor>✓ Safe to discard</Text>
                   <Text dimColor>✓ The main checkout stays as it is</Text>
                 </Box>
-                <Box justifyContent="flex-end">
+                <Box>
                   <Button key="worktree-create" label="Create worktree now" variant="primary" onPress={() => void claimNow($, options)} />
                 </Box>
               </Box>

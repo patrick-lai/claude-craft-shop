@@ -22,7 +22,7 @@ test('dragging a dot on the desktop radar sets that dial, and the agent is told'
   await ui.pointer({ type: 'move', x: 33, y: 10, button: 'left', in: 'radar-drag' })
   await ui.pointer({ type: 'up', x: 33, y: 10, button: 'left', in: 'radar-drag' })
   expect(await dialsSection($)).toContain('Tenacity (Goal mode)')
-  expect(await ui.find({ text: /What the agent is told at/ })).toBeDefined()
+  expect(await ui.find({ text: /what the agent is told at/i })).toBeDefined()
 
   // Arrow keys move the focus to Autonomy and lower it.
   await ui.key({ key: 'right', in: 'radar-drag' })

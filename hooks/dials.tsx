@@ -284,7 +284,7 @@ export function registerDials(on: On): void {
           <Text dimColor>{title}</Text>,
           <Text bold>{value}</Text>,
           rich ? (
-            <Box marginBottom={1}>{svg(ui, track(fraction, trackWidth), `${title} ${value}`, trackWidth, 6)}</Box>
+            <Box>{svg(ui, track(fraction, trackWidth), `${title} ${value}`, trackWidth, 6)}</Box>
           ) : (
             <Text color="suggestion">{bar(fraction, 16)}</Text>
           ),
@@ -377,14 +377,13 @@ export function registerDials(on: On): void {
           </Box>,
           isSelected && (
             <Box flexDirection="column" gap={1} marginTop={1}>
-              <Text dimColor>{dial.question}</Text>
               {card(
                 ui,
                 `told-${dial.key}`,
                 [
                   <Box>
                     <Text dimColor>
-                      What the agent is told at{' '}
+                      {dial.question} · what the agent is told at{' '}
                       <Text color={color} bold>
                         {level.label}
                       </Text>

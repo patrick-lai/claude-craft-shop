@@ -1,9 +1,10 @@
-// The desktop rail's pills, each its own picture: a fishStack wordmark, then
+// The desktop rail's pills, each its own picture: fishStack's mark, then
 // the prompt cache, tokens, dials, sources and worktree, each with its icon.
 // Every pill comes drawn twice, at rest and lit, so the surface can swap them
 // on hover without a round trip (rail.tsx), and with the caption it shows.
 import type { Tab } from '../types'
 import { paint } from './art'
+import { brandMark } from './brand'
 
 export type RailPill = { id: string; tab: Tab | 'pane'; caption: string; width: number; height: number; source: string; hotSource: string }
 
@@ -29,7 +30,6 @@ const HEIGHT = 28
 // alike, so the rail stays a slim row beside the composer.
 const SCALE = 0.88
 const SANS = `-apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif`
-const ROUNDED = `ui-rounded, 'SF Pro Rounded', -apple-system, system-ui, sans-serif`
 const BARS = ['#5aaeff', '#2fcfa6', '#74d16f', '#a8c94a', '#d8bf45']
 
 function escape(text: string): string {
@@ -59,10 +59,6 @@ function updown(x: number, mid: number): string {
   return `<path transform="translate(${x} ${mid - 6})" d="M3 11V1.5M.5 4 3 1.5 5.5 4" fill="none" stroke="#5aaeff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path transform="translate(${x + 6} ${mid - 6})" d="M3 1v9.5M.5 8 3 10.5 5.5 8" fill="none" stroke="#3fb950" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>`
 }
 
-function fishMark(x: number, y: number): string {
-  return `<g transform="translate(${x} ${y})"><defs><linearGradient id="brandMark" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5eead4"/><stop offset="1" stop-color="#3b82f6"/></linearGradient></defs><path d="M1 8.5C3.4 4.4 7 3 10.2 3.9c1.6.5 2.9 1.6 3.9 3.1l3.6-2.6v8.2L14.1 10c-1 1.5-2.3 2.6-3.9 3.1C7 14 3.4 12.6 1 8.5z" fill="url(#brandMark)"/><path d="M8.6 5.6c.9 1.7.9 4.1 0 5.8" fill="none" stroke="#0b1b2e" stroke-opacity="0.35" stroke-width="1.1" stroke-linecap="round"/><circle cx="4.6" cy="7.6" r="1.05" fill="#0b1b2e"/></g>`
-}
-
 function flame(x: number, y: number, isWarm: boolean): string {
   const color = isWarm ? '#f0a35e' : 'var(--dim)'
   return `<path transform="translate(${x} ${y})" d="M7 0.8c.5 2.4 3.3 3.9 3.3 7.2a4.3 4.3 0 0 1-8.6.2c0-1.5.6-2.6 1.6-3.5.1 1.2.7 2 1.7 2.4C4.6 4.8 5.6 2.8 7 .8z" fill="${isWarm ? 'rgba(240,163,94,0.18)' : 'none'}" stroke="${color}" stroke-width="1.4" stroke-linejoin="round"/>`
@@ -88,9 +84,9 @@ function branch(x: number, y: number, isOn: boolean): string {
 }
 
 // The pills that can give up their words for the rail to fit one row, in the
-// order they do, down to their icon. The cache gauge, the cost and the
-// sources count (always just its icon and number) never do.
-export const COMPACTABLE = ['brand', 'worktree', 'dials'] as const
+// order they do, down to their icon. The mark (always alone), the cache
+// gauge, the cost and the sources count (always its icon and number) never do.
+export const COMPACTABLE = ['worktree', 'dials'] as const
 export type Compactable = (typeof COMPACTABLE)[number]
 
 export function railArt(figures: RailArtFigures, iconOnly: ReadonlySet<Compactable> = new Set()): RailPill[] {
@@ -105,17 +101,13 @@ export function railArt(figures: RailArtFigures, iconOnly: ReadonlySet<Compactab
       const inner = `<rect x="0.5" y="0.5" width="${whole - 1}" height="${HEIGHT - 1}" rx="${(HEIGHT - 1) / 2}" class="pill${isHot ? ' hot' : ''}"/>${draw(0)}`
       // Theme colours are custom properties, which a presentation attribute
       // does not read everywhere; a style declaration does.
-      return `<svg xmlns="http://www.w3.org/2000/svg" width="${shown}" height="${tall}" viewBox="0 0 ${whole} ${HEIGHT}">${STYLE}${DEFS}${paint(inner)}</svg>`
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="${shown}" height="${tall}" viewBox="0 0 ${whole} ${HEIGHT}">${STYLE}${paint(inner)}</svg>`
     }
     pills.push({ id, tab, caption, width: shown, height: tall, source: svg(false), hotSource: svg(true) })
   }
 
-  {
-    const word = 'fishStack'
-    const isIcon = iconOnly.has('brand')
-    const width = isIcon ? 12 + 18 + 10 : 12 + 18 + 7 + textWidth(word, 13.5, true) + 14
-    pill('brand', width, 'pane', 'Open fishStack', left => isIcon ? fishMark(left + 12, mid - 8) : `${fishMark(left + 12, mid - 8)}<text x="${left + 12 + 18 + 7}" y="${mid + 4.6}" font-family="${ROUNDED}" font-size="13.5" font-weight="700" fill="url(#brandText)" letter-spacing="0.1">${word}</text>`)
-  }
+  // The mark alone in a round pill: the name is in the pane.
+  pill('brand', HEIGHT, 'pane', 'Open fishStack', left => brandMark(left + 4, 4, HEIGHT - 8, 'railMark'))
 
   // The cache gauge is always there: empty until a reply has been seen.
   {
@@ -180,4 +172,3 @@ const STYLE = `<style>
   .pill.hot { fill: var(--hot); stroke: var(--hotLine); }
 </style>`
 
-const DEFS = `<defs><linearGradient id="brandText" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#5eead4"/><stop offset="1" stop-color="#3b82f6"/></linearGradient></defs>`

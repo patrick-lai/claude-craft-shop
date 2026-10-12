@@ -87,7 +87,7 @@ export function drawRail(ui: Ui, figures: RailFigures, open: (tab: Tab | null) =
         'open-fishstack',
         null,
         <Text bold color="suggestion">
-          ▸ fishStack
+          ≋
         </Text>,
       )}
       <Box gap={1} alignItems="center">

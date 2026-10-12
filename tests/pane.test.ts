@@ -175,15 +175,15 @@ test('on the desktop the rail fits its one row: the least needed pills give up t
   expect(wide.svgs[4]!.alt).toBe('Add files, links or notes')
   // Slim: every pill under 25px tall, and all six whole fit 120 columns.
   expect(Math.max(...wide.svgs.map(svg => svg.height))).toBeLessThanOrEqual(25)
-  expect((await at(120)).worded).toEqual({ brand: true, cache: false, tokens: true, dials: true, sources: false, worktree: true })
+  expect((await at(120)).worded).toEqual({ brand: false, cache: false, tokens: true, dials: true, sources: false, worktree: true })
   expect((await at(120)).width).toBeLessThanOrEqual((120 - 3) * 7)
-  expect(wide.worded).toEqual({ brand: true, cache: false, tokens: true, dials: true, sources: false, worktree: true })
-  // About 560px: the wordmark goes first, and the row fits.
+  expect(wide.worded).toEqual({ brand: false, cache: false, tokens: true, dials: true, sources: false, worktree: true })
+  // About 560px: the row fits whole.
   const mid = await at(80)
   expect(mid.width).toBeLessThanOrEqual((80 - 3) * 7)
   expect(mid.worded).toEqual({ brand: false, cache: false, tokens: true, dials: true, sources: false, worktree: true })
-  const narrow = await at(60)
-  expect(narrow.width).toBeLessThanOrEqual((60 - 3) * 7)
+  const narrow = await at(55)
+  expect(narrow.width).toBeLessThanOrEqual((55 - 3) * 7)
   expect(narrow.worded).toEqual({ brand: false, cache: false, tokens: true, dials: false, sources: false, worktree: false })
   expect(narrow.svgs[2]!.source).toContain('>≈ $0.42<')
   expect(narrow.svgs[2]!.alt).toBe('↑ 14.7M sent · ↓ 67.0k received · API list price, not your bill')

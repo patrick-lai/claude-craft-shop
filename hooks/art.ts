@@ -3,6 +3,7 @@
 // Client laid over each (see drawnButton in kit.tsx, and the tab bar's own
 // overlay in ui.tsx).
 import type { Tab } from '../types'
+import { brandMark } from './brand'
 
 const SANS = `-apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif`
 const ROUNDED = `ui-rounded, 'SF Pro Rounded', -apple-system, system-ui, sans-serif`
@@ -34,10 +35,6 @@ export function textWidth(text: string, size: number, isBold = false): number {
   return units * size * (isBold ? 1.0 : 0.95)
 }
 
-export function fishMark(x: number, y: number): string {
-  return `<g transform="translate(${x} ${y})"><defs><linearGradient id="fishBody" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5eead4"/><stop offset="1" stop-color="#3b82f6"/></linearGradient></defs><path d="M1 8.5C3.4 4.4 7 3 10.2 3.9c1.6.5 2.9 1.6 3.9 3.1l3.6-2.6v8.2L14.1 10c-1 1.5-2.3 2.6-3.9 3.1C7 14 3.4 12.6 1 8.5z" fill="url(#fishBody)"/><path d="M8.6 5.6c.9 1.7.9 4.1 0 5.8" fill="none" stroke="#0b1b2e" stroke-opacity="0.35" stroke-width="1.1" stroke-linecap="round"/><circle cx="4.6" cy="7.6" r="1.05" fill="#0b1b2e"/></g>`
-}
-
 function tabIcon(id: Tab, x: number, y: number, isActive: boolean): string {
   const color = isActive ? 'var(--text)' : 'var(--dim)'
   const accent = { worktree: '#3fb950', dials: '#8f9cff', context: '#5cc8e8' }[id]
@@ -63,9 +60,9 @@ export function tabsArt(tabs: { id: Tab; label: string }[], current: Tab): Segme
   const mid = height / 2
   const parts: string[] = []
   const segments: Segments['segments'] = []
-  parts.push(fishMark(2, mid - 8))
-  parts.push(`<text x="27" y="${mid + 5}" font-family="${ROUNDED}" font-size="15" font-weight="750" fill="url(#brand)" letter-spacing="0.1">fishStack</text>`)
-  let x = 27 + textWidth('fishStack', 15, true) + 20
+  parts.push(brandMark(1, mid - 11, 22, 'paneMark'))
+  parts.push(`<text x="30" y="${mid + 5}" font-family="${ROUNDED}" font-size="15" font-weight="750" fill="url(#brand)" letter-spacing="0.1">fishStack</text>`)
+  let x = 30 + textWidth('fishStack', 15, true) + 20
   const trayX = x
   const widths = tabs.map(tab => 14 + 16 + 8 + textWidth(tab.label, 13, tab.id === current) + 16)
   const trayWidth = widths.reduce((sum, one) => sum + one, 0) + 8

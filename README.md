@@ -1,4 +1,4 @@
-# Claude fishStack
+# <img src="assets/icon.svg" width="28" height="28" alt=""> Claude fishStack
 
 A Claude Code mod that adds a **fishStack** pane with three tabs (**Perm worktree · Dials · Context**). It brings three CommissionAI features into Claude Code:
 
@@ -109,3 +109,12 @@ e2e/shoot.sh                    # draw every tab on the desktop surface and scre
 `tests/desktop.test.ts` draws every tab on the desktop surface with real content and fails if the desktop would refuse any tree. `tests/dials.test.ts` drags the radar's dots with pointer events, as a person on the desktop would. `e2e/shoot.sh` turns those trees into pages laid out like the desktop pane and screenshots them into `e2e/out/preview/png`. The page is an approximation of the desktop's own paint, close enough to judge layout. `shots/desktop/` holds the latest set.
 
 `e2e/setup.sh` builds a fixture: a bare origin, plus a clone of it. `e2e/drive.sh` starts Claude Code with this mod in a 200×50 tmux session, in the fullscreen layout, with Perm worktree on. It then checks each feature as a person would: the read-only band and the held-back early write, the move into the slot, the dials echoed back by the agent, a strict note, and the agent citing it.
+
+## The mark
+
+fishStack's mark is a round disc, teal to blue, with three lenses rising in a stack: a school that is also a stack of layers. It is drawn in one place, `hooks/brand.ts`, and `node e2e/brand.mjs` writes it out:
+
+- `assets/icon.svg`: full colour. The leading lens has an eye where it is drawn at 32px or more.
+- `assets/icon-template.svg`: one colour, black on clear, with no eye, for a macOS menu-bar (template) icon.
+
+The rail shows the mark alone; the name is in the pane.

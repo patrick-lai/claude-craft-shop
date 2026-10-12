@@ -33,6 +33,12 @@
       "title": "Free disk to keep (GB)",
       "description": "Perm worktree stops warming new slots when less than this much disk is free, as CommissionAI does at 20 GB.",
       "default": 20
+    },
+    "autoAnswerMinutes": {
+      "type": "number",
+      "title": "Autopilot answers after (minutes)",
+      "description": "With the Autonomy dial on Autopilot, a question the agent asked that nobody answers in this many minutes is answered with its recommended option (or the first).",
+      "default": 15
     }
   }
 }

@@ -15,6 +15,8 @@
 # 3. Context: a strict note reaches the agent.
 # 4. Claude Code's own worktrees (claude --worktree, the desktop's worktree
 #    option) come up in a fishStack slot.
+# 5. On Autopilot, a question nobody answers takes its recommended option
+#    (the fixture waits 6 seconds, not 15 minutes).
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -211,6 +213,17 @@ tmux send-keys -t fish Escape
 c ask fish "What is the Workshop API's launch codename? Answer in two words." 300
 screen | grep -qi 'BLUE HERON' || fail 'the agent did not cite the strict note'
 pass 'the agent cites the strict note'
+
+echo '5. Autopilot answers when nobody does'
+c type fish '/fishstack dials'
+c click fish '[ Autopilot ]' 2
+tmux send-keys -t fish Escape
+c type fish 'Ask me with the AskUserQuestion tool which colour I prefer, with the options "Red (Recommended)" and "Blue". Then reply with only "Picked: <the answer>".'
+c wait fish 'Which colou?r' 60
+pass 'the agent asked, and nobody answers'
+c idle fish 120
+screen | grep -q 'Picked: Red' || fail 'the question was not answered with the recommended option'
+pass 'after the wait, Autopilot answered with the recommended option'
 quit_claude
 
 echo "4. Claude Code's own worktree (claude --worktree)"

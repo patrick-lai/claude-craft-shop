@@ -17,6 +17,10 @@ export type World = {
   commands: string[]
   // Slots with uncommitted work, by path.
   dirty: Set<string>
+  // Answers the question the agent is waiting on, as the person would.
+  answer: (answers: Record<string, string>) => void
+  // Notifications sent, by text.
+  notified: string[]
 }
 
 function ran(stdout = '', exitCode = 0) {
@@ -55,7 +59,7 @@ export function world(
   const panes: string[] = []
   const commands: string[] = []
   const dirty = new Set<string>()
-  const state: World = { clock, toolCalls, fetched, dialogs: 0, closeDialog: () => undefined, panes, commands, dirty }
+  const state: World = { clock, toolCalls, fetched, dialogs: 0, closeDialog: () => undefined, panes, commands, dirty, answer: () => undefined, notified: [] }
 
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
@@ -184,7 +188,17 @@ export function world(
   })
   on('tool.call', ($, e) => {
     toolCalls.push(String(e.tool))
+    // A question waits for the person, as the dialog does, until the test
+    // answers it with state.answer.
+    if (String(e.tool) === 'AskUserQuestion') {
+      const asked = (e as unknown as { questions: unknown[] }).questions
+      return new Promise(resolve => (state.answer = answers => resolve({ result: { questions: asked, answers } as never })))
+    }
     return { result: 'ok' }
+  })
+  on('ui.notify', ($, e) => {
+    state.notified.push(String(e.text))
+    return { value: { isSent: true } as never }
   })
   return state
 }

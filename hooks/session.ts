@@ -1,7 +1,7 @@
 // What every session loads, and what the model is told: the read-only head
 // start, the dials' working style and the context library's enabled sources.
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, On, PromptComposeSection } from 'claude-code'
+import type { EngineInterface, On, PluginOptions, PromptComposeSection, Timer } from 'claude-code'
 
 import type { DialValues, Folder, Source } from '../types'
 import { CONTEXT_SECTION_ID, contextSection, legacyStoreKey, libraryStoreKey, parseLibrary } from './context'
@@ -56,7 +56,58 @@ async function migrateStore($: EngineInterface): Promise<string[]> {
   return copied
 }
 
-export function registerSession(on: On): void {
+// Autopilot answers for a person who is away: a question the agent asked
+// that nobody has answered for autoAnswerMinutes (15 by default) takes, for
+// each choice question, the option labelled (Recommended), or else the first.
+// Text and number questions are left for the agent to settle.
+const AUTO_ANSWER_MINUTES = 15
+
+type AskedQuestion = {
+  question: string
+  kind?: 'choice' | 'text' | 'number'
+  options?: { label: string }[]
+  defaultValue?: number
+}
+
+export function recommendedAnswers(questions: AskedQuestion[]): Record<string, string> {
+  const answers: Record<string, string> = {}
+  for (const one of questions) {
+    if (one.kind === 'number' && one.defaultValue !== undefined) answers[one.question] = String(one.defaultValue)
+    if ((one.kind ?? 'choice') !== 'choice' || one.options === undefined || one.options.length === 0) continue
+    const marked = one.options.find(option => /\(recommended\)/i.test(option.label))
+    answers[one.question] = (marked ?? one.options[0]!).label
+  }
+  return answers
+}
+
+export function registerSession(on: On, options: PluginOptions): void {
+  on('tool.call', { tool: 'AskUserQuestion' }, async ($, e, next) => {
+    const input = e as unknown as { questions?: AskedQuestion[]; metadata?: { source?: string } }
+    // Only the agent's own questions: a plugin asking through $.ui.ask
+    // carries a source, and is not Autopilot's to answer.
+    if ((await read($, dials)).autonomy < 5 || input.metadata?.source !== undefined || input.questions === undefined) return next(e)
+    const ms = Math.max(0, Number(options.autoAnswerMinutes ?? AUTO_ANSWER_MINUTES)) * 60_000
+    const answered = next(e)
+    let timer: Timer | null = null
+    const away = new Promise<'away'>(resolve => {
+      timer = $.clock.after(ms, () => resolve('away'))
+    })
+    try {
+      const first = await Promise.race([answered, away])
+      if (first !== 'away') return first
+      // The dial may have come down while the question waited: read where a
+      // change is saved, as this hook's own reads hold what it began with.
+      const now = await $.store.get(DIALS_STORE_KEY)
+      if (isDialValues(now) && now.autonomy < 5) return await answered
+      const answers = recommendedAnswers(input.questions)
+      const picked = Object.values(answers).join('; ')
+      void $.ui.notify(`Autopilot answered for you after ${Math.round(ms / 60_000)} min away: ${picked}`, { title: 'fishStack' }).catch(() => undefined)
+      return { result: { questions: input.questions, answers, afkTimeoutMs: ms } }
+    } finally {
+      ;(timer as Timer | null)?.cancel()
+    }
+  })
+
   on('session.start', async ($, e, next) => {
     // The commands first, so /fishstack answers from the first keystroke, not
     // after the worktree claim and the store reads below.

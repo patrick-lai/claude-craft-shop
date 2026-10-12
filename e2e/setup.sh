@@ -36,8 +36,8 @@ cat > "$root/settings.json" <<JSON
 {
   "enabledPlugins": { "fishstack@claude-fish-stack-mod": false },
   "pluginConfigs": {
-    "fishstack": { "options": { "autoWorktree": false, "worktreeRoot": "$root/slots", "setupCommand": "sleep ${FISH_SETUP_SECONDS:-4}", "minFreeGb": 0 } },
-    "fishstack@inline": { "options": { "autoWorktree": false, "worktreeRoot": "$root/slots", "setupCommand": "sleep ${FISH_SETUP_SECONDS:-4}", "minFreeGb": 0 } }
+    "fishstack": { "options": { "autoWorktree": false, "worktreeRoot": "$root/slots", "setupCommand": "sleep ${FISH_SETUP_SECONDS:-4}", "minFreeGb": 0, "autoAnswerMinutes": 0.1 } },
+    "fishstack@inline": { "options": { "autoWorktree": false, "worktreeRoot": "$root/slots", "setupCommand": "sleep ${FISH_SETUP_SECONDS:-4}", "minFreeGb": 0, "autoAnswerMinutes": 0.1 } }
   }
 }
 JSON

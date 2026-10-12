@@ -9,7 +9,7 @@ import { registerWorktree } from './worktree'
 
 export const register: Register = (on, options) => {
   registerGuard(on)
-  registerSession(on)
+  registerSession(on, options)
   registerWorktree(on, options)
   registerDials(on)
   registerContext(on)

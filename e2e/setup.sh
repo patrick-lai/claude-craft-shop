@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds the end-to-end fixture: a bare origin and a clone of it holding a
-# small JSON API and its openapi.json, plus settings that point Craft Shop's
+# small JSON API and its openapi.json, plus settings that point Craftshop's
 # worktree root into the fixture.
 set -euo pipefail
 

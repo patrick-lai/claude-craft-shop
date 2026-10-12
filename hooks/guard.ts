@@ -11,7 +11,7 @@ const worktree = atom({ plugin: 'craft-shop', key: 'worktree' } as const, IDLE_W
 const WRITE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'ExitPlanMode'])
 const SUBAGENT_TOOLS = new Set(['Agent', 'Task'])
 
-const SOLO_DENY = 'Crew is set to Solo in Craft Shop: do the work yourself without subagents.'
+const SOLO_DENY = 'Crew is set to Solo in Craftshop: do the work yourself without subagents.'
 
 export function registerGuard(on: On): void {
   on('tool.call', async ($, e, next) => {
@@ -23,6 +23,6 @@ export function registerGuard(on: On): void {
     if (SUBAGENT_TOOLS.has(tool) && (await read($, dials)).crew === 1) return { deny: SOLO_DENY }
     return next(e)
   }).catch(($, e, next) =>
-    next.called ? next(e) : { deny: 'Craft Shop could not check this call, so it was refused.' },
+    next.called ? next(e) : { deny: 'Craftshop could not check this call, so it was refused.' },
   )
 }

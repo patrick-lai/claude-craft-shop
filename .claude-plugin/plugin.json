@@ -1,7 +1,7 @@
 {
   "name": "craft-shop",
   "version": "0.1.0",
-  "description": "A Craft Shop pane for Claude Code: a perm worktree with a read-only head start, crew dials and a context library.",
+  "description": "A Craftshop pane for Claude Code: a perm worktree with a read-only head start, crew dials and a context library.",
   "author": {
     "name": "Patrick Lai"
   },

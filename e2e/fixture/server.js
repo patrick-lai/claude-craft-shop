@@ -1,4 +1,4 @@
-// A small JSON API for the Craft Shop end-to-end run.
+// A small JSON API for the Craftshop end-to-end run.
 const http = require('node:http')
 
 const port = Number(process.env.COMMISSION_DEV_PORT || process.env.PORT || 4517)

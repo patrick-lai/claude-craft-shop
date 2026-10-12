@@ -3,7 +3,7 @@ import type { Elements, RenderElement } from 'claude-code'
 import type { Tab } from '../types'
 
 export const PANE = 'craft-shop'
-export const PANE_TITLE = 'Craft Shop'
+export const PANE_TITLE = 'Craftshop'
 
 // The elements the pane draws with, so it draws on every surface: mobile has
 // no Input or Select, the terminal no Svg, and the tabs leave those out where
@@ -57,7 +57,7 @@ export function frame(ui: Ui, current: Tab, columns: number, onSelect: (id: Tab)
             />
           ))}
         </Box>
-        <Text dimColor>Craft Shop</Text>
+        <Text dimColor>Craftshop</Text>
       </Box>
       {body}
     </Box>

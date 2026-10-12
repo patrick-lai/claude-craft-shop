@@ -72,7 +72,7 @@ test('a dial changed mid-session reaches the model with the next prompt, once', 
   await ui.press({ key: 'tab-dials' })
   await ui.press({ key: 'pip-voice-5' })
   const told = await submit()
-  expect(told).toContain('Craft Shop update')
+  expect(told).toContain('Craftshop update')
   expect(told).toContain('Voice (Teach)')
   expect(await submit()).toBe('')
 })

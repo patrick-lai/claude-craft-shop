@@ -31,7 +31,12 @@ export function world(on: On, { isRepo = true } = {}): World {
   on('session.cwd', () => ({ value: REPO }))
   on('session.id', () => ({ value: 'abcdef123456' }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200_000 }, rateLimits: [] } }))
-  on('ui.open', () => ({ value: { isPlaced: true } }))
+  const panes: string[] = []
+  on('ui.open', ($, e) => {
+    if (!panes.includes(e.id)) panes.push(e.id)
+    return { value: { isPlaced: true } }
+  })
+  on('ui.panes', () => ({ value: panes.map(id => ({ id, title: id, isShown: true, isFocused: false, isPlaced: true })) }))
   on('fs.exists', () => ({ value: false }))
   on('fs.stat', ($, e) => ({ value: { kind: 'dir', size: 0, mtimeMs: 0, isLink: false, realPath: e.path } }))
   on('http.fetch', ($, e) => {
@@ -60,7 +65,7 @@ export async function startSession($: Engine): Promise<void> {
 }
 
 export const PANE_PROPS: RenderPropsOf['Pane'] = {
-  title: 'Craft Shop',
+  title: 'Craftshop',
   isFocused: true,
   bodyColumns: 90,
   placement: 'dock',

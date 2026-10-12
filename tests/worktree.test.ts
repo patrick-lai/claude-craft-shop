@@ -71,7 +71,7 @@ test('Perm worktree is off by default: no slot and no read-only guard', async ($
 
   const ui = await $.ui.mount({ plugin: 'craft-shop', surface: 'desktop', component: 'Pane', requestId: 'craft-shop', props: PANE_PROPS })
   await ui.press({ key: 'tab-worktree' })
-  expect(await ui.find({ text: /Off: Craft Shop leaves worktrees to Claude Code/ })).toBeDefined()
+  expect(await ui.find({ text: /Off: Craftshop leaves worktrees to Claude Code/ })).toBeDefined()
   await ui.press({ key: 'auto-worktree-on' })
   expect(await ui.find({ text: /On: new sessions in a main checkout/ })).toBeDefined()
 })

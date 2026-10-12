@@ -1,6 +1,6 @@
-# Claude Craft Shop
+# Claude Craftshop
 
-A Claude Code mod that adds a **Craft Shop** pane with three tabs (**Perm worktree · Dials · Context**). It brings three CommissionAI features into Claude Code:
+A Claude Code mod that adds a **Craftshop** pane with three tabs (**Perm worktree · Dials · Context**). It brings three CommissionAI features into Claude Code:
 
 1. **Perm worktree with a read-only head start.** When it is on, each new session claims a lasting worktree slot. The agent reads, searches and plans while the slot is prepared, then the session moves in and the lock lifts. It is off by default.
 2. **Crew dials.** Six dials set how the agent works: Foresight, Crew, Tenacity, Autonomy, Proof and Voice.
@@ -34,7 +34,7 @@ Change them in `/config`. They are also stored in settings under `pluginConfigs[
 
 ![Perm worktree tab after the move](shots/desktop/worktree-ready.png)
 
-The tab's toggle is **Off** by default. While it is off, Craft Shop leaves worktrees to Claude Code: the desktop app's worktree option, `claude --worktree` and `EnterWorktree` work as they always do, and the session is never locked. **Create worktree now** claims a slot for the current session.
+The tab's toggle is **Off** by default. While it is off, Craftshop leaves worktrees to Claude Code: the desktop app's worktree option, `claude --worktree` and `EnterWorktree` work as they always do, and the session is never locked. **Create worktree now** claims a slot for the current session.
 
 While it is **On**:
 

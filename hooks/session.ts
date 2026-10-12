@@ -21,7 +21,7 @@ function styleOf(values: DialValues, list: Source[], groups: Folder[]): string {
 }
 
 function styleUpdate(style: string): string {
-  return `Craft Shop update: the user changed the working style dials or the shared project context during this session. What follows replaces the Working style and Project context sections of your system prompt.\n\n${style}`
+  return `Craftshop update: the user changed the working style dials or the shared project context during this session. What follows replaces the Working style and Project context sections of your system prompt.\n\n${style}`
 }
 
 export function registerSession(on: On): void {

@@ -7,7 +7,7 @@ const tab = atom({ plugin: 'craft-shop', key: 'tab' } as const, 'worktree')
 
 export const CRAFT_COMMAND: CommandSpec = {
   name: 'craft',
-  description: 'Open the Craft Shop pane: perm worktree, dials and context',
+  description: 'Open the Craftshop pane: perm worktree, dials and context',
   argumentHint: '[worktree|dials|context]',
 }
 
@@ -20,6 +20,6 @@ export function registerPane(on: On): void {
     if (isTab(wanted)) await update($, tab, () => wanted)
     await $.ui.open({ id: PANE, title: PANE_TITLE, focus: true })
     const label = TABS.find(one => one.id === wanted)?.label
-    return { text: label === undefined ? 'Opened Craft Shop.' : `Opened Craft Shop · ${label}.` }
+    return { text: label === undefined ? 'Opened Craftshop.' : `Opened Craftshop · ${label}.` }
   })
 }

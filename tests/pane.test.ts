@@ -31,7 +31,24 @@ test('/craft opens the pane on the tab it names', async ($, on) => {
     origin: { kind: 'composer' },
     presentation: { isFullscreen: true, columns: 200 },
   })
-  expect(opened.text).toBe('Opened Craft Shop · Dials.')
+  expect(opened.text).toBe('Opened Craftshop · Dials.')
   const ui = await mountPane($, 'terminal')
   expect(await ui.find({ type: 'Button', key: 'pip-crew-1' })).toBeDefined()
+})
+
+test('with the pane closed, the band above the prompt offers a button that opens Craftshop', async ($, on) => {
+  world(on, { isRepo: false })
+  // Beneath the plugin, the engine's own band draws nothing here.
+  on('ui.render', { component: 'AbovePrompt' }, ($, e) => $.ui.resolve(e).Box({}))
+  await startSession($)
+  const band = await $.ui.mount({
+    plugin: 'craft-shop',
+    surface: 'desktop',
+    component: 'AbovePrompt',
+    props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 100, scroll: { offset: 0, bodyRows: 10 }, view: {} },
+  })
+  expect(await band.find({ type: 'Button', key: 'open-craftshop' })).toBeDefined()
+  await band.press({ key: 'open-craftshop' })
+  await band.redraw()
+  expect(await band.find({ type: 'Button', key: 'open-craftshop' })).toBeUndefined()
 })

@@ -40,10 +40,10 @@ const SETUP_TIMEOUT_MS = 10 * 60_000
 const LOCKFILES = ['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lock', 'bun.lockb']
 
 export const READ_ONLY_DENY =
-  'Read-only until the worktree is ready. Craft Shop is preparing a worktree for this session; read, search and plan for now, and you will be moved there with full access.'
+  'Read-only until the worktree is ready. Craftshop is preparing a worktree for this session; read, search and plan for now, and you will be moved there with full access.'
 
 export function headStartNote(main: string): string {
-  return `Read-only head start: your worktree is still being prepared, so for now you run read-only in the main checkout at \`${main}\`. It may sit on another branch or be behind origin, so treat it as a reference. Investigate, read code and plan; do not edit files, commit or run commands that change anything. When your plan is ready, write it in your reply and end your turn. When the worktree is ready, Craft Shop moves you there with full access and tells you to continue.`
+  return `Read-only head start: your worktree is still being prepared, so for now you run read-only in the main checkout at \`${main}\`. It may sit on another branch or be behind origin, so treat it as a reference. Investigate, read code and plan; do not edit files, commit or run commands that change anything. When your plan is ready, write it in your reply and end your turn. When the worktree is ready, Craftshop moves you there with full access and tells you to continue.`
 }
 
 function continueNote(path: string, branch: string): string {
@@ -343,7 +343,7 @@ async function startWorktree($: $, options: PluginOptions, cwd: string, isForced
     await beginWorktree($, options)
     return
   }
-  // Off, Craft Shop stays out of the way: no slot, no read-only guard, and
+  // Off, Craftshop stays out of the way: no slot, no read-only guard, and
   // Claude Code's own worktree handling applies.
   if (!isForced && !(await isAutoOn($, options))) return
 
@@ -454,8 +454,15 @@ export function registerWorktree(on: On, options: PluginOptions): void {
     return done
   })
 
+  on('ui.close', { id: PANE }, async ($, e, next) => {
+    const closed = await next(e)
+    $.ui.invalidate('ui.render')
+    return closed
+  })
+
   on('ui.open', { id: PANE }, async ($, e, next) => {
     const opened = await next(e)
+    $.ui.invalidate('ui.render')
     $.clock.after(0, () => void refreshSlots($, options))
     return opened
   })
@@ -472,7 +479,17 @@ export function registerWorktree(on: On, options: PluginOptions): void {
       $.clock.after(0, () => void $.ui.open({ id: PANE, title: PANE_TITLE }))
     }
     const state = await read($, worktree)
-    if (e.props.hasSurvey || state.phase === 'off' || (await read($, isBandHidden))) return next(e)
+    if (e.props.hasSurvey) return next(e)
+    if (state.phase === 'off' || (await read($, isBandHidden))) {
+      // With no worktree news, the band offers a way back to a closed pane.
+      if ((await $.ui.panes()).some(one => one.id === PANE)) return next(e)
+      const { Button } = $.ui.resolve(e)
+      return (
+        <Button key="open-craftshop" plain dimColor onPress={() => void $.ui.open({ id: PANE, title: PANE_TITLE, focus: true })}>
+          ▸ Craftshop
+        </Button>
+      )
+    }
 
     const { Box, Text, Button } = $.ui.resolve(e)
     if (state.phase === 'preparing') {
@@ -526,7 +543,7 @@ export function registerWorktree(on: On, options: PluginOptions): void {
             <Text dimColor>
               {isAuto
                 ? "On: new sessions in a main checkout, and Claude's own worktrees, get a lasting slot. Read-only until it is ready, then the lock lifts."
-                : "Off: Craft Shop leaves worktrees to Claude Code (the desktop's worktree option, claude --worktree, EnterWorktree)."}
+                : "Off: Craftshop leaves worktrees to Claude Code (the desktop's worktree option, claude --worktree, EnterWorktree)."}
             </Text>
           </Box>
           <Box flexShrink={0}>{segmented(ui, 'auto-worktree', AUTO_CHOICES, isAuto ? 'on' : 'off', choice => void setAuto($, choice === 'on'))}</Box>

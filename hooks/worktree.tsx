@@ -51,6 +51,8 @@ const elsewhere = atom({ plugin: 'fishstack', key: 'elsewhere' } as const, null)
 // What the pool's background warming is doing, for the Perm worktree tab.
 const poolNote = atom({ plugin: 'fishstack', key: 'poolNote' } as const, '')
 const tokenTotals = atom({ plugin: 'fishstack', key: 'tokenTotals' } as const, null)
+// Autopilot answering for a person who is away (session.ts sets it).
+const autopilot = atom({ plugin: 'fishstack', key: 'autopilot' } as const, null)
 
 type $ = EngineInterface
 
@@ -810,6 +812,8 @@ export function registerWorktree(on: On, options: PluginOptions): void {
       const input = last === null ? 0 : last.input_tokens + last.cache_read_input_tokens + last.cache_creation_input_tokens
       const list = await read($, sources)
       const values = await read($, dials)
+      // Only while the dial is on Autopilot: lowered, nothing is answered.
+      const auto = values.autonomy === 5 ? await read($, autopilot) : null
       const ui: Ui = resolveUi($.ui.resolve(e), e.surface)
       return drawRail(
         ui,
@@ -824,6 +828,12 @@ export function registerWorktree(on: On, options: PluginOptions): void {
           sourcesOn: list.filter(one => one.mode !== 'off').length,
           sourcesTotal: list.length,
           branch: state.phase === 'ready' ? state.branch : null,
+          autopilot:
+            auto === null
+              ? null
+              : auto.kind === 'waiting'
+                ? { kind: 'waiting', secondsLeft: Math.max(0, Math.round((auto.deadline - now) / 1000)), totalSeconds: Math.round((auto.deadline - auto.since) / 1000), picked: auto.picked, count: auto.count }
+                : { kind: 'answered', at: clockTime(auto.at), picked: auto.picked, waitedMinutes: Math.round(auto.waitedMs / 60_000) },
         },
         at => void openAt($, at),
         railHover,
@@ -1075,6 +1085,11 @@ export function registerWorktree(on: On, options: PluginOptions): void {
       </Box>,
     )
   })
+}
+
+// A time of day as the person's clock shows it: 4:12 pm.
+function clockTime(at: number): string {
+  return new Date(at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
 }
 
 // The prompt cache lives 5 minutes past the last reply. While it is warm

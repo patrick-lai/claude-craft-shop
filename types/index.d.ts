@@ -16,6 +16,12 @@ export type Worktree = {
   error: string | null
 }
 
+// Autopilot's answer for a person who is away, as the rail shows it: a
+// question waiting until its deadline, then what was picked for it.
+export type AutopilotWait =
+  | { kind: 'waiting'; since: number; deadline: number; picked: string; count: number }
+  | { kind: 'answered'; at: number; picked: string; waitedMs: number }
+
 export type Slot = { path: string; branch: string | null; isLeased: boolean; isMine: boolean }
 
 export type DialKey = 'foresight' | 'crew' | 'tenacity' | 'autonomy' | 'proof' | 'voice'
@@ -62,6 +68,7 @@ declare module 'claude-code' {
       poolNote: string
       elsewhere: string | null
       railTick: number
+      autopilot: AutopilotWait | null
       isTurnRunning: boolean
       lastReplyAt: number | null
       tokenTotals: { input: number; output: number } | null

@@ -21,6 +21,10 @@ export type World = {
   answer: (answers: Record<string, string>) => void
   // Notifications sent, by text.
   notified: string[]
+  // Lines shown under an open dialog, by text (undefined removes one).
+  notices: (string | undefined)[]
+  // What the plugin last saved under each store key.
+  saved: Record<string, unknown>
 }
 
 function ran(stdout = '', exitCode = 0) {
@@ -52,14 +56,26 @@ export function world(
   } = {},
 ): World {
   const clock = mock.clock(on, { now: 1_000_000 })
-  mock.store(on, store)
+  // The store, as mock.store keeps one, with what is saved readable here.
+  const kept: Record<string, unknown> = { ...store }
+  on('store.get', ($, e) => ({ value: kept[e.key] }))
+  on('store.set', ($, e) => {
+    kept[e.key] = e.value
+    state.saved[e.key] = e.value
+    return { value: undefined }
+  })
+  on('store.delete', ($, e) => {
+    delete kept[e.key]
+    return { value: undefined }
+  })
+  on('store.keys', () => ({ value: Object.keys(kept) }))
   mock.env(on, { HOME: '/home/me' })
   const toolCalls: string[] = []
   const fetched: string[] = []
   const panes: string[] = []
   const commands: string[] = []
   const dirty = new Set<string>()
-  const state: World = { clock, toolCalls, fetched, dialogs: 0, closeDialog: () => undefined, panes, commands, dirty, answer: () => undefined, notified: [] }
+  const state: World = { clock, toolCalls, fetched, dialogs: 0, closeDialog: () => undefined, panes, commands, dirty, answer: () => undefined, notified: [], notices: [], saved: {} }
 
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
@@ -196,6 +212,10 @@ export function world(
     }
     return { result: 'ok' }
   })
+  on('ui.notice', ($, e) => {
+    state.notices.push(e.text)
+    return { value: undefined }
+  })
   on('ui.notify', ($, e) => {
     state.notified.push(String(e.text))
     return { value: { isSent: true } as never }
@@ -216,6 +236,16 @@ export const PANE_PROPS: RenderPropsOf['Pane'] = {
   view: {},
 }
 
+
+// The band above the prompt: with no worktree news, fishStack's rail.
+export async function mountBand($: Engine, surface: 'terminal' | 'desktop') {
+  return $.ui.mount({
+    plugin: 'fishstack',
+    surface,
+    component: 'AbovePrompt',
+    props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 160, scroll: { offset: 0, bodyRows: 10 }, view: {} },
+  })
+}
 
 export async function mountPane($: Engine, surface: 'terminal' | 'desktop') {
   return $.ui.mount({ plugin: 'fishstack', surface, component: 'Pane', requestId: 'fishstack', props: PANE_PROPS })

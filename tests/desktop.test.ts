@@ -89,3 +89,32 @@ test('the worktree tab draws its steps and slots on the desktop', { options: { a
   await clock.advance(1)
   await show(ui, 'worktree-ready')
 })
+
+test('the rail on Autopilot: a question waiting, then answered for the person', async ($, on) => {
+  const { clock } = world(on, { isRepo: false, store: { dials: { foresight: 4, crew: 3, tenacity: 5, autonomy: 5, proof: 4, voice: 2 } } })
+  on('turn.complete', ($, e) => ({ text: e.answer }))
+  await startSession($)
+  await $.turn.complete({ turnId: 't1', answer: 'done', durationMs: 1_000, reason: 'answer', isAborted: false, usage: { input_tokens: 1_200, output_tokens: 3_400, cache_read_input_tokens: 48_000, cache_creation_input_tokens: 2_100, model: 'claude-opus-5-5' } } as never)
+  const band = await $.ui.mount({
+    plugin: 'fishstack',
+    surface: 'desktop',
+    component: 'AbovePrompt',
+    props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 120, scroll: { offset: 0, bodyRows: 10 }, view: {} },
+  })
+  const pending = $.tool.call({ tool: 'AskUserQuestion', questions: [{ question: 'Which colour?', header: 'Colour', multiSelect: false, options: [{ label: 'Red (Recommended)', description: '' }, { label: 'Blue', description: '' }] }] } as never)
+  await clock.advance(4 * 60_000)
+  await band.redraw()
+  await show(band, 'rail-autopilot-wait')
+  // The pointer on the dials pill: its caption says what will be picked.
+  await band.resize({ columns: 20, rows: 1, in: 'rail-dials-press' })
+  await band.pointer({ type: 'enter', x: 5, y: 0, in: 'rail-dials-press' })
+  await band.redraw()
+  await show(band, 'rail-autopilot-wait-hover')
+  await clock.advance(11 * 60_000)
+  await pending
+  await band.redraw()
+  await show(band, 'rail-autopilot-done-hover')
+  await band.pointer({ type: 'leave', x: 5, y: 0, in: 'rail-dials-press' })
+  await band.redraw()
+  await show(band, 'rail-autopilot-done')
+})

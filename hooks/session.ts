@@ -3,7 +3,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, PluginOptions, PromptComposeSection, Timer } from 'claude-code'
 
-import type { DialValues, Folder, Source } from '../types'
+import type { AutopilotWait, DialValues, Folder, Source } from '../types'
 import { CONTEXT_SECTION_ID, contextSection, legacyStoreKey, libraryStoreKey, parseLibrary } from './context'
 import { BALANCED, brief, DIALS_SECTION_ID, DIALS_STORE_KEY, isDialValues } from './dials'
 import { FISH_COMMANDS } from './pane'
@@ -15,6 +15,8 @@ const sources = atom({ plugin: 'fishstack', key: 'sources' } as const, [])
 const worktree = atom({ plugin: 'fishstack', key: 'worktree' } as const, IDLE_WORKTREE)
 const isHeadStartPrompted = atom({ plugin: 'fishstack', key: 'isHeadStartPrompted' } as const, false)
 const toldStyle = atom({ plugin: 'fishstack', key: 'toldStyle' } as const, null)
+const autopilot = atom({ plugin: 'fishstack', key: 'autopilot' } as const, null)
+const railTick = atom({ plugin: 'fishstack', key: 'railTick' } as const, 0)
 
 function styleOf(values: DialValues, list: Source[], groups: Folder[]): string {
   return [brief(values), contextSection(list, groups) ?? 'The user shares no project context now.'].join('\n\n')
@@ -80,6 +82,73 @@ export function recommendedAnswers(questions: AskedQuestion[]): Record<string, s
   return answers
 }
 
+// The picks as the rail and the notice say them: each answer without its
+// "(Recommended)", the questions' answers joined.
+export function pickedText(answers: Record<string, string>): string {
+  return Object.values(answers)
+    .map(answer => answer.replace(/\s*\(recommended\)\s*/i, ' ').trim())
+    .join(', ')
+}
+
+// Minutes left as a person reads them: "in 14 min", "in under a minute".
+function minutesLeft(ms: number): string {
+  return ms < 60_000 ? 'in under a minute' : `in ${Math.ceil(ms / 60_000)} min`
+}
+
+// What Autopilot answered last in this session, kept in the store so the rail
+// still says so after a reload, until the person types again.
+export const AUTOPILOT_STORE_KEY = 'autopilot'
+type AutopilotKept = { sessionId: string; answered: AutopilotWait & { kind: 'answered' } }
+
+// The questions Autopilot is waiting on in this process, by call: the rail
+// shows the soonest, and how many.
+type Waiting = { id: string; since: number; deadline: number; picked: string }
+const waitingOn = new Map<string, Waiting>()
+let waitTick: Timer | null = null
+let calls = 0
+
+async function showWaiting($: EngineInterface): Promise<void> {
+  const soonest = [...waitingOn.values()].sort((a, b) => a.deadline - b.deadline)[0]
+  if (soonest !== undefined) {
+    await update($, autopilot, (): AutopilotWait => ({ kind: 'waiting', since: soonest.since, deadline: soonest.deadline, picked: soonest.picked, count: waitingOn.size }))
+  } else {
+    await update($, autopilot, now => (now?.kind === 'waiting' ? null : now))
+  }
+}
+
+// While anything waits, the rail redraws every 15 seconds so its ring runs
+// down, and each open dialog's line counts the minutes.
+function tickWhileWaiting($: EngineInterface): void {
+  if (waitingOn.size > 0 && waitTick === null) {
+    waitTick = $.clock.every(15_000, () => {
+      void (async () => {
+        const now = await $.clock.now()
+        for (const one of waitingOn.values()) notice($, one.id, `Autopilot picks ${one.picked} ${minutesLeft(one.deadline - now)} unless you answer`)
+        await update($, railTick, n => n + 1)
+      })()
+    })
+  }
+  if (waitingOn.size === 0 && waitTick !== null) {
+    waitTick.cancel()
+    waitTick = null
+  }
+}
+
+// A line under the question's dialog: the rail is not drawn while a dialog
+// holds the composer (the terminal's), so the countdown is said there too.
+function notice($: EngineInterface, id: string, text: string | undefined): void {
+  if (id.startsWith('call-')) return
+  try {
+    $.ui.notice(id, text)
+  } catch {
+    // The dialog closed first.
+  }
+}
+
+// Where a prompt the person typed comes from: the terminal's composer, the
+// desktop app (through the SDK) or their phone (Remote Control).
+const PERSON_ORIGINS = new Set(['composer', 'sdk', 'bridge'])
+
 export function registerSession(on: On, options: PluginOptions): void {
   on('tool.call', { tool: 'AskUserQuestion' }, async ($, e, next) => {
     const input = e as unknown as { questions?: AskedQuestion[]; metadata?: { source?: string } }
@@ -87,24 +156,44 @@ export function registerSession(on: On, options: PluginOptions): void {
     // carries a source, and is not Autopilot's to answer.
     if ((await read($, dials)).autonomy < 5 || input.metadata?.source !== undefined || input.questions === undefined) return next(e)
     const ms = Math.max(0, Number(options.autoAnswerMinutes ?? AUTO_ANSWER_MINUTES)) * 60_000
+    const id = e.tool_use_id ?? `call-${++calls}`
+    const since = await $.clock.now()
+    const picked = pickedText(recommendedAnswers(input.questions)) || 'the recommended options'
     const answered = next(e)
     let timer: Timer | null = null
     const away = new Promise<'away'>(resolve => {
       timer = $.clock.after(ms, () => resolve('away'))
     })
+    waitingOn.set(id, { id, since, deadline: since + ms, picked })
+    await showWaiting($)
+    tickWhileWaiting($)
+    // After the dialog has opened: a line for a call not yet open is refused.
+    $.clock.after(0, () => notice($, id, `Autopilot picks ${picked} ${minutesLeft(ms)} unless you answer`))
     try {
       const first = await Promise.race([answered, away])
       if (first !== 'away') return first
       // The dial may have come down while the question waited: read where a
       // change is saved, as this hook's own reads hold what it began with.
       const now = await $.store.get(DIALS_STORE_KEY)
-      if (isDialValues(now) && now.autonomy < 5) return await answered
+      if (isDialValues(now) && now.autonomy < 5) {
+        waitingOn.delete(id)
+        await showWaiting($)
+        notice($, id, undefined)
+        return await answered
+      }
       const answers = recommendedAnswers(input.questions)
-      const picked = Object.values(answers).join('; ')
-      void $.ui.notify(`Autopilot answered for you after ${Math.round(ms / 60_000)} min away: ${picked}`, { title: 'fishStack' }).catch(() => undefined)
+      const at = await $.clock.now()
+      const done: AutopilotWait = { kind: 'answered', at, picked, waitedMs: ms }
+      waitingOn.delete(id)
+      await update($, autopilot, () => done)
+      await showWaiting($)
+      await $.store.set(AUTOPILOT_STORE_KEY, { sessionId: await $.session.id(), answered: done })
+      void $.ui.notify(`Autopilot answered for you after ${Math.round(ms / 60_000)} min away: ${Object.values(answers).join('; ')}`, { title: 'fishStack' }).catch(() => undefined)
       return { result: { questions: input.questions, answers, afkTimeoutMs: ms } }
     } finally {
       ;(timer as Timer | null)?.cancel()
+      if (waitingOn.delete(id)) await showWaiting($)
+      tickWhileWaiting($)
     }
   })
 
@@ -118,6 +207,8 @@ export function registerSession(on: On, options: PluginOptions): void {
     const started = await next(e)
     const storedDials = await $.store.get(DIALS_STORE_KEY)
     if (isDialValues(storedDials)) await update($, dials, () => storedDials)
+    const kept = (await $.store.get(AUTOPILOT_STORE_KEY)) as AutopilotKept | null | undefined
+    if (kept?.sessionId === (await $.session.id()) && (await read($, autopilot)) === null) await update($, autopilot, () => kept.answered)
     const repo = await $.session.repo()
     const root = repo?.root ?? (await $.session.root())
     const library = parseLibrary(await $.store.get(libraryStoreKey(root)), await $.store.get(legacyStoreKey(root)))
@@ -145,6 +236,12 @@ export function registerSession(on: On, options: PluginOptions): void {
   })
 
   on('prompt.submit', async ($, e, next) => {
+    // The person is back: what Autopilot answered for them has been seen.
+    // A notification or a peer's message is not them.
+    if (PERSON_ORIGINS.has(e.origin.kind) && (await read($, autopilot))?.kind === 'answered') {
+      await update($, autopilot, () => null)
+      await $.store.set(AUTOPILOT_STORE_KEY, null)
+    }
     const notes: string[] = []
     const { phase, main } = await read($, worktree)
     if (isReadOnlyPhase(phase) && main !== null) {

@@ -1,7 +1,9 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { activate, mountPane, startSession, world } from './world'
+import { railArt } from '../hooks/rail-art'
+import type { RailArtFigures } from '../hooks/rail-art'
+import { activate, mountBand, mountPane, startSession, world } from './world'
 
 const AUTOPILOT = { foresight: 4, crew: 3, tenacity: 5, autonomy: 5, proof: 4, voice: 2 }
 const DECIDE = { ...AUTOPILOT, autonomy: 4 }
@@ -80,4 +82,126 @@ test('a dial lowered while the question waits stops Autopilot answering it', asy
   state.answer({ 'Which database?': 'SQLite' })
   expect((await pending).result).toMatchObject({ answers: { 'Which database?': 'SQLite' } })
   expect(state.notified).toEqual([])
+})
+
+// The rail as each surface shows it: the desktop's dials pill (its tone, its
+// caption, its ring) and the terminal's dials item.
+async function rail($: Engine) {
+  const desktop = JSON.stringify(await (await mountBand($, 'desktop')).drawn())
+  const terminal = (await (await mountBand($, 'terminal')).find({ key: 'rail-dials' }))?.text ?? ''
+  return { desktop, terminal }
+}
+
+test('on Autopilot the rail counts down a waiting question, then says what it picked until the person types', async ($, on) => {
+  const state = world(on, { isRepo: false, store: { dials: AUTOPILOT } })
+  await startSession($)
+  expect((await rail($)).desktop).not.toContain('pill wait')
+  const pending = ask($, { tool_use_id: 'toolu_1' })
+  await state.clock.advance(0)
+
+  let now = await rail($)
+  expect(now.desktop).toContain('class=\\"pill wait\\"')
+  expect(now.desktop).toContain('Autopilot picks Postgres, Lint in 15 min unless you answer')
+  expect(now.terminal).toContain('Dials Autopilot · picks Postgres, Lint in 15 min')
+  // The terminal hides the rail under the dialog: the dialog's line says it.
+  expect(state.notices).toContain('Autopilot picks Postgres, Lint in 15 min unless you answer')
+  const fullRing = /stroke-dasharray=\\"([\d.]+) /.exec(now.desktop)![1]
+
+  await state.clock.advance(10 * MINUTE)
+  now = await rail($)
+  expect(now.desktop).toContain('Autopilot picks Postgres, Lint in 5 min unless you answer')
+  expect(Number(/stroke-dasharray=\\"([\d.]+) /.exec(now.desktop)![1])).toBeLessThan(Number(fullRing) / 2)
+  expect(state.notices).toContain('Autopilot picks Postgres, Lint in 5 min unless you answer')
+
+  await state.clock.advance(5 * MINUTE)
+  await pending
+  now = await rail($)
+  expect(now.desktop).toContain('class=\\"pill done\\"')
+  expect(now.desktop).toContain('Autopilot answered Postgres, Lint at ')
+  expect(now.desktop).toContain('nobody had for 15 min')
+  expect(now.terminal).toContain('Dials Autopilot · ✓ picked Postgres, Lint for you')
+  expect(state.saved.autopilot).toMatchObject({ answered: { kind: 'answered', picked: 'Postgres, Lint' } })
+
+  // A notification arriving is not the person: the check stays.
+  await $.prompt.submit({ text: 'task done', wait: false, origin: { kind: 'task-notification' } as never })
+  expect((await rail($)).desktop).toContain('pill done')
+  await $.prompt.submit({ text: 'thanks', wait: false, origin: { kind: 'composer' } })
+  now = await rail($)
+  expect(now.desktop).not.toContain('pill done')
+  expect(now.terminal).not.toContain('pick')
+  expect(state.saved.autopilot).toBeNull()
+})
+
+test('the cue goes when the person answers, and never shows below Autopilot', async ($, on) => {
+  const state = world(on, { isRepo: false, store: { dials: AUTOPILOT } })
+  await startSession($)
+  const pending = ask($, { tool_use_id: 'toolu_2' })
+  await state.clock.advance(2 * MINUTE)
+  expect((await rail($)).desktop).toContain('pill wait')
+  state.answer({ 'Which database?': 'SQLite' })
+  await pending
+  const after = await rail($)
+  expect(after.desktop).not.toContain('pill wait')
+  expect(after.desktop).not.toContain('pill done')
+
+  // Lowered while a question waits: the rail drops the cue at once.
+  const again = ask($, { tool_use_id: 'toolu_3' })
+  await state.clock.advance(MINUTE)
+  expect((await rail($)).desktop).toContain('pill wait')
+  const ui = await mountPane($, 'terminal')
+  await activate(ui, 'tab-dials')
+  await activate(ui, 'preset-Balanced')
+  const lowered = await rail($)
+  expect(lowered.desktop).not.toContain('pill wait')
+  expect(lowered.terminal).not.toContain('picks')
+  state.answer({ 'Which database?': 'SQLite' })
+  await again
+})
+
+test('two questions waiting: the rail counts down the sooner and says how many', async ($, on) => {
+  const state = world(on, { isRepo: false, store: { dials: AUTOPILOT } })
+  await startSession($)
+  const first = ask($, { tool_use_id: 'toolu_4' })
+  await state.clock.advance(5 * MINUTE)
+  void ask($, { tool_use_id: 'toolu_5' })
+  await state.clock.advance(0)
+  expect((await rail($)).desktop).toContain('Autopilot picks Postgres, Lint in 10 min unless you answer · 2 questions waiting')
+  await state.clock.advance(10 * MINUTE)
+  await first
+  // The first answered, the second still waits: still counting.
+  expect((await rail($)).desktop).toContain('Autopilot picks Postgres, Lint in 5 min unless you answer')
+})
+
+test('the dials pill keeps its width whatever Autopilot is doing, compacted too', () => {
+  const base: RailArtFigures = { cacheSecondsLeft: null, isWorking: false, cachePercent: null, tokens: null, costUsd: null, preset: 'Autopilot', presetLevels: [4, 3, 5, 5, 4, 2], sourcesOn: 0, sourcesTotal: 0, branch: null, autopilot: null }
+  const widths = (compact: boolean) =>
+    [
+      null,
+      { kind: 'waiting', secondsLeft: 840, totalSeconds: 900, picked: 'Red', count: 1 },
+      { kind: 'waiting', secondsLeft: 12, totalSeconds: 900, picked: 'A much longer pick than usual', count: 3 },
+      { kind: 'answered', at: '4:12 am', picked: 'Red', waitedMinutes: 15 },
+    ].map(autopilot => {
+      const pills = railArt({ ...base, autopilot } as RailArtFigures, new Set(compact ? ['dials'] : []))
+      return pills.find(pill => pill.id === 'dials')!
+    })
+  for (const compact of [false, true]) {
+    const pills = widths(compact)
+    expect(new Set(pills.map(pill => pill.width)).size).toBe(1)
+    // Compacted to its icon, the pill still shows the ring and the check.
+    expect(pills[1]!.source).toContain('stroke="#f0a35e"')
+    expect(pills[3]!.source).toContain('stroke="#3fb950"')
+  }
+})
+
+test('below Autopilot a question shows nothing on the rail and no line under it', async ($, on) => {
+  const state = world(on, { isRepo: false, store: { dials: DECIDE } })
+  await startSession($)
+  const pending = ask($, { tool_use_id: 'toolu_6' })
+  await state.clock.advance(MINUTE)
+  const now = await rail($)
+  expect(now.desktop).not.toContain('pill wait')
+  expect(now.terminal).not.toContain('pick')
+  expect(state.notices).toEqual([])
+  state.answer({ 'Which database?': 'SQLite' })
+  await pending
 })

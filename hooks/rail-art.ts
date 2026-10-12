@@ -10,6 +10,13 @@ import { brandMark } from './brand'
 // no pane of its own only explains itself on hover).
 export type RailPill = { id: string; tab: Tab | 'pane' | null; caption: string; width: number; height: number; source: string; hotSource: string }
 
+// Autopilot answering for a person who is away, as the rail shows it (only
+// while Autonomy is on Autopilot): a question waiting, with the time left of
+// its wait, or what was picked once nobody answered.
+export type RailAutopilot =
+  | { kind: 'waiting'; secondsLeft: number; totalSeconds: number; picked: string; count: number }
+  | { kind: 'answered'; at: string; picked: string; waitedMinutes: number }
+
 export type RailArtFigures = {
   cacheSecondsLeft: number | null
   isWorking: boolean
@@ -25,6 +32,7 @@ export type RailArtFigures = {
   sourcesOn: number
   sourcesTotal: number
   branch: string | null
+  autopilot: RailAutopilot | null
 }
 
 const HEIGHT = 28
@@ -85,6 +93,19 @@ function branch(x: number, y: number, isOn: boolean): string {
   return `<g transform="translate(${x} ${y})" fill="none" stroke="${color}" stroke-width="1.4" stroke-linecap="round"><circle cx="3.5" cy="2.5" r="1.8"/><circle cx="3.5" cy="12" r="1.8"/><circle cx="11" cy="4.5" r="1.8"/><path d="M3.5 4.3v5.9M11 6.3c0 3-3.2 2.8-6.3 4.2"/></g>`
 }
 
+// Autopilot's wait in the radar's place: a ring that runs down as the
+// question waits, amber like a timer; then a check, once it has answered.
+function waitRing(x: number, y: number, share: number): string {
+  const r = 6
+  const c = 2 * Math.PI * r
+  const left = Math.max(0, Math.min(1, share))
+  return `<g transform="translate(${x} ${y})"><circle cx="7" cy="7" r="${r}" fill="none" stroke="var(--track)" stroke-width="2"/><circle cx="7" cy="7" r="${r}" fill="none" stroke="#f0a35e" stroke-width="2" stroke-linecap="round" stroke-dasharray="${(c * left).toFixed(2)} ${c.toFixed(2)}" transform="rotate(-90 7 7)"/><path d="M7 4.2V7l1.8 1.2" fill="none" stroke="#f0a35e" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></g>`
+}
+
+function answeredMark(x: number, y: number): string {
+  return `<g transform="translate(${x} ${y})"><circle cx="7" cy="7" r="6.4" fill="rgba(63,185,80,0.2)" stroke="#3fb950" stroke-width="1.4"/><path d="M4.2 7.2 6.2 9.2 9.9 5" fill="none" stroke="#3fb950" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>`
+}
+
 // The pills that can give up their words for the rail to fit one row, in the
 // order they do, down to their icon. The mark (always alone), the cache
 // gauge, the cost and the sources count (always its icon and number) never do.
@@ -95,12 +116,12 @@ export function railArt(figures: RailArtFigures, iconOnly: ReadonlySet<Compactab
   const pills: RailPill[] = []
   const mid = HEIGHT / 2
 
-  const pill = (id: string, width: number, tab: RailPill['tab'], caption: string, draw: (left: number) => string) => {
+  const pill = (id: string, width: number, tab: RailPill['tab'], caption: string, draw: (left: number) => string, tone = '') => {
     const whole = Math.ceil(width)
     const shown = Math.ceil(whole * SCALE)
     const tall = Math.round(HEIGHT * SCALE)
     const svg = (isHot: boolean) => {
-      const inner = `<rect x="0.5" y="0.5" width="${whole - 1}" height="${HEIGHT - 1}" rx="${(HEIGHT - 1) / 2}" class="pill${isHot ? ' hot' : ''}"/>${draw(0)}`
+      const inner = `<rect x="0.5" y="0.5" width="${whole - 1}" height="${HEIGHT - 1}" rx="${(HEIGHT - 1) / 2}" class="pill${tone}${isHot ? ' hot' : ''}"/>${draw(0)}`
       // Theme colours are custom properties, which a presentation attribute
       // does not read everywhere; a style declaration does.
       return `<svg xmlns="http://www.w3.org/2000/svg" width="${shown}" height="${tall}" viewBox="0 0 ${whole} ${HEIGHT}">${STYLE}${paint(inner)}</svg>`
@@ -143,11 +164,29 @@ export function railArt(figures: RailArtFigures, iconOnly: ReadonlySet<Compactab
     pill('tokens', width, null, caption, left => `${updown(left + 12, mid)}<text x="${left + 12 + 12 + 7}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5" font-weight="600" fill="var(--text)" class="num">${escape(label)}</text>`)
   }
 
+  // The dials pill. On Autopilot it also says when Autopilot is answering for
+  // you: tinted, its radar swapped for a ring that runs down while a question
+  // waits, then a check once it answered. Same width either way, so nothing
+  // beside it moves, and the icon stays when the pill gives up its words.
   {
     const label = figures.preset
     const isIcon = iconOnly.has('dials')
     const width = isIcon ? 12 + 14 + 12 : 12 + 14 + 7 + textWidth(label, 12.5, true) + 14
-    pill('dials', width, 'dials', `Dials: ${label} · tune how the agent works`, left => isIcon ? radarMini(left + 12, mid - 7, figures.presetLevels) : `${radarMini(left + 12, mid - 7, figures.presetLevels)}<text x="${left + 12 + 14 + 7}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5" font-weight="600" fill="var(--text)">${escape(label)}</text>`)
+    const auto = figures.autopilot
+    const icon = (left: number) =>
+      auto === null
+        ? radarMini(left + 12, mid - 7, figures.presetLevels)
+        : auto.kind === 'waiting'
+          ? waitRing(left + 12, mid - 7, auto.secondsLeft / Math.max(1, auto.totalSeconds))
+          : answeredMark(left + 12, mid - 7)
+    const caption =
+      auto === null
+        ? `Dials: ${label} · tune how the agent works`
+        : auto.kind === 'waiting'
+          ? `Autopilot picks ${auto.picked} ${auto.secondsLeft < 60 ? 'in under a minute' : `in ${Math.ceil(auto.secondsLeft / 60)} min`} unless you answer${auto.count > 1 ? ` · ${auto.count} questions waiting` : ''}`
+          : `Autopilot answered ${auto.picked} at ${auto.at}: nobody had for ${auto.waitedMinutes} min`
+    const tone = auto === null ? '' : auto.kind === 'waiting' ? ' wait' : ' done'
+    pill('dials', width, 'dials', caption, left => (isIcon ? icon(left) : `${icon(left)}<text x="${left + 12 + 14 + 7}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5" font-weight="600" fill="var(--text)">${escape(label)}</text>`), tone)
   }
 
   {
@@ -172,5 +211,9 @@ const STYLE = `<style>
   .num { font-variant-numeric: tabular-nums; }
   .pill { fill: var(--pill); stroke: var(--pillLine); }
   .pill.hot { fill: var(--hot); stroke: var(--hotLine); }
+  .pill.wait { fill: rgba(240,163,94,0.12); stroke: rgba(240,163,94,0.6); }
+  .pill.wait.hot { fill: rgba(240,163,94,0.22); stroke: rgba(240,163,94,0.9); }
+  .pill.done { fill: rgba(63,185,80,0.12); stroke: rgba(63,185,80,0.6); }
+  .pill.done.hot { fill: rgba(63,185,80,0.22); stroke: rgba(63,185,80,0.9); }
 </style>`
 

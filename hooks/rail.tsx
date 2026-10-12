@@ -6,7 +6,7 @@ import type { RenderElement } from 'claude-code'
 import type { Tab } from '../types'
 import { cacheGauge, drawnButton } from './kit'
 import { COMPACTABLE, railArt } from './rail-art'
-import type { Compactable, RailPill } from './rail-art'
+import type { Compactable, RailAutopilot, RailPill } from './rail-art'
 import { tokens } from './ui'
 import type { Ui } from './ui'
 
@@ -23,6 +23,7 @@ export type RailFigures = {
   sourcesOn: number
   sourcesTotal: number
   branch: string | null
+  autopilot: RailAutopilot | null
 }
 
 // A desktop cell's width in pixels, guessed low: the band is measured in the
@@ -142,6 +143,12 @@ export function drawRail(ui: Ui, figures: RailFigures, open: (tab: Tab | null) =
         <Text>
           <Text dimColor>Dials </Text>
           <Text bold>{figures.preset}</Text>
+          {figures.autopilot?.kind === 'waiting' && (
+            <Text color="warning">
+              {' '}· picks {figures.autopilot.picked} {figures.autopilot.secondsLeft < 60 ? 'in under a minute' : `in ${Math.ceil(figures.autopilot.secondsLeft / 60)} min`}
+            </Text>
+          )}
+          {figures.autopilot?.kind === 'answered' && <Text color="success"> · ✓ picked {figures.autopilot.picked} for you</Text>}
         </Text>,
       )}
       {item(

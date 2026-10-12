@@ -60,6 +60,7 @@ declare module 'claude-code' {
       worktree: Worktree
       slots: Slot[]
       isTurnRunning: boolean
+      lastReplyAt: number | null
       isBandHidden: boolean
       isStepsShown: boolean
       isHeadStartPrompted: boolean

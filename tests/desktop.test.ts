@@ -29,6 +29,7 @@ test('every tab draws on the desktop with content in it', async ($, on) => {
     ],
   }))
   on('fs.read', ($, e) => ({ value: e.path.endsWith('refunds.md') ? 'Refunds settle in 5 business days. Partial refunds keep the original currency.' : 'Amounts are integer cents. Never use floats for money.' }))
+  on('turn.complete', ($, e) => ({ text: e.answer }))
   await startSession($)
   const ui = await mountPane($, 'desktop')
 
@@ -56,6 +57,7 @@ test('every tab draws on the desktop with content in it', async ($, on) => {
   await ui.press({ key: 'tab-worktree' })
   await show(ui, 'worktree-off')
 
+  await $.turn.complete({ turnId: 't1', answer: 'done', durationMs: 1_000, reason: 'answer', isAborted: false })
   const band = await $.ui.mount({
     plugin: 'craft-shop',
     surface: 'desktop',

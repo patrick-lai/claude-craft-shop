@@ -4,15 +4,14 @@
 import type { RenderElement } from 'claude-code'
 
 import type { Tab } from '../types'
-import { svg, track } from './kit'
-import { tokens } from './ui'
+import { cacheGauge } from './kit'
 import type { Ui } from './ui'
 
 export type RailFigures = {
   isPaneOpen: boolean
-  percent: number
-  used: number
-  window: number
+  isWorking: boolean
+  // Seconds the prompt cache stays warm, null before the first reply.
+  cacheSecondsLeft: number | null
   // Share of the last request's input the prompt cache served, null before one.
   cachePercent: number | null
   costUsd: number | null
@@ -22,17 +21,11 @@ export type RailFigures = {
   branch: string | null
 }
 
-const FILL: Record<string, string> = { success: '#3fb6a8', warning: '#d6a24a', error: '#e5534b' }
-
-function windowColor(percent: number): string {
-  return percent >= 85 ? 'error' : percent >= 65 ? 'warning' : 'success'
-}
-
 export function drawRail(ui: Ui, figures: RailFigures, open: (tab: Tab | null) => void) {
-  const { Box, Text, Button } = ui
-  const rich = ui.Svg !== undefined
-  const color = windowColor(figures.percent)
-  const cacheColor = figures.cachePercent === null ? undefined : figures.cachePercent >= 70 ? 'success' : figures.cachePercent >= 30 ? 'warning' : 'error'
+  const { Box, Text, Button, Svg } = ui
+  const left = figures.cacheSecondsLeft
+  const isWarm = figures.isWorking || (left !== null && left > 0)
+  const clock = left === null ? '' : `${Math.floor(left / 60)}:${String(Math.floor(left % 60)).padStart(2, '0')}`
   const item = (key: string, tab: Tab | null, children: RenderElement) => (
     <Button key={key} plain onPress={() => open(tab)}>
       {children}
@@ -48,34 +41,32 @@ export function drawRail(ui: Ui, figures: RailFigures, open: (tab: Tab | null) =
             ▸ Craftshop
           </Text>,
         )}
-      <Box gap={1} alignItems="center">
-        {item(
-          'rail-window',
-          'context',
-          <Text>
-            <Text dimColor>Context </Text>
-            <Text color={color} bold>
-              {figures.percent}%
+      {left !== null && (
+        <Box gap={1} alignItems="center">
+          {Svg !== undefined ? (
+            <Svg source={cacheGauge(left, figures.isWorking, figures.cachePercent)} alt={isWarm ? `Prompt cache warm, ${clock} left` : 'Prompt cache cold'} width={70} height={20} isInteractive />
+          ) : (
+            <Text color={isWarm ? 'warning' : undefined} dimColor={!isWarm}>
+              {'▮'.repeat(figures.isWorking ? 5 : Math.ceil(left / 60))}
+              {'▯'.repeat(figures.isWorking ? 0 : 5 - Math.ceil(left / 60))}
             </Text>
-            <Text dimColor>
-              {' '}
-              {tokens(figures.used)}/{tokens(figures.window)}
-            </Text>
-          </Text>,
-        )}
-        {rich && svg(ui, track(figures.percent / 100, 56, FILL[color]), `${figures.percent}% of the context window`, 56, 6)}
-      </Box>
-      {figures.cachePercent !== null &&
-        item(
-          'rail-cache',
-          'context',
-          <Text>
-            <Text dimColor>Cache </Text>
-            <Text color={cacheColor} bold>
-              {figures.cachePercent}%
-            </Text>
-          </Text>,
-        )}
+          )}
+          {item(
+            'rail-cache',
+            'context',
+            figures.isWorking ? (
+              <Text dimColor>Working</Text>
+            ) : isWarm ? (
+              <Text>
+                <Text dimColor>Cache warm </Text>
+                <Text bold>{clock}</Text>
+              </Text>
+            ) : (
+              <Text dimColor>Cache cold</Text>
+            ),
+          )}
+        </Box>
+      )}
       {figures.costUsd !== null &&
         item(
           'rail-cost',

@@ -36,6 +36,30 @@ test('/craft opens the pane on the tab it names', async ($, on) => {
   expect(await ui.find({ type: 'Button', key: 'pip-crew-1' })).toBeDefined()
 })
 
+test("the rail's cache gauge runs down for 5 minutes after a reply, then goes cold", async ($, on) => {
+  const { clock } = world(on, { isRepo: false })
+  on('turn.complete', ($, e) => ({ text: e.answer }))
+  await startSession($)
+  const band = await $.ui.mount({
+    plugin: 'craft-shop',
+    surface: 'desktop',
+    component: 'AbovePrompt',
+    props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 100, scroll: { offset: 0, bodyRows: 10 }, view: {} },
+  })
+  const cache = async () => (await band.find({ type: 'Button', key: 'rail-cache' }))?.text
+  expect(await cache()).toBeUndefined()
+
+  await $.turn.complete({ turnId: 't1', answer: 'done', durationMs: 1_000, reason: 'answer', isAborted: false })
+  await band.redraw()
+  expect(await cache()).toBe('Cache warm 5:00')
+  await clock.advance(3 * 60_000 + 10_000)
+  await band.redraw()
+  expect(await cache()).toBe('Cache warm 1:50')
+  await clock.advance(2 * 60_000)
+  await band.redraw()
+  expect(await cache()).toBe('Cache cold')
+})
+
 test('with no worktree news the band is a status rail whose items open their tab', async ($, on) => {
   world(on, { isRepo: false })
   await startSession($)

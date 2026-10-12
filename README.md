@@ -21,8 +21,7 @@ Answer `y` to add the marketplace, then pick a scope (user scope is first). Next
 Open the pane with `/craft`, or `/craft worktree|dials|context` to go straight to a tab. The pane opens by itself where the surface docks panes: the desktop app, and the terminal's fullscreen layout (`/tui fullscreen`). Keys `1`–`3` switch tabs while the pane has focus.
 
 The rail above the prompt shows Craftshop's status at a glance:
-- how full the context window is;
-- how much of the last request the prompt cache served;
+- the prompt cache: a flame and five bars that run down over the 5 minutes after each reply, as in CommissionAI. While they last, your next message reuses the cached chat, so it is faster and cheaper. Hover it for details;
 - the session's cost;
 - the dials preset;
 - how many sources are on;

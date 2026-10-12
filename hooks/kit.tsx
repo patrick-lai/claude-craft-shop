@@ -252,3 +252,25 @@ export function presetGlyph(levels: number[], color: string, size = 18): string 
   const shape = levels.map((level, index) => point(index, level)).join(' ')
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 18 18"><polygon points="${ring}" fill="none" stroke="${color}" stroke-opacity="0.35"/><polygon points="${shape}" fill="${color}" fill-opacity="0.3" stroke="${color}" stroke-width="1.2" stroke-linejoin="round"/></svg>`
 }
+
+// CommissionAI's prompt-cache gauge: a flame and five bars, one per minute of
+// the cache's five, running down after each reply. Hovering it explains it.
+export function cacheGauge(secondsLeft: number, isWorking: boolean, hitPercent: number | null): string {
+  const colors = ['#5aaeff', '#2fcfa6', '#74d16f', '#a8c94a', '#d8bf45']
+  const lit = isWorking ? 5 : Math.ceil(secondsLeft / 60)
+  const isWarm = isWorking || secondsLeft > 0
+  const bars = colors
+    .map((color, index) => `<rect x="${24 + index * 9}" y="3" width="6" height="14" rx="3" fill="${index < lit ? color : '#8b949e'}" fill-opacity="${index < lit ? 1 : 0.3}"/>`)
+    .join('')
+  const flame = `<path d="M9 2.5c.6 2.7 3.6 4.3 3.6 7.9A4.6 4.6 0 0 1 3.4 10.6c0-1.6.7-2.8 1.7-3.8.1 1.3.8 2.2 1.8 2.6C6.5 6.9 7.4 4.7 9 2.5z" fill="none" stroke="${isWarm ? '#e8a33d' : '#8b949e'}" stroke-width="1.5" stroke-linejoin="round"/>`
+  const minutes = Math.floor(secondsLeft / 60)
+  const seconds = String(Math.floor(secondsLeft % 60)).padStart(2, '0')
+  const lines = isWorking
+    ? ['Prompt cache in use', 'The agent is working, reusing your chat from the cache.']
+    : isWarm
+      ? ['Prompt cache warm', 'The agent keeps your chat so far in a short-lived cache. While it is warm, your next message reuses it: faster and much cheaper.', `Bars show the time left: ${minutes}:${seconds}. The cache lasts 5 min after the last reply, then rests.`, 'Good time to send a follow-up.']
+      : ['Prompt cache cold', 'More than 5 minutes since the last reply, so the cache has rested. Your next message reads the whole chat again: slower and costlier.']
+  if (hitPercent !== null) lines.push(`The last request read ${hitPercent}% of its input from the cache.`)
+  const title = lines.map(line => escape(line)).join('\n\n')
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="70" height="20" viewBox="0 0 70 20"><title>${title}</title><rect width="70" height="20" fill="transparent"/>${flame}${bars}</svg>`
+}

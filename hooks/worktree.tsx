@@ -34,6 +34,7 @@ const worktree = atom({ plugin: 'craft-shop', key: 'worktree' } as const, IDLE_W
 const isStepsShown = atom({ plugin: 'craft-shop', key: 'isStepsShown' } as const, false)
 const dials = atom({ plugin: 'craft-shop', key: 'dials' } as const, BALANCED)
 const sources = atom({ plugin: 'craft-shop', key: 'sources' } as const, [])
+const lastReplyAt = atom({ plugin: 'craft-shop', key: 'lastReplyAt' } as const, null)
 
 type $ = EngineInterface
 
@@ -453,6 +454,8 @@ export function registerWorktree(on: On, options: PluginOptions): void {
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
     if (e.agentId !== undefined) return done
+    const repliedAt = await $.clock.now()
+    await update($, lastReplyAt, () => repliedAt)
     await update($, isTurnRunning, () => false)
     if ((await read($, worktree)).phase === 'ready') await update($, isBandHidden, () => true)
     return done
@@ -487,7 +490,11 @@ export function registerWorktree(on: On, options: PluginOptions): void {
     if (state.phase === 'off' || (await read($, isBandHidden))) {
       // With no worktree news, the band is Craftshop's status rail. Reading
       // isTurnRunning redraws it as each turn starts and ends.
-      await read($, isTurnRunning)
+      const isWorking = await read($, isTurnRunning)
+      const repliedAt = await read($, lastReplyAt)
+      const now = await $.clock.now()
+      const cacheSecondsLeft = repliedAt === null ? null : Math.max(0, Math.round((CACHE_TTL_MS - (now - repliedAt)) / 1000))
+      tickWhileWarm($, cacheSecondsLeft !== null && cacheSecondsLeft > 0 && !isWorking)
       const usage = await $.session.usage({ breakdown: 'summary' })
       const breakdown = usage.context.breakdown
       const last = breakdown?.apiUsage ?? null
@@ -498,9 +505,8 @@ export function registerWorktree(on: On, options: PluginOptions): void {
         ui,
         {
           isPaneOpen: (await $.ui.panes()).some(one => one.id === PANE),
-          percent: breakdown?.percentage ?? usage.context.percent ?? 0,
-          used: breakdown?.totalTokens ?? usage.context.tokens ?? 0,
-          window: breakdown?.rawMaxTokens ?? usage.context.window,
+          isWorking,
+          cacheSecondsLeft,
           cachePercent: last === null || input === 0 ? null : Math.round((last.cache_read_input_tokens / input) * 100),
           costUsd: usage.cost?.usd ?? null,
           preset: presetName(await read($, dials)),
@@ -721,6 +727,19 @@ export function registerWorktree(on: On, options: PluginOptions): void {
       </Box>,
     )
   })
+}
+
+// The prompt cache lives 5 minutes past the last reply. While it is warm
+// the rail redraws every few seconds so its bars run down.
+const CACHE_TTL_MS = 5 * 60_000
+let cacheTick: Timer | null = null
+
+function tickWhileWarm($: $, isWarm: boolean): void {
+  if (isWarm && cacheTick === null) cacheTick = $.clock.every(5_000, () => $.ui.invalidate('ui.render'))
+  if (!isWarm && cacheTick !== null) {
+    cacheTick.cancel()
+    cacheTick = null
+  }
 }
 
 // The rail's items open the pane, at their tab when they name one.

@@ -1,0 +1,29 @@
+{
+  "name": "claude-fish-stack-mod",
+  "version": "0.2.0",
+  "description": "fishStack: a Claude Code mod with a perm worktree head start, crew dials and a context library, in one pane and a status rail.",
+  "keywords": [
+    "claude-code",
+    "claude-code-plugin",
+    "claude-code-mod",
+    "worktree",
+    "agents"
+  ],
+  "homepage": "https://github.com/patrick-lai/claude-fish-stack-mod#readme",
+  "bugs": "https://github.com/patrick-lai/claude-fish-stack-mod/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/patrick-lai/claude-fish-stack-mod.git"
+  },
+  "license": "MIT",
+  "author": "Patrick Lai",
+  "files": [
+    ".claude-plugin/plugin.json",
+    ".claude-plugin/marketplace.json",
+    "hooks",
+    "types",
+    "assets",
+    "README.md",
+    "LICENSE"
+  ]
+}

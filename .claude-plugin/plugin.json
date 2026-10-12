@@ -1,11 +1,13 @@
 {
   "name": "fishstack",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A fishStack pane for Claude Code: a perm worktree with a read-only head start, crew dials and a context library.",
   "author": {
     "name": "Patrick Lai"
   },
-  "repository": "https://github.com/patrick-lai/claude-fishstack",
+  "license": "MIT",
+  "homepage": "https://github.com/patrick-lai/claude-fish-stack-mod",
+  "repository": "https://github.com/patrick-lai/claude-fish-stack-mod",
   "types": "./types/index.d.ts",
   "userConfig": {
     "autoWorktree": {

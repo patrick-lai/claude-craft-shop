@@ -13,7 +13,7 @@ A Claude Code mod that adds a **fishStack** pane with three tabs (**Perm worktre
 At the prompt of a Claude Code terminal session (2.1.296 or newer):
 
 ```
-/plugin install fishstack --marketplace patrick-lai/claude-fishstack
+/plugin install fishstack --marketplace patrick-lai/claude-fish-stack-mod
 ```
 
 Answer `y` to add the marketplace, then pick a scope (user scope is first). Next you get a screen of options. The defaults work as they are.
@@ -112,9 +112,9 @@ e2e/shoot.sh                    # draw every tab on the desktop surface and scre
 
 ## The mark
 
-fishStack's mark is a round disc, teal to blue, with three lenses rising in a stack: a school that is also a stack of layers. It is drawn in one place, `hooks/brand.ts`, and `node e2e/brand.mjs` writes it out:
+fishStack's mark is "Moonlit": two pale koi chasing round a ripple on night water, a school of two. It is drawn in one place, `hooks/brand.ts`, and `node e2e/brand.mjs` writes it out:
 
-- `assets/icon.svg`: full colour. The leading lens has an eye where it is drawn at 32px or more.
-- `assets/icon-template.svg`: one colour, black on clear, with no eye, for a macOS menu-bar (template) icon.
+- `assets/icon.svg`: full colour. The koi have eyes where the mark is drawn at 32px or more.
+- `assets/icon-template.svg`: one colour, black on clear, with fuller fish and no eyes, for a macOS menu-bar (template) icon.
 
 The rail shows the mark alone; the name is in the pane.

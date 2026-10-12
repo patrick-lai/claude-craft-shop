@@ -22,15 +22,14 @@ test('the tabs switch on press and each draws its empty state', async ($, on) =>
   }
 })
 
-test('/fish opens the pane on the tab it names', async ($, on) => {
+test('/fishstack, or /fs for short, opens the pane on the tab it names', async ($, on) => {
   world(on, { isRepo: false })
   await startSession($)
-  const opened = await $.command.run({
-    command: 'fish',
-    args: 'dials',
-    origin: { kind: 'composer' },
-    presentation: { isFullscreen: true, columns: 200 },
-  })
+  const run = (command: string, args: string) =>
+    $.command.run({ command, args, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 200 } })
+  expect((await run('fs', 'nope')).text).toBe('No tab named "nope". Try /fishstack worktree, dials or context.')
+  expect((await run('fs', '')).text).toBe('Opened fishStack.')
+  const opened = await run('fishstack', 'dials')
   expect(opened.text).toBe('Opened fishStack · Dials.')
   const ui = await mountPane($, 'terminal')
   expect(await ui.find({ type: 'Button', key: 'pip-crew-1' })).toBeDefined()

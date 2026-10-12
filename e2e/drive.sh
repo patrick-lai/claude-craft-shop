@@ -51,9 +51,9 @@ c wait fish '❯ 2\. Yes, I trust this folder|❯ Yes, I trust this folder' 10
 tmux send-keys -t fish Enter
 c wait fish 'Read-only until the worktree is ready' 30
 pass 'the band says read-only while the worktree is prepared'
-c type fish '/fish dials'
+c type fish '/fishstack dials'
 c click fish '[ Balanced ]' 2
-c type fish '/fish worktree'
+c type fish '/fishstack worktree'
 c shot fish "$out/01-head-start.ansi"
 
 c ask fish 'Create a file hello.txt containing the line: hello from fishStack. If you cannot write yet, say so and end your turn.'
@@ -69,12 +69,12 @@ git -C "$app" worktree list | grep -q "$(basename "$slot")" || fail 'the slot is
 pass "the session moved into $slot and hello.txt landed there, not in the main checkout"
 c idle fish 180
 close_diff_panel
-c type fish '/fish worktree'
+c type fish '/fishstack worktree'
 c wait fish '● Ready · fish/' 30
 c shot fish "$out/03-worktree.ansi"
 
 echo '2. Crew dials'
-c type fish '/fish dials'
+c type fish '/fishstack dials'
 close_diff_panel
 c click fish '[ Balanced ]' 2
 c click fish '[ Quick ]' 2
@@ -90,7 +90,7 @@ screen | grep -q 'Voice: Teach, Foresight: Dive in' || fail 'the agent did not e
 pass 'the agent echoes the working style it was given'
 
 echo '3. Context library'
-c type fish '/fish context'
+c type fish '/fishstack context'
 c click fish 'Or paste a link' 0
 c type fish "The Workshop API's launch codename is BLUE HERON."
 c wait fish '1 of 1 sources on' 10

@@ -20,7 +20,7 @@ Answer `y` to add the marketplace, then pick a scope (user scope is first). Next
 
 fishStack was called Craftshop. Its first session copies what Craftshop saved (dials, context libraries, the Perm worktree switch) into its own store, once, and never over anything fishStack already holds. Options set under `pluginConfigs["craft-shop"]` do not carry over: set them again in `/config`.
 
-Open the pane with `/fish`, or `/fish worktree|dials|context` to go straight to a tab. The pane opens by itself where the surface docks panes: the desktop app, and the terminal's fullscreen layout (`/tui fullscreen`). Keys `1`–`3` switch tabs while the pane has focus.
+Open the pane with `/fishstack` (or `/fs` for short), or `/fishstack worktree|dials|context` to go straight to a tab. The pane opens by itself where the surface docks panes: the desktop app, and the terminal's fullscreen layout (`/tui fullscreen`). Keys `1`–`3` switch tabs while the pane has focus.
 
 The rail above the prompt shows fishStack's status at a glance:
 - the prompt cache: a flame and five bars that run down over the 5 minutes after each reply, as in CommissionAI. While they last, your next message reuses the cached chat, so it is faster and cheaper. Hover it for details;

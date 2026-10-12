@@ -6,7 +6,7 @@ import type { EngineInterface, On, PromptComposeSection } from 'claude-code'
 import type { DialValues, Folder, Source } from '../types'
 import { CONTEXT_SECTION_ID, contextSection, legacyStoreKey, libraryStoreKey, parseLibrary } from './context'
 import { BALANCED, brief, DIALS_SECTION_ID, DIALS_STORE_KEY, isDialValues } from './dials'
-import { FISH_COMMAND } from './pane'
+import { FISH_COMMANDS } from './pane'
 import { headStartNote, IDLE_WORKTREE, isReadOnlyPhase } from './worktree'
 
 const dials = atom({ plugin: 'fishstack', key: 'dials' } as const, BALANCED)
@@ -69,7 +69,7 @@ export function registerSession(on: On): void {
     const library = parseLibrary(await $.store.get(libraryStoreKey(root)), await $.store.get(legacyStoreKey(root)))
     await update($, sources, () => library.sources)
     await update($, folders, () => library.folders)
-    await $.command.register(FISH_COMMAND)
+    for (const command of FISH_COMMANDS) await $.command.register(command)
     return started
   })
 

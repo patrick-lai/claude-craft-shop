@@ -6,7 +6,7 @@ import type { ClientProps, ElementConstructor, EngineInterface, On } from 'claud
 
 import type { DialKey, DialValues, Tab } from '../types'
 import { presetArt } from './art'
-import { card, chip, dialIcon, drawnButton, isRich, segmented, svg, track } from './kit'
+import { card, chip, dialIcon, drawnButton, isRich, svg, track } from './kit'
 import { bar, frame, PANE, resolveUi } from './ui'
 import type { Ui } from './ui'
 
@@ -232,7 +232,6 @@ function pips(level: number, color: string): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="106" height="18" viewBox="0 0 106 18">${cells}</svg>`
 }
 
-const LEVELS = [1, 2, 3, 4, 5].map(level => ({ value: String(level), label: String(level) }))
 
 // What the radar's Client posts: a dial and its level, and whether the press
 // selects that dial. Posted by code, so checked before it moves anything.
@@ -362,12 +361,11 @@ export function registerDials(on: On): void {
                 </Box>
               )}
             </Box>
-            {!isSelected && (
-              <Box gap={1} alignItems="center">
-                <Button key={`less-${dial.key}`} label="−" dimColor onPress={() => pick(dial.key, value - 1)} />
-                <Button key={`more-${dial.key}`} label="+" dimColor onPress={() => pick(dial.key, value + 1)} />
-              </Box>
-            )}
+            <Box gap={1} alignItems="center">
+              <Button key={`less-${dial.key}`} label="−" dimColor onPress={() => pick(dial.key, value - 1)} />
+              <Button key={`more-${dial.key}`} label="+" dimColor onPress={() => pick(dial.key, value + 1)} />
+              {isSelected && <Button key={`done-${dial.key}`} label="Done" onPress={() => void update($, selectedDial, () => null)} />}
+            </Box>
           </Box>,
           <Box>
             <Text wrap="wrap">
@@ -379,10 +377,7 @@ export function registerDials(on: On): void {
           </Box>,
           isSelected && (
             <Box flexDirection="column" gap={1} marginTop={1}>
-              <Box justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1}>
-                <Text dimColor>{dial.question}</Text>
-                {segmented(ui, `level-${dial.key}`, LEVELS, String(value), picked => pick(dial.key, Number(picked)))}
-              </Box>
+              <Text dimColor>{dial.question}</Text>
               {card(
                 ui,
                 `told-${dial.key}`,

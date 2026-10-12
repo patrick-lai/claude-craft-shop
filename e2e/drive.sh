@@ -188,7 +188,7 @@ c click fish 'Or paste a link' 0
 c type fish "The Workshop API's launch codename is BLUE HERON."
 c wait fish '1 of 1 sources on' 10
 pass 'a note added in the field is on'
-c click fish 'Make strict' 0
+c click fish '[ Strict ]' 2
 c wait fish 'Strict' 10
 pass 'the note is strict'
 c shot fish "$out/04-context.ansi"

@@ -8,7 +8,7 @@ import type { EngineInterface, On } from 'claude-code'
 
 import type { ContextView, Folder, Source, SourceMode, Tab } from '../types'
 import { switchArt } from './art'
-import { card, chip, drawnButton, folderArt, glyph, GLYPH_COLOR, isRich, svg, tickMeter, track } from './kit'
+import { card, drawnButton, folderArt, glyph, GLYPH_COLOR, isRich, svg, tickMeter, track } from './kit'
 import { bar, frame, PANE, resolveUi, tokens } from './ui'
 import type { Ui } from './ui'
 
@@ -452,7 +452,9 @@ export function registerContext(on: On): void {
                   {onOff(`toggle-${source.id}`, isOn ? 'on' : 'off', () => void setMode($, source.id, isOn ? 'off' : 'guidance'))}
                   {rich ? svg(ui, glyph(source.kind), source.kind, 18, 18) : <Text color={GLYPH_COLOR[source.kind]}>{KIND_MARK[source.kind]}</Text>}
                   <Button key={`open-${source.id}`} plain onPress={go({ openId: isOpen ? null : source.id, isEditingText: false })}>
-                    <Text dimColor>{isOpen ? '▾ ' : '▸ '}</Text>
+                    <Text color="suggestion" bold>
+                      {isOpen ? '▾ ' : '▸ '}
+                    </Text>
                     <Text bold dimColor={!isOn}>
                       {shorten(source.title, Math.max(20, columns - (isNested ? 52 : 46)))}
                     </Text>
@@ -461,10 +463,15 @@ export function registerContext(on: On): void {
                 <Box gap={1} alignItems="center" flexShrink={0}>
                   <Text dimColor>{facts(source).replace(/^\w+ · /, '')}</Text>
                   {isThin(source) && <Text color="warning">may be empty</Text>}
+                  {isThin(source) && <Button key={`thin-refresh-${source.id}`} label="Refresh" dimColor onPress={() => void refresh($, source)} />}
                   {isOn && (
-                    <Button key={`strict-${source.id}`} plain onPress={() => void setMode($, source.id, source.mode === 'strict' ? 'guidance' : 'strict')}>
-                      {source.mode === 'strict' ? chip(ui, 'Strict', 'suggestion') : <Text dimColor>Make strict</Text>}
-                    </Button>
+                    <Button
+                      key={`strict-${source.id}`}
+                      label="Strict"
+                      variant={source.mode === 'strict' ? 'primary' : undefined}
+                      dimColor={source.mode !== 'strict'}
+                      onPress={() => void setMode($, source.id, source.mode === 'strict' ? 'guidance' : 'strict')}
+                    />
                   )}
                 </Box>
               </Box>,
@@ -533,7 +540,9 @@ export function registerContext(on: On): void {
               {members.length > 0 && onOff(`folder-toggle-${folder.id}`, state, () => void setFolderOn($, folder.id, state !== 'on'))}
               {rich && svg(ui, glyph('folder'), 'folder', 18, 18)}
               <Button key={`fold-${folder.id}`} plain onPress={() => void toggleFolderOpen($, folder.id)}>
-                <Text dimColor>{isOpen ? '▾ ' : '▸ '}</Text>
+                <Text color="suggestion" bold>
+                  {isOpen ? '▾ ' : '▸ '}
+                </Text>
                 <Text bold>{folder.name}</Text>
                 <Text dimColor>
                   {members.length === 0 ? '  empty' : `  ${members.length} ${members.length === 1 ? 'source' : 'sources'} · ${onCount} on`}

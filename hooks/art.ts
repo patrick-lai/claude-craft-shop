@@ -13,9 +13,19 @@ export const THEME = `<style>
   .num { font-variant-numeric: tabular-nums; }
 </style>`
 
-// Theme colours as style declarations, which every renderer reads.
+// Theme colours as style declarations, which every renderer reads: one style
+// per element, since a second style attribute is invalid XML and the image
+// fails to load.
 export function paint(markup: string): string {
-  return markup.replace(/(fill|stroke)="var\((--[A-Za-z]+)\)"/g, 'style="$1: var($2)"')
+  return markup.replace(/<[a-z]+\b[^>]*>/g, tag => {
+    const styles: string[] = []
+    const bare = tag.replace(/\s(fill|stroke)="var\((--[A-Za-z]+)\)"/g, (_, property: string, name: string) => {
+      styles.push(`${property}: var(${name})`)
+      return ''
+    })
+    if (styles.length === 0) return tag
+    return bare.replace(/(\/?>)$/, ` style="${styles.join('; ')}"$1`)
+  })
 }
 
 export function textWidth(text: string, size: number, isBold = false): number {

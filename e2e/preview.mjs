@@ -89,7 +89,9 @@ function render(node) {
       return `<button class="b ${variant}" style="${p.dimColor ? 'opacity:.7' : ''}">${content}</button>`
     }
     case 'Svg':
-      return `<span class="svg" title="${esc(p.alt)}">${p.source}</span>`
+      // As an image, the way the desktop app shows it: strict XML, so a
+      // malformed picture breaks here too instead of rendering inline.
+      return `<span class="svg" title="${esc(p.alt)}"><img alt="${esc(p.alt)}" width="${p.width}" height="${p.height}" src="data:image/svg+xml;base64,${Buffer.from(p.source).toString('base64')}"/></span>`
     case 'Input':
       return `<label class="in">${(p.label ?? '').trim() === '' ? '' : `<span>${esc(p.label.trim())}</span>`}<input value="${esc(p.value ?? '')}" placeholder="${esc(p.placeholder ?? '')}"/></label>`
     case 'Select':

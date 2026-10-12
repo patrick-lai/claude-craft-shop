@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { activate, mountPane, REPO, startSession, world } from './world'
+import { activate, COMPOSE, mountPane, REPO, startSession, world } from './world'
 
 // Where the slots of /repo live under a worktreeRoot of /slots.
 async function repoDir(): Promise<string> {
@@ -178,4 +178,35 @@ test('a session in a worktree fishStack does not manage is told where it is, and
   expect(await ui.find({ text: /This session already works in a worktree/ })).toBeDefined()
   expect(await ui.find({ text: /\/other\/wt/ })).toBeDefined()
   expect(await ui.find({ type: 'Button', key: 'worktree-create' })).toBeUndefined()
+})
+
+test('after /clear the session keeps its slot, its lease and its dials', { options: { worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
+  const dir = await repoDir()
+  const state = world(on, { slots: [`${dir}/2`] })
+  on('session.end', ($, e) => ({ sessionId: e.sessionId }))
+  on('classic.SessionStart', () => ({}))
+  await $.session.start({ cwd: `${dir}/2`, surface: 'terminal', isInteractive: true })
+  const ui = await mountPane($, 'terminal')
+  await activate(ui, 'tab-dials')
+  await activate(ui, 'preset-Autopilot')
+  expect(state.saved[`lease:${dir}/2`]).toBeDefined()
+  // /clear: the conversation ends, the process goes on in the slot, and a
+  // fresh session follows with no session.start.
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } } as never)
+  await $.classic.SessionStart({ source: 'clear' } as never)
+  expect(state.saved[`lease:${dir}/2`]).toBeDefined()
+  const composed = await $.prompt.compose(COMPOSE)
+  expect(composed.sections.find(section => section.id === 'fishstack:dials')?.text).toContain('Autonomy (Autopilot)')
+  await activate(ui, 'tab-worktree')
+  expect(await ui.find({ text: /Ready/ })).toBeDefined()
+})
+
+test('a session that really ends gives its slot back', { options: { worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
+  const dir = await repoDir()
+  const state = world(on, { slots: [`${dir}/2`] })
+  on('session.end', ($, e) => ({ sessionId: e.sessionId }))
+  await $.session.start({ cwd: `${dir}/2`, surface: 'terminal', isInteractive: true })
+  expect(state.saved[`lease:${dir}/2`]).toBeDefined()
+  await $.session.end({ reason: 'prompt_input_exit', sessionId: 's1', resume: { id: 's1' } } as never)
+  expect(state.saved[`lease:${dir}/2`]).toBeUndefined()
 })

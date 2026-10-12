@@ -549,6 +549,19 @@ let hasAutoOpened = false
 // at session.start, or the desktop app or an editor attaching (they run the
 // session headless, so its session.start says no one is at the prompt).
 let hasStarted = false
+// Where the session worked as a /clear ended it, for the session after.
+let carried: { worktree: Worktree; elsewhere: string | null } | null = null
+
+// After a /clear: the session that follows works where the last one did,
+// in the same slot, its lease kept alive from here.
+async function carryOverClear($: $): Promise<void> {
+  if (carried === null) return
+  const { worktree: was, elsewhere: where } = carried
+  carried = null
+  await update($, worktree, () => was)
+  await update($, elsewhere, () => where)
+  if (was.phase === 'ready' && was.path !== null) startHeartbeat($, was.path)
+}
 
 export const AUTO_WORKTREE_KEY = 'autoWorktree'
 
@@ -723,10 +736,23 @@ export function registerWorktree(on: On, options: PluginOptions): void {
   })
 
   on('session.end', async ($, e, next) => {
+    // A /clear ends the conversation, not the process: it goes on in the same
+    // slot, so the lease stays, and what the next session needs is kept for
+    // it (the state starts over, and no session.start follows).
+    if (e.reason === 'clear') {
+      carried = { worktree: await read($, worktree), elsewhere: await read($, elsewhere) }
+      return next(e)
+    }
     heartbeat?.cancel()
     const { path } = await read($, worktree)
     if (path !== null) await releaseSlot($, path)
     return next(e)
+  })
+
+  on('classic.SessionStart', { source: 'clear' }, async ($, e, next) => {
+    const done = await next(e)
+    await carryOverClear($)
+    return done
   })
 
   on('turn.start', async ($, e, next) => {

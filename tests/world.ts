@@ -66,6 +66,7 @@ export function world(
   })
   on('store.delete', ($, e) => {
     delete kept[e.key]
+    delete state.saved[e.key]
     return { value: undefined }
   })
   on('store.keys', () => ({ value: Object.keys(kept) }))

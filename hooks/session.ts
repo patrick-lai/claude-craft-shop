@@ -145,6 +145,17 @@ function notice($: EngineInterface, id: string, text: string | undefined): void 
   }
 }
 
+// The dials and this repository's library, as the store keeps them.
+async function loadSaved($: EngineInterface): Promise<void> {
+  const storedDials = await $.store.get(DIALS_STORE_KEY)
+  if (isDialValues(storedDials)) await update($, dials, () => storedDials)
+  const repo = await $.session.repo()
+  const root = repo?.root ?? (await $.session.root())
+  const library = parseLibrary(await $.store.get(libraryStoreKey(root)), await $.store.get(legacyStoreKey(root)))
+  await update($, sources, () => library.sources)
+  await update($, folders, () => library.folders)
+}
+
 // Where a prompt the person typed comes from: the terminal's composer, the
 // desktop app (through the SDK) or their phone (Remote Control).
 const PERSON_ORIGINS = new Set(['composer', 'sdk', 'bridge'])
@@ -205,16 +216,19 @@ export function registerSession(on: On, options: PluginOptions): void {
     // from Craftshop's store.
     await migrateStore($)
     const started = await next(e)
-    const storedDials = await $.store.get(DIALS_STORE_KEY)
-    if (isDialValues(storedDials)) await update($, dials, () => storedDials)
+    await loadSaved($)
     const kept = (await $.store.get(AUTOPILOT_STORE_KEY)) as AutopilotKept | null | undefined
     if (kept?.sessionId === (await $.session.id()) && (await read($, autopilot)) === null) await update($, autopilot, () => kept.answered)
-    const repo = await $.session.repo()
-    const root = repo?.root ?? (await $.session.root())
-    const library = parseLibrary(await $.store.get(libraryStoreKey(root)), await $.store.get(legacyStoreKey(root)))
-    await update($, sources, () => library.sources)
-    await update($, folders, () => library.folders)
     return started
+  })
+
+  // A /clear starts the state over with no session.start: the session after
+  // it gets the dials and the library back from the store (worktree.tsx
+  // carries the worktree over).
+  on('classic.SessionStart', { source: 'clear' }, async ($, e, next) => {
+    const done = await next(e)
+    await loadSaved($)
+    return done
   })
 
   on('prompt.compose', async ($, e, next) => {

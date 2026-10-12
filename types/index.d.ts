@@ -71,6 +71,7 @@ declare module 'claude-code' {
       autopilot: AutopilotWait | null
       isTurnRunning: boolean
       isDialsOn: boolean
+      isEnforced: boolean
       isContextOn: boolean
       lastReplyAt: number | null
       tokenTotals: { input: number; output: number; cacheRead?: number; cacheWrite?: number } | null

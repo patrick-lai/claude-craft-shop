@@ -25,12 +25,12 @@ If you run Claude Code all day, a few things keep getting in the way:
 - **You keep repeating yourself.** "Write a spec first." "Don't ask, just decide." "Run the tests." You type it every session.
 - **The agent forgets what matters.** API conventions, the design doc, the ticket: pasted in again and again.
 
-fishStack adds one pane with three tabs, and a status rail above the prompt.
+fishStack adds one pane with three tabs, and a status rail above the prompt. Each tab has a switch at the top (**Use worktrees**, **Use dials**, **Use context**), so you can turn any of them off and the rail shows it.
 
 | Tab | What it does |
 | - | - |
-| **[Perm worktree](#perm-worktree)** | Every new session moves into a worktree of its own, already set up, typically in about three seconds. |
-| **[Dials](#dials)** | Six dials set how the agent plans, delegates, persists, asks, proves and talks. On **Autopilot**, a question nobody answers is settled after 15 minutes. |
+| **[Worktrees](#worktrees)** | Every new session moves into a worktree of its own, already set up, typically in about three seconds. |
+| **[Dials](#dials)** | Six dials set how the agent plans, delegates, persists, asks, proves and talks. Some levels are enforced in code, not only asked for. |
 | **[Context](#context)** | Notes, links and files the agent reads in every request. Mark one Strict and the agent treats it as ground truth. |
 
 ## Install
@@ -53,17 +53,17 @@ Restart Claude Code, then open the pane with **`/fs`** (or `/fishstack`). `/fs d
 
 fishStack is built and tested on macOS: copy-on-write cloning and the file pickers use macOS tools.
 
-## Perm worktree
+## Worktrees
 
 <p align="center">
   <img src="docs/media/claim.gif" width="100%" alt="Real Claude Code in a terminal: a new session claims a warm slot, moves in on its own branch, and answers a question">
 </p>
 
-Perm worktree (as in permanent) gives each new session a worktree of its own, on its own `fish/…` branch, and keeps the worktrees around to reuse. Your main checkout stays untouched. It is off until you turn it on.
+Turn on **Use worktrees** and each new session gets a worktree of its own, on its own `fish/…` branch, kept around to reuse. Your main checkout stays untouched. It is off until you turn it on.
 
 It's fast because the work happens before you need it:
 
-- **A warm pool.** fishStack keeps a pool of slots in the background (three to start, with one always free), each checked out, with dependencies in place and your setup command already run. A new session takes one and moves in. In the run above that took about three seconds from launch.
+- **A warm pool.** fishStack keeps a pool of slots in the background (three to start, with one always free), each checked out, with dependencies in place and your setup command already run. A new session takes one and moves in. In the run above that took about three seconds from launch. **Warm one more** adds a slot whenever you want a bigger pool, and the tab lists every slot.
 - **A head start.** While the slot is prepared, the agent can already read, search and plan. Anything that writes waits until it has moved in.
 - **No copying.** `node_modules` is cloned copy-on-write (APFS), so a slot costs almost no disk until something changes.
 - **Nothing lost.** A slot is reused once its session ends. Anything left uncommitted is saved under `refs/fish/backup/` first.
@@ -71,7 +71,7 @@ It's fast because the work happens before you need it:
 It works with Claude Code's own worktrees too. `claude --worktree feat-x` and the desktop app's worktree option land in a slot on `fish/feat-x`.
 
 <p align="center">
-  <img src="docs/media/worktree-desktop.png" width="760" alt="The Perm worktree tab in the desktop app: the switch on, the pool's status, this session's slot and branch, and the slots list">
+  <img src="docs/media/worktree-desktop.png" width="760" alt="The Worktrees tab in the desktop app: Use worktrees on, the pool's status with Warm one more, this session's slot and branch, and the slots list">
 </p>
 
 <details>
@@ -104,7 +104,28 @@ Six dials, each with five levels, become a short **Working style** brief in the 
 
 Start from a preset (**Balanced**, **Quick**, **Deep work**, **Autopilot**), then nudge single dials. On the desktop you can drag the radar's points. The estimates beside the radar show what a setting costs you in spend, time to done, and how often the agent will ask you.
 
-A change takes effect right away, even mid-turn: the agent picks it up before its next request. **What agents are told** shows the exact brief.
+A change takes effect right away, even mid-turn: the agent picks it up before its next request. **What agents are told** shows the exact brief. **Use dials** off sends no working style at all, and your settings wait for you.
+
+### Enforced, not only asked
+
+A prompt is a request; some levels are also held in code, so the agent can't skip them. Each dial's card says what its level enforces:
+
+| Dial | Level | Enforced |
+| - | - | - |
+| Foresight | Write a spec, Deep spec | The first edit of a request waits until the agent has posted its spec. |
+| Crew | Solo, Scouts | Subagents are refused; at Scouts, one per request. |
+| Tenacity | Checklist, Goal mode | A request that changed code ends with its checklist or acceptance criteria. |
+| Proof | Compile and up | A request that changed code runs a build, typecheck or tests after its last change. |
+| Voice | Explain, Teach | A request that changed code ends with the labelled parts. |
+| Autonomy | Autopilot | A question nobody answers is settled after 15 minutes. |
+
+It's built never to get in the way of Claude Code itself:
+- **Capped.** An edit is refused twice at most per request, then let through, and the end of a request is held back once at most, never in a loop.
+- **Main agent only.** Subagents and doc-only changes are left alone.
+- **Fails open.** Any check that can't decide lets things through.
+- **Switchable.** The **Enforce** switch turns it all off and leaves the dials as prompts alone.
+
+The level prompts borrow good habits from [pStack](https://github.com/cursor/plugins/tree/main/pstack) (Lauren Tan, MIT): verdicts of VERIFIED, NOT VERIFIED or INCONCLUSIVE, a failing test before a bug fix, one done-predicate and one owner per file for parallel subagents, and testing a shared assumption after two failed fixes.
 
 ### Autopilot answers when you're away
 
@@ -124,7 +145,7 @@ While Autopilot waits, the dials pill on the rail turns amber with a ring that r
   <img src="docs/media/context.gif" width="100%" alt="Real Claude Code: a note added in the Context tab and marked Strict, then the agent names a new field in snake_case because of it">
 </p>
 
-Add the things the agent should always know: a note, a link (fetched as text), a file, or a whole folder from **Choose folder…**. Each source has an **On/Off** switch. A **Strict** source is binding: if the code disagrees, the agent has to say so. A meter keeps the total near a 12k-token budget, and a footer shows how full the context window is.
+Add the things the agent should always know (**Use context** off holds them all back at once): a note, a link (fetched as text), a file, or a whole folder from **Choose folder…**. Each source has an **On/Off** switch. A **Strict** source is binding: if the code disagrees, the agent has to say so. A meter keeps the total near a 12k-token budget, and a footer shows how full the context window is.
 
 Libraries are kept per repository and reach the agent as a **Project context** section, every request.
 
@@ -139,10 +160,10 @@ The rail is one row of pills above the prompt, and it stays one row at any windo
 | Pill | Shows |
 | - | - |
 | **Mark** | Opens fishStack. |
-| **Cache** | The prompt cache. Five bars run down over the five minutes after a reply. While any are lit, your next message reuses the cache, so it's faster and cheaper. |
-| **Cost** | Claude Code's own estimate at API list prices, which isn't your plan's bill. Tokens in and out on hover. |
-| **Dials** | The preset. Amber while Autopilot waits to answer for you, green once it has. |
-| **Context** | How many sources are on. |
+| **Cache** | The prompt cache. Five bars run down over the five minutes after a reply. While any are lit, your next message reuses the cache, so it's faster and cheaper. Hover for the hit rate: the last reply's and the whole session's share of input read from the cache, from the token counts Claude reports. |
+| **Cost** | Claude Code's own `/cost` total at API list prices, cache reads and writes included. It isn't your plan's bill. Tokens in and out on hover. |
+| **Dials** | The preset, or Off. Amber while Autopilot waits to answer for you, green once it has. |
+| **Context** | How many sources are on, or Off. |
 | **Worktree** | The branch this session works on. |
 
 In the terminal the rail is plain text, and the same items open the same tabs.
@@ -153,7 +174,7 @@ Set them in `/config`. They're stored under `pluginConfigs["fishstack"].options`
 
 | Option | Default | What it does |
 | - | - | - |
-| `autoWorktree` | `false` | Perm worktree's starting value. Once you flip the switch, your choice sticks. |
+| `autoWorktree` | `false` | Use worktrees' starting value. Once you flip the switch, your choice sticks. |
 | `worktreeRoot` | `~/.fishstack/worktrees` | Where slots live: `<root>/<repo>-<hash>/<n>`. |
 | `setupCommand` | empty | Runs in a new slot before the session moves in, `pnpm install` say. Times out after 10 minutes. |
 | `minFreeGb` | `20` | The pool stops warming below this much free disk. |
@@ -162,7 +183,7 @@ Set them in `/config`. They're stored under `pluginConfigs["fishstack"].options`
 <details>
 <summary><b>Coming from Craftshop?</b></summary>
 
-fishStack was called Craftshop. Its first session copies what Craftshop saved (dials, context libraries, the Perm worktree switch) into its own store, once, and never over anything fishStack already holds. Options set under `pluginConfigs["craft-shop"]` don't carry over, so set them again in `/config`.
+fishStack was called Craftshop. Its first session copies what Craftshop saved (dials, context libraries, the worktrees switch) into its own store, once, and never over anything fishStack already holds. Options set under `pluginConfigs["craft-shop"]` don't carry over, so set them again in `/config`.
 </details>
 
 ## Develop

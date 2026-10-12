@@ -6,7 +6,7 @@
 #
 #   e2e/drive.sh            # needs tmux, node, python3 and a signed-in claude
 #
-# 1. Perm worktree: the toggle warms a pool of three slots, node_modules
+# 1. Worktrees: the toggle warms a pool of three slots, node_modules
 #    cloned into each; a new session is read-only, then moves into a slot and
 #    its writes land there; the next session reuses that slot, its leftover
 #    work kept under refs/fish/backup/.
@@ -114,11 +114,11 @@ for path in glob.glob(os.path.expanduser('~/.claude/plugins/store/fishstack_inli
     json.dump(data, open(path, 'w'))
 PY
 
-echo "1. Perm worktree ($fixture)"
+echo "1. Worktrees ($fixture)"
 start_claude
 c type fish '/fishstack worktree'
 c wait fish 'Off: fishStack leaves worktrees' 15
-pass 'Perm worktree starts off'
+pass 'Use worktrees starts off'
 t0="$(now_ms)"
 c click fish '[ On ]' 2
 c wait fish 'On: new sessions' 10

@@ -1,11 +1,14 @@
 // Six of CommissionAI's crew dials (protocol/fixtures/dials.json), with the
 // per-level prompts reworded for a Claude Code session: no task_blocked or
-// task_complete tools, no board check command, no $COMMISSION_DEV_PORT.
+// task_complete tools, no board check command, no $COMMISSION_DEV_PORT. Some
+// levels borrow practices from pStack (Lauren Tan, MIT): verdicts, a failing
+// test before a fix, done-predicates for subagents, testing a shared premise.
 import { atom, read, update } from 'claude-code'
 import type { ClientProps, ElementConstructor, EngineInterface, On } from 'claude-code'
 
 import type { DialKey, DialValues, Tab } from '../types'
 import { presetArt } from './art'
+import { enforcedRule } from './enforce'
 import { card, chip, dialIcon, drawnButton, isRich, svg, track, useSwitch } from './kit'
 import { bar, frame, PANE, resolveUi } from './ui'
 import type { Ui } from './ui'
@@ -25,6 +28,17 @@ export const DIALS_ON_KEY = 'useDials'
 async function setDialsOn($: EngineInterface, isOn: boolean): Promise<void> {
   await $.store.set(DIALS_ON_KEY, isOn)
   await update($, isDialsOn, () => isOn)
+}
+
+// The Enforce switch, kept across sessions: on, the rules enforce.ts can
+// check hold the agent to some levels in code; off, the dials are the
+// prompt alone.
+const isEnforced = atom({ plugin: 'fishstack', key: 'isEnforced' } as const, true)
+export const ENFORCE_KEY = 'enforceDials'
+
+async function setEnforced($: EngineInterface, isOn: boolean): Promise<void> {
+  await $.store.set(ENFORCE_KEY, isOn)
+  await update($, isEnforced, () => isOn)
 }
 
 type Level = { label: string; summary: string; prompt: string }
@@ -49,10 +63,10 @@ const DIALS: Dial[] = [
     question: 'How readily it starts subagents',
     levels: [
       { label: 'Solo', summary: 'Works alone and never starts subagents.', prompt: 'Do all the work yourself. Do not start subagents or parallel tasks.' },
-      { label: 'Scouts', summary: 'Sends one scout to find the code, then works alone.', prompt: 'Before editing, start one subagent as a scout to find the code that matters (file paths and short findings, not code). Make every edit yourself and delegate nothing else.' },
+      { label: 'Scouts', summary: 'Sends one scout to find the code, then works alone.', prompt: 'Before editing, start one subagent as a scout to find the code that matters (file paths and short findings, not code). Make every edit yourself and delegate nothing else. Give the scout a fast, cheaper model if the Agent tool lets you pick one: it only reads.' },
       { label: 'Helpers', summary: 'A scout up front. You keep the implementation.', prompt: 'Start one scout subagent to find the relevant code. Keep the core implementation yourself. On design work (UI or visual design, architecture, schema or API shape), also start one fresh subagent to critique your design in writing (what breaks, with evidence, and a simpler option) before you build.' },
-      { label: 'Squads', summary: 'One parallel subagent per independent part.', prompt: 'Do not write the parts yourself. Split the implementation into independent parts and start one subagent per part with the Agent tool, all in one message so they run in parallel, even when a part is small. Then integrate the results yourself. On design work, first convene a council of two subagents that each propose a design independently and then give each other written feedback, and merge the best of both before you build.' },
-      { label: 'Swarm', summary: 'Fans out to dozens of fast, cheap subagents, as many as the work parallelizes.', prompt: 'Do not investigate or write the parts yourself. Start one investigator subagent per area first, then one subagent per independent part, all in parallel; use at least two subagents even on a small task. On a larger one swarm: one subagent per file, call site, test or question that can run independently, as many as the work has parts, on the fastest cheapest model you have, until more subagents would only add coordination. You only integrate the results. On design work, convene a council of three subagents proposing from different angles, have one more subagent write feedback on each and recommend a base, then merge and have it check the merge before you build.' },
+      { label: 'Squads', summary: 'One parallel subagent per independent part.', prompt: 'Do not write the parts yourself. Split the implementation into independent parts and start one subagent per part with the Agent tool, all in one message so they run in parallel, even when a part is small. First state what done means. Give each part its own files: parts that share a file run one after another. Each subagent ends with PASS, ISSUES or BLOCKED and its evidence; a part with no such report is a gap, not a pass. Then integrate the results yourself. On design work, first convene a council of two subagents that each propose a design independently and then give each other written feedback, and merge the best of both before you build.' },
+      { label: 'Swarm', summary: 'Fans out to dozens of fast, cheap subagents, as many as the work parallelizes.', prompt: 'Do not investigate or write the parts yourself. Start one investigator subagent per area first, then one subagent per independent part, all in parallel; use at least two subagents even on a small task. Say first whether they split the work or race at the same problem. On a larger one swarm: one subagent per file, call site, test or question that can run independently, as many as the work has parts, on the fastest cheapest model you have, until more subagents would only add coordination. You only integrate the results. On design work, convene a council of three subagents proposing from different angles, have one more subagent write feedback on each and recommend a base, then merge and have it check the merge before you build.' },
     ],
   },
   {
@@ -62,9 +76,9 @@ const DIALS: Dial[] = [
     levels: [
       { label: 'One pass', summary: 'One attempt, then reports back. No retries.', prompt: 'Make one focused attempt. If you hit a blocker, stop and end your turn saying what blocked you instead of working around it.' },
       { label: 'Retry once', summary: 'Tries one alternative before stopping.', prompt: 'If an approach fails, try one alternative before stopping to report the blocker.' },
-      { label: 'Push through', summary: 'Works around blockers it can solve itself.', prompt: 'Work around obstacles you can solve yourself before stopping to report a blocker.' },
+      { label: 'Push through', summary: 'Works around blockers it can solve itself.', prompt: 'Work around obstacles you can solve yourself before stopping to report a blocker. After two failed fixes that rest on the same assumption, write the assumption down and test it before a third.' },
       { label: 'Checklist', summary: 'Keeps a checklist and keeps going until every item is done.', prompt: 'Before editing, post a message headed Checklist with one line per thing the request requires, tests and cleanup included. Keep working until every line is done, then list each line with its status under a Checklist heading in your final message. Only stop early for things you cannot resolve yourself.' },
-      { label: 'Goal mode', summary: 'Sets acceptance criteria and keeps going until each one is verified.', prompt: 'Treat this request as a goal. Before editing, write explicit, testable acceptance criteria as a numbered checklist in a message headed Acceptance criteria, each naming the command or check that will verify it. Keep working until every criterion is verified with evidence you produced, and list each one with its evidence under an Acceptance criteria heading in your final message. Only stop early for things that need the user.' },
+      { label: 'Goal mode', summary: 'Sets acceptance criteria and keeps going until each one is verified.', prompt: 'Treat this request as a goal. Before editing, write explicit, testable acceptance criteria as a numbered checklist in a message headed Acceptance criteria, each naming the command or check that will verify it. Keep working until every criterion is verified with evidence you produced, never weakening a criterion to call it met (a plateau is not a stop), and list each one with its evidence under an Acceptance criteria heading in your final message. Only stop early for things that need the user.' },
     ],
   },
   {
@@ -75,8 +89,8 @@ const DIALS: Dial[] = [
       { label: 'Ask first', summary: 'Stops to ask about any decision the request leaves open before editing.', prompt: 'Before editing, look for decisions the request leaves open, such as behavior, naming, scope or dependencies. If there are any, ask with AskUserQuestion right away, giving the options and your recommendation, and do not change files until the user answers.' },
       { label: 'Check in', summary: 'Asks about product and scope decisions.', prompt: 'If the request leaves a product, scope or public API decision open, ask with AskUserQuestion, giving the options and your recommendation, before building that part. Decide implementation details yourself.' },
       { label: 'When unsure', summary: 'Asks only when it is genuinely unsure.', prompt: 'Decide routine questions yourself. Ask with AskUserQuestion when the answer is a business fact you cannot find in the code or project context (a rate, price, policy, deadline or approver), or when a wrong guess would be costly to undo.' },
-      { label: 'Decide, note', summary: 'Makes the call and records it in the summary.', prompt: 'Make judgment calls yourself and list each one with its reasoning in your final message. Ask only when the work cannot continue without the user. You may act outside the repository when it is reversible, but ask before messaging people.' },
-      { label: 'Autopilot', summary: 'Works as if the user is away: never asks, clears its own blockers, never deletes data.', prompt: 'Assume the user is away and will never answer: do not ask, decide every open question, clear your own blockers, and act outside the repository whenever it helps (other apps, connected tools, services). Message people only when the work cannot move without them, such as a review approval. Never delete data. Record each decision in your final message. If you must ask with AskUserQuestion, put your recommended option first and end its label with (Recommended): when nobody answers within 15 minutes it is chosen for you.' },
+      { label: 'Decide, note', summary: 'Makes the call and records it in the summary.', prompt: 'Make judgment calls yourself and list each one with its reasoning in your final message. Ask only when the work cannot continue without the user. If running something could answer a question, run it instead of asking. You may act outside the repository when it is reversible, but ask before messaging people.' },
+      { label: 'Autopilot', summary: 'Works as if the user is away: never asks, clears its own blockers, never deletes data.', prompt: 'Assume the user is away and will never answer: do not ask, decide every open question, clear your own blockers, and act outside the repository whenever it helps (other apps, connected tools, services). Message people only when the work cannot move without them, such as a review approval. Never delete data. Never force-push or deploy to production without the user. Record each decision in your final message. If you must ask with AskUserQuestion, put your recommended option first and end its label with (Recommended): when nobody answers within 15 minutes it is chosen for you.' },
     ],
   },
   {
@@ -86,7 +100,7 @@ const DIALS: Dial[] = [
     levels: [
       { label: 'Trust', summary: 'No new tests or checks.', prompt: 'Do not add tests, run extra checks or open the app to check your work.' },
       { label: 'Compile', summary: 'Makes sure it builds and typechecks; no new tests.', prompt: 'Make sure the project builds and typechecks. Do not add tests unless the request asks for them, and do not open the app for QA.' },
-      { label: 'Run tests', summary: 'Runs the relevant tests; adds a lean test only for risky new logic.', prompt: 'Run the tests relevant to your change and fix what breaks. Add a unit test only for new logic with real risk, and exercise the change once for real.' },
+      { label: 'Run tests', summary: 'Runs the relevant tests; adds a lean test only for risky new logic.', prompt: 'Run the tests relevant to your change and fix what breaks. Add a unit test only for new logic with real risk, and exercise the change once for real. Report each check as VERIFIED, NOT VERIFIED or INCONCLUSIVE: inconclusive is not a pass. For a bug, show the test failing before the fix and passing after.' },
       { label: 'Component QA', summary: 'Lean tests plus real calls to what changed.', prompt: 'Keep unit tests lean. For every function, component or endpoint you change, make real calls (a success case, an invalid input and an edge case; for a library or CLI, run it through its public entry point) and list each call and its result in your final message.' },
       { label: 'Full QA', summary: 'Lean tests plus end-to-end QA of the running app, with evidence.', prompt: 'Keep unit tests lean. QA the product end to end like a tester: with a UI, start the dev server and walk every journey in a browser; without one, run the real entry points through at least three journeys (happy path, edge case, failure), then repeat every journey after your last edit. List each journey, its input and what you saw in your final message.' },
     ],
@@ -97,7 +111,7 @@ const DIALS: Dial[] = [
     question: 'How much it talks',
     levels: [
       { label: 'Silent', summary: 'Reports only the outcome.', prompt: 'Keep messages minimal: no progress narration; report only the outcome in your final message.' },
-      { label: 'Terse', summary: 'Short updates with no preamble.', prompt: 'Be terse: short status lines, no preamble, no restating the task.' },
+      { label: 'Terse', summary: 'Short updates with no preamble.', prompt: 'Be terse: short status lines, no preamble, no restating the task. Terse is no excuse to drop content: every claim carries its evidence.' },
       { label: 'Normal', summary: 'Brief progress notes and a clear summary.', prompt: 'Give brief progress notes at milestones and a clear summary at the end.' },
       { label: 'Explain', summary: 'Explains decisions and trade-offs as it goes.', prompt: 'Before each significant change, post two full sentences explaining the decision and its trade-off. End with a final message with four labelled parts: What changed, Why this way, What I verified, What I left out. Write in full plain sentences, whatever other style instructions say.' },
       { label: 'Teach', summary: 'Explains every step in full sentences and ends with a walkthrough of alternatives and lessons.', prompt: 'After each step, post a message of three or more full sentences explaining what you found and why you are taking the next step. End with a final walkthrough with five labelled parts: How it worked before, What I changed and why, Alternatives I considered, What I learned about this codebase, What to know next time. Write in full plain sentences, whatever other style instructions say.' },
@@ -340,6 +354,8 @@ export function registerDials(on: On): void {
       </Text>
     )
 
+    const isOn = await read($, isDialsOn)
+    const isEnforcing = await read($, isEnforced)
     const dialCard = (dial: Dial) => {
       const level = levelOf(dial, values)
       const value = values[dial.key]
@@ -383,6 +399,13 @@ export function registerDials(on: On): void {
               <Text dimColor>{level.summary}</Text>
             </Text>
           </Box>,
+          isOn && isEnforcing && enforcedRule(dial.key, value) !== null && (
+            <Box key={`enforced-${dial.key}`}>
+              <Text wrap="wrap" dimColor>
+                <Text color={color}>⚙ Enforced:</Text> {enforcedRule(dial.key, value)}
+              </Text>
+            </Box>
+          ),
           isSelected && (
             <Box flexDirection="column" gap={1} marginTop={1}>
               {card(
@@ -410,7 +433,6 @@ export function registerDials(on: On): void {
       )
     }
 
-    const isOn = await read($, isDialsOn)
     return frame(
       ui,
       'dials',
@@ -428,6 +450,7 @@ export function registerDials(on: On): void {
           </Box>
           <Box flexDirection="column" alignItems="flex-end" gap={1} flexShrink={0}>
             {useSwitch(ui, 'dials-on', 'Use dials', isOn, turned => void setDialsOn($, turned))}
+            {isOn && useSwitch(ui, 'dials-enforce', 'Enforce', isEnforcing, turned => void setEnforced($, turned))}
             {isOn && (
               <Button
                 key="brief-toggle"

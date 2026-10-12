@@ -5,7 +5,7 @@ import type { EngineInterface, On, PluginOptions, PromptComposeSection, Timer } 
 
 import type { AutopilotWait, DialValues, Folder, Source } from '../types'
 import { CONTEXT_ON_KEY, CONTEXT_SECTION_ID, contextSection, legacyStoreKey, libraryStoreKey, parseLibrary } from './context'
-import { BALANCED, brief, DIALS_ON_KEY, DIALS_SECTION_ID, DIALS_STORE_KEY, isDialValues } from './dials'
+import { BALANCED, brief, DIALS_ON_KEY, DIALS_SECTION_ID, DIALS_STORE_KEY, ENFORCE_KEY, isDialValues } from './dials'
 import { FISH_COMMANDS } from './pane'
 import { headStartNote, IDLE_WORKTREE, isReadOnlyPhase } from './worktree'
 
@@ -17,6 +17,7 @@ const isHeadStartPrompted = atom({ plugin: 'fishstack', key: 'isHeadStartPrompte
 const toldStyle = atom({ plugin: 'fishstack', key: 'toldStyle' } as const, null)
 const isDialsOn = atom({ plugin: 'fishstack', key: 'isDialsOn' } as const, true)
 const isContextOn = atom({ plugin: 'fishstack', key: 'isContextOn' } as const, true)
+const isEnforced = atom({ plugin: 'fishstack', key: 'isEnforced' } as const, true)
 const autopilot = atom({ plugin: 'fishstack', key: 'autopilot' } as const, null)
 const railTick = atom({ plugin: 'fishstack', key: 'railTick' } as const, 0)
 
@@ -170,6 +171,8 @@ async function loadSaved($: EngineInterface): Promise<void> {
   await update($, isDialsOn, () => useDials !== false)
   const useContext = await $.store.get(CONTEXT_ON_KEY)
   await update($, isContextOn, () => useContext !== false)
+  const enforce = await $.store.get(ENFORCE_KEY)
+  await update($, isEnforced, () => enforce !== false)
   const repo = await $.session.repo()
   const root = repo?.root ?? (await $.session.root())
   const library = parseLibrary(await $.store.get(libraryStoreKey(root)), await $.store.get(legacyStoreKey(root)))

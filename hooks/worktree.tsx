@@ -11,6 +11,7 @@ import { frame, PANE, PANE_TITLE, resolveUi } from './ui'
 import type { Ui } from './ui'
 import { BALANCED, presetName } from './dials'
 import { branchArt, card, label, svg, useSwitch } from './kit'
+import { beginTurn } from './enforce'
 import { drawRail } from './rail'
 
 export const IDLE_WORKTREE: Worktree = {
@@ -782,6 +783,16 @@ export function registerWorktree(on: On, options: PluginOptions): void {
   })
 
   on('turn.start', async ($, e, next) => {
+    // The dials' facts start over with each turn, from where its messages
+    // begin; unreadable, the rules that need them let things through.
+    let start: number | null = null
+    try {
+      const messages = await $.session.messages()
+      start = Array.isArray(messages) && messages.length < 4000 ? messages.length : null
+    } catch {
+      start = null
+    }
+    beginTurn(start)
     await update($, isTurnRunning, () => true)
     return next(e)
   })

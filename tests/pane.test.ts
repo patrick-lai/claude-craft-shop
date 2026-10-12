@@ -165,20 +165,23 @@ test('on the desktop the rail fits its one row: the least needed pills give up t
     const ids = ['brand', 'cache', 'tokens', 'dials', 'sources', 'worktree']
     const svgs = ids.map(id => (byKey(tree, `drawn-rail-${id}-press`) as { children: { props: { source: string; width: number; height: number; alt: string } }[] }).children[0]!.props)
     const width = svgs.reduce((sum, svg) => sum + svg.width, 0) + (svgs.length - 1) * 7
-    const worded = Object.fromEntries(ids.map((id, index) => [id, /<text/.test(svgs[index]!.source) && !(id === 'sources' && !svgs[index]!.source.includes(' sources'))]))
+    // Words beyond a count: the sources pill only ever has its number.
+    const worded = Object.fromEntries(ids.map((id, index) => [id, /<text/.test(svgs[index]!.source) && !(id === 'sources')]))
+    expect(svgs[4]!.source).not.toContain('source')
     return { width, worded, svgs }
   }
   // Wide: every pill keeps its words.
   const wide = await at(200)
+  expect(wide.svgs[4]!.alt).toBe('Add files, links or notes')
   // Slim: every pill under 25px tall, and all six whole fit 120 columns.
   expect(Math.max(...wide.svgs.map(svg => svg.height))).toBeLessThanOrEqual(25)
-  expect((await at(120)).worded).toEqual({ brand: true, cache: false, tokens: true, dials: true, sources: true, worktree: true })
+  expect((await at(120)).worded).toEqual({ brand: true, cache: false, tokens: true, dials: true, sources: false, worktree: true })
   expect((await at(120)).width).toBeLessThanOrEqual((120 - 3) * 7)
-  expect(wide.worded).toEqual({ brand: true, cache: false, tokens: true, dials: true, sources: true, worktree: true })
+  expect(wide.worded).toEqual({ brand: true, cache: false, tokens: true, dials: true, sources: false, worktree: true })
   // About 560px: the wordmark goes first, and the row fits.
   const mid = await at(80)
   expect(mid.width).toBeLessThanOrEqual((80 - 3) * 7)
-  expect(mid.worded).toEqual({ brand: false, cache: false, tokens: true, dials: true, sources: true, worktree: true })
+  expect(mid.worded).toEqual({ brand: false, cache: false, tokens: true, dials: true, sources: false, worktree: true })
   const narrow = await at(60)
   expect(narrow.width).toBeLessThanOrEqual((60 - 3) * 7)
   expect(narrow.worded).toEqual({ brand: false, cache: false, tokens: true, dials: false, sources: false, worktree: false })

@@ -88,9 +88,9 @@ function branch(x: number, y: number, isOn: boolean): string {
 }
 
 // The pills that can give up their words for the rail to fit one row, in the
-// order they do, down to their icon (sources to its count). The cache gauge
-// and the cost never do.
-export const COMPACTABLE = ['brand', 'worktree', 'sources', 'dials'] as const
+// order they do, down to their icon. The cache gauge, the cost and the
+// sources count (always just its icon and number) never do.
+export const COMPACTABLE = ['brand', 'worktree', 'dials'] as const
 export type Compactable = (typeof COMPACTABLE)[number]
 
 export function railArt(figures: RailArtFigures, iconOnly: ReadonlySet<Compactable> = new Set()): RailPill[] {
@@ -158,9 +158,8 @@ export function railArt(figures: RailArtFigures, iconOnly: ReadonlySet<Compactab
 
   {
     const count = figures.sourcesTotal === figures.sourcesOn ? String(figures.sourcesOn) : `${figures.sourcesOn}/${figures.sourcesTotal}`
-    const word = iconOnly.has('sources') ? '' : figures.sourcesTotal === 1 ? ' source' : ' sources'
-    const width = 12 + 14 + 7 + textWidth(count, 12.5, true) + textWidth(word, 12.5) + 14
-    pill('sources', width, 'context', figures.sourcesTotal === 0 ? 'Add files, links or notes' : `${figures.sourcesOn} of ${figures.sourcesTotal} sources reach the agent`, left => `${pages(left + 12, mid - 7.5)}<text x="${left + 12 + 14 + 7}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5"><tspan font-weight="650" fill="var(--text)">${count}</tspan><tspan fill="var(--dim)">${word}</tspan></text>`)
+    const width = 12 + 14 + 7 + textWidth(count, 12.5, true) + 14
+    pill('sources', width, 'context', figures.sourcesTotal === 0 ? 'Add files, links or notes' : `${figures.sourcesOn} of ${figures.sourcesTotal} sources reach the agent`, left => `${pages(left + 12, mid - 7.5)}<text x="${left + 12 + 14 + 7}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5"><tspan font-weight="650" fill="var(--text)">${count}</tspan></text>`)
   }
 
   {

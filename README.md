@@ -50,7 +50,7 @@ The tab's toggle is **Off** by default. While it is off, fishStack leaves worktr
 While it is **On**:
 
 - **A session started in a repository's main checkout** claims a slot in the background. Prompts work right away, but the session is read-only until the slot is ready.
-- **A worktree Claude Code creates** (`claude --worktree`, `EnterWorktree` with a name) goes through the mod's `WorktreeCreate` hook. Claude Code enters a claimed slot instead of a throwaway worktree, and the session stays read-only while the slot is seeded.
+- **A worktree Claude Code creates** goes to fishStack too. `claude --worktree <name>` and the desktop app's **worktree** option make theirs (`.claude/worktrees/<name>`) before any mod loads, so a session that starts in one is adopted: it claims a slot on `fish/<name>`, stays read-only until the slot is ready, then moves in. `EnterWorktree` with a name mid-session goes through the mod's `WorktreeCreate` hook, and Claude Code enters a claimed slot instead of a throwaway worktree.
 - **A warm pool**, as CommissionAI keeps one. Turning the toggle on makes three slots in the background, one at a time, each seeded and set up before any session needs it; after every claim the pool tops up so one spare waits. It pauses below 20 GB of free disk. The tab shows **Pool: N slots, M ready**.
 
 Preparing a slot takes four steps, made the way CommissionAI makes them:

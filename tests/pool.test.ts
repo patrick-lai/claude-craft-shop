@@ -138,3 +138,21 @@ test('with too little free disk the pool does not warm, and the tab says why', {
   await ui.redraw()
   expect(await ui.find({ text: /Paused: .* GB of disk free, under the 10000 GB it keeps/ })).toBeDefined()
 })
+
+test("a session started in a worktree Claude Code made (claude --worktree, the desktop's option) is adopted into a slot on its name", { options: { autoWorktree: true, worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
+  const { clock, commands, toolCalls } = world(on)
+  await $.session.start({ cwd: `${REPO}/.claude/worktrees/feat-x`, surface: 'terminal', isInteractive: true })
+  // Read-only until its slot is ready, then moved in.
+  expect((await $.tool.call({ tool: 'Edit', file_path: '/repo/a.ts', old_string: 'a', new_string: 'b' })).deny).toContain('Read-only until the worktree is ready')
+  await clock.advance(1)
+  const dir = await repoDir()
+  expect(commands).toContain(`${dir}/1$ git -c core.hooksPath=/dev/null checkout -q -B fish/feat-x origin/main`)
+  expect(toolCalls).toContain('EnterWorktree')
+})
+
+test('a session started in some other worktree, a slot of ours among them, is left where it is', { options: { autoWorktree: true, worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
+  const { clock, toolCalls } = world(on)
+  await $.session.start({ cwd: '/slots/repo-x/1', surface: 'terminal', isInteractive: true })
+  await clock.advance(1)
+  expect(toolCalls).not.toContain('EnterWorktree')
+})

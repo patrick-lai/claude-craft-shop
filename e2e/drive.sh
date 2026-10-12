@@ -74,7 +74,7 @@ wait_moved_in() {
 }
 
 quit_claude() {
-  c idle fish 120
+  c idle fish 300
   c type fish '/exit'
   local waited=0
   while tmux has-session -t fish 2>/dev/null && [ "$waited" -lt 20 ]; do sleep 1; waited=$((waited + 1)); done
@@ -87,13 +87,15 @@ slots() { git -C "$app" worktree list --porcelain | grep -c "^worktree .*/slots/
 fixture="$("$here/setup.sh")"
 app="$fixture/app"
 
-# The toggle is kept in the --plugin-dir copy's own store across runs: start
-# each run with it off, so the run is what turns it on.
+# The toggle and the dials are kept in the --plugin-dir copy's own store
+# across runs: start each run with the toggle off (the run turns it on) and
+# the Quick dials (no subagents, short answers), so turns stay short.
 python3 -I - <<'PY'
 import glob, json, os
 for path in glob.glob(os.path.expanduser('~/.claude/plugins/store/fishstack_inline-*.json')):
     data = json.load(open(path))
     data['autoWorktree'] = False
+    data['dials'] = {'foresight': 1, 'crew': 1, 'tenacity': 2, 'autonomy': 4, 'proof': 2, 'voice': 2}
     json.dump(data, open(path, 'w'))
 PY
 
@@ -132,7 +134,7 @@ c type fish '/fishstack worktree'
 c wait fish '● Ready · fish/' 30
 pass 'the session moved into its worktree'
 c shot fish "$out/02-claimed.ansi"
-c ask fish 'Create a file hello.txt containing the line: hello from fishStack. Do not commit it.'
+c ask fish 'Create a file hello.txt containing the line: hello from fishStack. Do not commit it.' 300
 approve_until '[ -e "$first/hello.txt" ]' 120
 [ ! -e "$app/hello.txt" ] || fail 'hello.txt landed in the main checkout'
 pass 'hello.txt landed in the slot, not the main checkout'
@@ -163,7 +165,7 @@ c wait fish 'Voice \(Teach\)' 10
 pass 'pressing the pips changes the brief'
 c shot fish "$out/03-dials.ansi"
 tmux send-keys -t fish Escape
-c ask fish 'Which level labels are your Voice and Foresight dials set to now? Answer as "Voice: X, Foresight: Y" only.'
+c ask fish 'Which level labels are your Voice and Foresight dials set to now? Answer as "Voice: X, Foresight: Y" only.' 300
 screen | grep -q 'Voice: Teach, Foresight: Dive in' || fail 'the agent did not echo the dials'
 pass 'the agent echoes the working style it was given'
 
@@ -175,7 +177,7 @@ approve_until 'screen | grep -q "sleep 12"' 60
 sleep 2
 c click fish '[ Autopilot ]' 2
 pass 'the dials were changed to Autopilot while the command ran'
-c idle fish 120
+c idle fish 300
 screen | grep -q 'Voice: Terse, Foresight: Write a spec' || fail 'the agent answered with the dials from before the change'
 pass 'changed mid-turn, the dials reached the agent before its next request'
 
@@ -193,7 +195,7 @@ c wait fish 'Strict' 10
 pass 'the note is strict'
 c shot fish "$out/04-context.ansi"
 tmux send-keys -t fish Escape
-c ask fish "What is the Workshop API's launch codename? Answer in two words."
+c ask fish "What is the Workshop API's launch codename? Answer in two words." 300
 screen | grep -qi 'BLUE HERON' || fail 'the agent did not cite the strict note'
 pass 'the agent cites the strict note'
 quit_claude

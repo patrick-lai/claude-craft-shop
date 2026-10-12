@@ -152,7 +152,9 @@ export function world(
     // Git, its -c settings set aside.
     const args = argv.slice(1).filter((one, index, all) => one !== '-c' && all[index - 1] !== '-c')
     const sub = args.join(' ')
-    if (sub === 'rev-parse --show-toplevel') return ran(`${REPO}\n`)
+    // A worktree's top level is its own folder; every one shares /repo/.git.
+    if (sub === 'rev-parse --show-toplevel') return ran(`${cwd.startsWith(`${REPO}/.claude/worktrees/`) || cwd.startsWith('/slots/') ? cwd : REPO}\n`)
+    if (sub === 'rev-parse --path-format=absolute --git-common-dir') return ran(`${REPO}/.git\n`)
     if (sub === 'symbolic-ref --short refs/remotes/origin/HEAD') return ran('origin/main\n')
     if (sub === 'fetch -q origin main') return ran()
     if (sub === 'rev-parse origin/main') return ran('0123456789abcdef\n')

@@ -501,7 +501,7 @@ async function prepare($: $, options: PluginOptions): Promise<void> {
       await setStep($, `Could not fetch origin; starting from the local ${branchName}`, true)
     }
     const baseSha = await gitOut($, ['rev-parse', base], main, `Could not resolve ${base}.`)
-    const branch = `fish/${(await $.session.id()).slice(0, 6)}`
+    const branch = `fish/${adoptedName ?? (await $.session.id()).slice(0, 6)}`
     await update($, worktree, current => ({ ...current, base, baseSha, branch }))
 
     await setStep($, 'Claiming a slot')
@@ -588,12 +588,31 @@ async function startWorktree($: $, options: PluginOptions, cwd: string, isForced
   if (repo === null) return
   const top = await git($, ['rev-parse', '--show-toplevel'], cwd)
   if (top.exitCode !== 0) return
-  const main = await realPath($, top.stdout.trim())
-  if (main !== (await realPath($, repo.root))) return
+  const here = await realPath($, top.stdout.trim())
+  // The main checkout is where the repository's .git lives; a worktree's
+  // top level is not it.
+  const common = await git($, ['rev-parse', '--path-format=absolute', '--git-common-dir'], cwd)
+  const commonDir = common.stdout.trim()
+  const main = common.exitCode === 0 && commonDir.endsWith('/.git') ? await realPath($, commonDir.slice(0, -'/.git'.length)) : here
+  if (here !== main) {
+    // A worktree Claude Code made itself (claude --worktree, the desktop's
+    // worktree option): those are made before any mod loads, so its
+    // WorktreeCreate never reaches fishStack. Adopt it: a slot on its name,
+    // read-only until the slot is ready, then the session moves in. Any
+    // other worktree (a slot of ours among them) is left as it is.
+    if (!here.startsWith(`${main}/.claude/worktrees/`)) return
+    adoptedName = here.split('/').pop()!.replace(/[^A-Za-z0-9._-]+/g, '-').slice(0, 40)
+  } else if (main !== (await realPath($, repo.root))) {
+    return
+  }
 
   await update($, worktree, now => ({ ...now, main }))
   await beginWorktree($, options)
 }
+
+// The name of the Claude Code worktree this session started in, which its
+// slot's branch takes; null for a session started in the main checkout.
+let adoptedName: string | null = null
 
 // The empty state's button: claims a slot now, whether the toggle is on or off.
 async function claimNow($: $, options: PluginOptions): Promise<void> {

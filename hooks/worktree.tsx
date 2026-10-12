@@ -4,7 +4,7 @@
 // in the main checkout (see guard.ts). This file also draws the band above
 // the prompt and the pane's Worktree tab.
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, On, PluginOptions, Timer } from 'claude-code'
+import type { ClientProps, ElementConstructor, EngineInterface, On, PluginOptions, Timer } from 'claude-code'
 
 import type { Slot, Tab, Worktree, WorktreePhase } from '../types'
 import { frame, PANE, PANE_TITLE, resolveUi } from './ui'
@@ -35,6 +35,7 @@ const isStepsShown = atom({ plugin: 'craft-shop', key: 'isStepsShown' } as const
 const dials = atom({ plugin: 'craft-shop', key: 'dials' } as const, BALANCED)
 const sources = atom({ plugin: 'craft-shop', key: 'sources' } as const, [])
 const lastReplyAt = atom({ plugin: 'craft-shop', key: 'lastReplyAt' } as const, null)
+const railHover = atom({ plugin: 'craft-shop', key: 'railHover' } as const, null)
 
 type $ = EngineInterface
 
@@ -461,6 +462,17 @@ export function registerWorktree(on: On, options: PluginOptions): void {
     return done
   })
 
+  // What the rail's Client posts: the segment under the pointer, or one pressed.
+  on('ui.message', { element: 'rail-click' }, async ($, e, next) => {
+    const data = e.data as { hover?: unknown; open?: unknown } | null
+    if (data !== null && typeof data === 'object') {
+      if (data.hover === null || (typeof data.hover === 'number' && Number.isInteger(data.hover))) await update($, railHover, () => data.hover as number | null)
+      if (data.open === 'pane') await openAt($, null)
+      else if (data.open === 'worktree' || data.open === 'dials' || data.open === 'context') await openAt($, data.open)
+    }
+    return next(e)
+  })
+
   on('ui.close', { id: PANE }, async ($, e, next) => {
     const closed = await next(e)
     $.ui.invalidate('ui.render')
@@ -500,7 +512,9 @@ export function registerWorktree(on: On, options: PluginOptions): void {
       const last = breakdown?.apiUsage ?? null
       const input = last === null ? 0 : last.input_tokens + last.cache_read_input_tokens + last.cache_creation_input_tokens
       const list = await read($, sources)
+      const values = await read($, dials)
       const ui: Ui = resolveUi($.ui.resolve(e), e.surface)
+      const { Client } = $.ui.resolve(e) as { Client?: ElementConstructor<ClientProps> }
       return drawRail(
         ui,
         {
@@ -509,12 +523,15 @@ export function registerWorktree(on: On, options: PluginOptions): void {
           cacheSecondsLeft,
           cachePercent: last === null || input === 0 ? null : Math.round((last.cache_read_input_tokens / input) * 100),
           costUsd: usage.cost?.usd ?? null,
-          preset: presetName(await read($, dials)),
+          preset: presetName(values),
+          presetLevels: [values.foresight, values.crew, values.tenacity, values.autonomy, values.proof, values.voice],
           sourcesOn: list.filter(one => one.mode !== 'off').length,
           sourcesTotal: list.length,
           branch: state.phase === 'ready' ? state.branch : null,
         },
         at => void openAt($, at),
+        await read($, railHover),
+        Client,
       )
     }
 

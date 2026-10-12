@@ -27,7 +27,7 @@ The rail above the prompt shows Craftshop's status at a glance:
 - how many sources are on;
 - the worktree's branch.
 
-Click an item to open its tab. While the pane is closed, the rail starts with **▸ Craftshop**. While a worktree is being prepared, the rail shows its progress instead.
+In the desktop app the rail is drawn as one picture of pills with icons; hover a pill for a line about it, and click it to open its tab. In the terminal it is text, and each item opens its tab too. While the pane is closed, the rail starts with **▸ Craftshop**. While a worktree is being prepared, the rail shows its progress instead.
 
 ## Options
 

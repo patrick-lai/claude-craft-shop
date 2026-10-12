@@ -61,6 +61,7 @@ declare module 'claude-code' {
       slots: Slot[]
       isTurnRunning: boolean
       lastReplyAt: number | null
+      railHover: number | null
       isBandHidden: boolean
       isStepsShown: boolean
       isHeadStartPrompted: boolean

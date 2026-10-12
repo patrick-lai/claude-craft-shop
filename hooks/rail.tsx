@@ -1,10 +1,11 @@
 // The rail above the prompt while there is no worktree news: Craftshop's
 // status at a glance (context window, prompt cache, cost, dials, sources,
 // worktree), each item opening its tab. worktree.tsx gathers the figures.
-import type { RenderElement } from 'claude-code'
+import type { ClientProps, ElementConstructor, RenderElement } from 'claude-code'
 
 import type { Tab } from '../types'
 import { cacheGauge } from './kit'
+import { railArt } from './rail-art'
 import type { Ui } from './ui'
 
 export type RailFigures = {
@@ -16,13 +17,43 @@ export type RailFigures = {
   cachePercent: number | null
   costUsd: number | null
   preset: string
+  presetLevels: number[]
   sourcesOn: number
   sourcesTotal: number
   branch: string | null
 }
 
-export function drawRail(ui: Ui, figures: RailFigures, open: (tab: Tab | null) => void) {
+// On the desktop the rail is one picture with a Client over it for presses
+// and hovers; the hovered segment's caption shows beneath it.
+export function drawRail(
+  ui: Ui,
+  figures: RailFigures,
+  open: (tab: Tab | null) => void,
+  hover: number | null,
+  Client: ElementConstructor<ClientProps> | undefined,
+) {
   const { Box, Text, Button, Svg } = ui
+  if (Svg !== undefined && Client !== undefined) {
+    const art = railArt(figures, hover, !figures.isPaneOpen)
+    const caption = hover === null ? null : (art.segments[hover]?.caption ?? null)
+    return (
+      <Box flexDirection="column">
+        <Box key="rail-art" position="relative">
+          <Svg source={art.source} alt={art.segments.map(one => one.caption).join(' ')} width={art.width} height={art.height} />
+          <Box position="absolute" top={0} left={0} right={0} bottom={0}>
+            <Client
+              key="rail-click"
+              module="./rail-click.tsx"
+              props={{ width: art.width, segments: art.segments.map(one => ({ x0: one.x0, x1: one.x1, tab: one.tab })) }}
+              width="100%"
+              height="100%"
+            />
+          </Box>
+        </Box>
+        {caption !== null && <Text dimColor>{caption}</Text>}
+      </Box>
+    )
+  }
   const left = figures.cacheSecondsLeft
   const isWarm = figures.isWorking || (left !== null && left > 0)
   const clock = left === null ? '' : `${Math.floor(left / 60)}:${String(Math.floor(left % 60)).padStart(2, '0')}`

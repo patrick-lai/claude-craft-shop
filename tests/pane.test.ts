@@ -42,7 +42,7 @@ test("the rail's cache gauge runs down for 5 minutes after a reply, then goes co
   await startSession($)
   const band = await $.ui.mount({
     plugin: 'craft-shop',
-    surface: 'desktop',
+    surface: 'terminal',
     component: 'AbovePrompt',
     props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 100, scroll: { offset: 0, bodyRows: 10 }, view: {} },
   })
@@ -65,7 +65,7 @@ test('with no worktree news the band is a status rail whose items open their tab
   await startSession($)
   const band = await $.ui.mount({
     plugin: 'craft-shop',
-    surface: 'desktop',
+    surface: 'terminal',
     component: 'AbovePrompt',
     props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 100, scroll: { offset: 0, bodyRows: 10 }, view: {} },
   })
@@ -78,4 +78,32 @@ test('with no worktree news the band is a status rail whose items open their tab
   expect(await pane.find({ type: 'Button', key: 'dial-foresight' })).toBeDefined()
   await band.redraw()
   expect(await band.find({ type: 'Button', key: 'open-craftshop' })).toBeUndefined()
+})
+
+test('on the desktop the rail is one picture: hovering a pill captions it, pressing opens its tab', async ($, on) => {
+  world(on, { isRepo: false })
+  await startSession($)
+  const band = await $.ui.mount({
+    plugin: 'craft-shop',
+    surface: 'desktop',
+    component: 'AbovePrompt',
+    props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 100, scroll: { offset: 0, bodyRows: 10 }, view: {} },
+  })
+  expect(await band.find({ type: 'Svg' })).toBeDefined()
+  const overlay = (await band.find({ type: 'Client', key: 'rail-click' }))!.props as {
+    props: { width: number; segments: { x0: number; x1: number; tab: string }[] }
+  }
+  const { width, segments } = overlay.props
+  expect(segments.map(one => one.tab)).toEqual(['pane', 'context', 'dials', 'context', 'worktree'])
+
+  // Lay the overlay out at 60 cells and point at the middle of the Dials pill.
+  await band.resize({ columns: 60, rows: 2, in: 'rail-click' })
+  const dials = segments[2]!
+  const x = Math.floor(((dials.x0 + dials.x1) / 2 / width) * 60)
+  await band.pointer({ type: 'move', x, y: 0, in: 'rail-click' })
+  await band.redraw()
+  expect(await band.find({ text: /Dials: Balanced/ })).toBeDefined()
+  await band.pointer({ type: 'down', x, y: 0, button: 'left', in: 'rail-click' })
+  const pane = await mountPane($, 'desktop')
+  expect(await pane.find({ type: 'Button', key: 'dial-foresight' })).toBeDefined()
 })

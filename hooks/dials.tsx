@@ -250,8 +250,8 @@ function isRadarPost(data: unknown): data is { dial: number; level: number; sele
 }
 
 export function registerDials(on: On): void {
-  on('ui.message', async ($, e, next) => {
-    if (e.element !== 'radar-drag' || !isRadarPost(e.data)) return next(e)
+  on('ui.message', { element: 'radar-drag' }, async ($, e, next) => {
+    if (!isRadarPost(e.data)) return next(e)
     const dial = DIALS[e.data.dial]!
     const level = e.data.level
     if (e.data.select !== undefined) await update($, selectedDial, () => dial.key)

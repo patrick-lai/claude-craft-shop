@@ -43,13 +43,13 @@ export function isTab(value: string): value is Tab {
 // the frame they share.
 export function frame(ui: Ui, current: Tab, columns: number, onSelect: (id: Tab) => void, body: RenderElement) {
   const { Box, Button, Text, Svg } = ui
-  const rich = Svg !== undefined
   // The tabs are the surface's own buttons, so a press answers at once (a
   // drawn tab bar went through a Client and a redrawn picture, and lagged);
-  // they sit in one tray, the current one filled, keys 1 to 3. On the desktop
-  // the mark and the name lead, a still picture.
+  // the current one filled, keys 1 to 3. No tray behind them: the desktop
+  // draws a box's background square, and it read as a stray box. On the
+  // desktop the mark and the name lead, a still picture.
   const tabs = (
-    <Box gap={1} backgroundColor={rich ? 'rgba(140,140,150,0.10)' : undefined} paddingX={rich ? 1 : 0}>
+    <Box gap={1}>
       {TABS.map((one, index) => (
         <Button
           key={`tab-${one.id}`}

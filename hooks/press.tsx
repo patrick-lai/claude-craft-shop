@@ -17,7 +17,10 @@ const Press: ClientModule<Props, true> = (props, surface) => {
       else if (hovers && event.type === 'leave') surface.post({ hover: false })
     })
   }
-  return <Box width={surface.columns} height={surface.rows} />
+  // The whole drawing, to the pixel: a size in whole cells left a pill's
+  // right and bottom edges dead (and all of it before the first layout,
+  // when the cells are 0).
+  return <Box width="100%" height="100%" />
 }
 
 export default Press

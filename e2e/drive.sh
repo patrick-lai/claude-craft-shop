@@ -87,6 +87,19 @@ slots() { git -C "$app" worktree list --porcelain | grep -c "^worktree .*/slots/
 fixture="$("$here/setup.sh")"
 app="$fixture/app"
 
+# The --plugin-dir copy's store is shared with any session using that copy
+# (a developer's own): save it, and put it back however the run ends.
+for kept in ~/.claude/plugins/store/fishstack_inline-*.json; do
+  [ -e "$kept" ] && cp "$kept" "$kept.e2e-saved"
+done
+restore_store() {
+  for saved in ~/.claude/plugins/store/fishstack_inline-*.json.e2e-saved; do
+    [ -e "$saved" ] && mv "$saved" "${saved%.e2e-saved}"
+  done
+  return 0
+}
+trap restore_store EXIT
+
 # The toggle and the dials are kept in the --plugin-dir copy's own store
 # across runs: start each run with the toggle off (the run turns it on) and
 # the Quick dials (no subagents, short answers), so turns stay short.

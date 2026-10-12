@@ -959,23 +959,17 @@ export function registerWorktree(on: On, options: PluginOptions): void {
                 ))}
               </Box>
             ),
+            state.path !== null && (
+              <Box flexDirection="column" marginTop={1}>
+                {detail('Main', shortPath(state.main ?? ''))}
+                {detail('Slot', shortPath(state.path))}
+                {detail('Branch', state.branch ?? '')}
+                {detail('Base', `${state.base ?? ''}${state.baseSha === null ? '' : ` @ ${state.baseSha.slice(0, 7)}`}`)}
+              </Box>
+            ),
           ],
           { tone: state.phase === 'failed' ? 'danger' : isReady ? 'plain' : 'warning' },
         )}
-
-        {state.path === null
-          ? null
-          : card(
-              ui,
-              'worktree-facts',
-              [
-                detail('Main', shortPath(state.main ?? '')),
-                detail('Slot', shortPath(state.path)),
-                detail('Branch', state.branch ?? ''),
-                detail('Base', `${state.base ?? ''}${state.baseSha === null ? '' : ` @ ${state.baseSha.slice(0, 7)}`}`),
-              ],
-              { tone: 'muted' },
-            )}
 
         {list.length > 0 && (
           <Box flexDirection="column" gap={rich ? 1 : 0}>

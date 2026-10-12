@@ -276,24 +276,22 @@ export function registerDials(on: On): void {
     const trackWidth = isWide ? Math.max(140, columns * 8 - RADAR_W - 16 - 4 * 8) : Math.max(140, (columns - 4) * 8)
     const pick = (key: DialKey, level: number) => void setDials($, now => ({ ...now, [key]: Math.min(5, Math.max(1, level)) }))
 
-    const estimateCard = (key: string, title: string, value: string, fraction: number) =>
-      card(
-        ui,
-        key,
-        [
-          <Text dimColor>{title}</Text>,
-          <Text bold>{value}</Text>,
-          rich ? (
-            <Box>{svg(ui, track(fraction, trackWidth), `${title} ${value}`, trackWidth, 6)}</Box>
-          ) : (
-            <Text color="suggestion">{bar(fraction, 16)}</Text>
-          ),
-        ],
-        { grow: 1 },
-      )
+    const estimateCard = (key: string, title: string, value: string, fraction: number) => (
+      <Box key={key} flexDirection="column">
+        <Text>
+          <Text dimColor>{title} </Text>
+          <Text bold>{value}</Text>
+        </Text>
+        {rich ? (
+          <Box>{svg(ui, track(fraction, trackWidth), `${title} ${value}`, trackWidth, 6)}</Box>
+        ) : (
+          <Text color="suggestion">{bar(fraction, 16)}</Text>
+        )}
+      </Box>
+    )
 
     const estimates = (
-      <Box flexDirection="column" gap={1} flexGrow={1}>
+      <Box flexDirection="column" gap={2} flexGrow={1} justifyContent="center">
         {estimateCard('est-spend', 'Spend', spendText(guess.spend), (guess.spend - 0.4) / 2)}
         {estimateCard('est-time', 'Time to done', guess.paceLabel, Math.min(1, guess.pace / 2))}
         {estimateCard('est-asks', 'Asks you', guess.asks, (6 - values.autonomy) / 5)}

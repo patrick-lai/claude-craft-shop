@@ -156,3 +156,26 @@ test('a session started in some other worktree, a slot of ours among them, is le
   await clock.advance(1)
   expect(toolCalls).not.toContain('EnterWorktree')
 })
+
+test('a session that starts in one of our slots is that slot\'s, ready, with nothing to create, toggle off or on', { options: { worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
+  const dir = await repoDir()
+  const { toolCalls } = world(on, { slots: [`${dir}/2`] })
+  await $.session.start({ cwd: `${dir}/2`, surface: 'terminal', isInteractive: true })
+  expect(toolCalls).not.toContain('EnterWorktree')
+  expect((await $.tool.call({ tool: 'Edit', file_path: `${dir}/2/a.ts`, old_string: 'a', new_string: 'b' })).deny).toBeUndefined()
+  const ui = await mountPane($, 'desktop')
+  await activate(ui, 'tab-worktree')
+  expect(await ui.find({ text: /Ready/ })).toBeDefined()
+  expect(await ui.find({ text: /this session/ })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'worktree-create' })).toBeUndefined()
+})
+
+test('a session in a worktree fishStack does not manage is told where it is, and offered nothing to create', { options: { worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: '/other/wt', surface: 'terminal', isInteractive: true })
+  const ui = await mountPane($, 'desktop')
+  await activate(ui, 'tab-worktree')
+  expect(await ui.find({ text: /This session already works in a worktree/ })).toBeDefined()
+  expect(await ui.find({ text: /\/other\/wt/ })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'worktree-create' })).toBeUndefined()
+})

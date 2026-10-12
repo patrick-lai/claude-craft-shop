@@ -60,6 +60,7 @@ declare module 'claude-code' {
       worktree: Worktree
       slots: Slot[]
       poolNote: string
+      elsewhere: string | null
       railTick: number
       isTurnRunning: boolean
       lastReplyAt: number | null

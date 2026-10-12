@@ -45,6 +45,9 @@ const railTick = atom({ plugin: 'fishstack', key: 'railTick' } as const, 0)
 // The rail's figures for one session, kept in the store under one key.
 const RAIL_STORE_KEY = 'rail'
 type RailKept = { sessionId: string; repliedAt: number | null; tokens: { input: number; output: number } | null }
+// The worktree this session works in when it is not ours to manage (another
+// tool's, or one made by hand); null in the main checkout or a slot of ours.
+const elsewhere = atom({ plugin: 'fishstack', key: 'elsewhere' } as const, null)
 // What the pool's background warming is doing, for the Perm worktree tab.
 const poolNote = atom({ plugin: 'fishstack', key: 'poolNote' } as const, '')
 const tokenTotals = atom({ plugin: 'fishstack', key: 'tokenTotals' } as const, null)
@@ -580,10 +583,6 @@ async function startWorktree($: $, options: PluginOptions, cwd: string, isForced
     await beginWorktree($, options)
     return
   }
-  // Off, fishStack stays out of the way: no slot, no read-only guard, and
-  // Claude Code's own worktree handling applies.
-  if (!isForced && !(await isAutoOn($, options))) return
-
   const repo = await $.session.repo()
   if (repo === null) return
   const top = await git($, ['rev-parse', '--show-toplevel'], cwd)
@@ -594,13 +593,42 @@ async function startWorktree($: $, options: PluginOptions, cwd: string, isForced
   const common = await git($, ['rev-parse', '--path-format=absolute', '--git-common-dir'], cwd)
   const commonDir = common.stdout.trim()
   const main = common.exitCode === 0 && commonDir.endsWith('/.git') ? await realPath($, commonDir.slice(0, -'/.git'.length)) : here
+
+  // Already in one of our slots (a session carried on there, or started
+  // there): it is this session's, ready, whatever the toggle says.
+  if (here !== main) {
+    const repoDir = await slotsRoot($, options, main)
+    const realDir = await realPath($, repoDir).catch(() => repoDir)
+    const inside = [realDir, repoDir].find(dir => here.startsWith(`${dir}/`))
+    if (inside !== undefined) {
+      const path = `${repoDir}${here.slice(inside.length)}`
+      const branch = (await git($, ['rev-parse', '--abbrev-ref', 'HEAD'], here)).stdout.trim() || null
+      const at = await $.clock.now()
+      await update($, worktree, (): Worktree => ({ ...IDLE_WORKTREE, phase: 'ready', main, path, branch, step: 'Carried on in this slot', steps: [{ label: 'Carried on in this slot', at, isWarning: false }] }))
+      await writeLease($, path)
+      startHeartbeat($, path)
+      await refreshSlots($, options)
+      return
+    }
+  }
+
+  // Off, fishStack stays out of the way: no slot, no read-only guard, and
+  // Claude Code's own worktree handling applies.
+  if (!isForced && !(await isAutoOn($, options))) {
+    if (here !== main) await update($, elsewhere, () => here)
+    return
+  }
+
   if (here !== main) {
     // A worktree Claude Code made itself (claude --worktree, the desktop's
     // worktree option): those are made before any mod loads, so its
     // WorktreeCreate never reaches fishStack. Adopt it: a slot on its name,
     // read-only until the slot is ready, then the session moves in. Any
     // other worktree (a slot of ours among them) is left as it is.
-    if (!here.startsWith(`${main}/.claude/worktrees/`)) return
+    if (!here.startsWith(`${main}/.claude/worktrees/`)) {
+      await update($, elsewhere, () => here)
+      return
+    }
     adoptedName = here.split('/').pop()!.replace(/[^A-Za-z0-9._-]+/g, '-').slice(0, 40)
   } else if (main !== (await realPath($, repo.root))) {
     return
@@ -619,7 +647,8 @@ async function claimNow($: $, options: PluginOptions): Promise<void> {
   hasStarted = false
   await startWorktree($, options, await $.session.cwd(), true)
   if ((await read($, worktree)).phase === 'off') {
-    await $.ui.toast("No worktree: this session isn't in a repository's main checkout.")
+    const other = await read($, elsewhere)
+    await $.ui.toast(other === null ? "No worktree: this session isn't in a git repository." : `This session already works in a worktree fishStack does not manage: ${other}`)
   }
 }
 
@@ -881,6 +910,28 @@ export function registerWorktree(on: On, options: PluginOptions): void {
           </Box>
         </Box>
     )
+
+    const other = await read($, elsewhere)
+    if (state.phase === 'off' && other !== null) {
+      // In a worktree that is not ours: say where, and offer nothing to make.
+      return frame(
+        ui,
+        'worktree',
+        e.props.bodyColumns,
+        select,
+        <Box flexDirection="column" gap={1}>
+          {autoCard}
+          {card(ui, 'worktree-elsewhere', [
+            <Text bold>This session already works in a worktree</Text>,
+            <Text dimColor>fishStack does not manage it, so it leaves it as it is. New sessions started in the main checkout get a slot of their own.</Text>,
+            <Box marginTop={1} gap={1}>
+              <Text dimColor>Path</Text>
+              <Text wrap="truncate-start">{shortPath(other)}</Text>
+            </Box>,
+          ])}
+        </Box>,
+      )
+    }
 
     if (state.phase === 'off') {
       const rich = ui.Svg !== undefined

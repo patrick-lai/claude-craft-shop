@@ -46,7 +46,8 @@ test("the rail's cache gauge runs down for 5 minutes after a reply, then goes co
     props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 100, scroll: { offset: 0, bodyRows: 10 }, view: {} },
   })
   const cache = async () => (await band.find({ type: 'Button', key: 'rail-cache' }))?.text
-  expect(await cache()).toBeUndefined()
+  // The gauge is there from the start, empty until a reply.
+  expect(await cache()).toBe('Cache starts next reply')
 
   await $.turn.complete({ turnId: 't1', answer: 'done', durationMs: 1_000, reason: 'answer', isAborted: false })
   await band.redraw()
@@ -185,6 +186,39 @@ test('on the desktop the rail fits its one row: the least needed pills give up t
   expect(narrow.svgs[2]!.alt).toBe('↑ 14.7M sent · ↓ 67.0k received · API list price, not your bill')
   // An icon still says what it stands for when hovered.
   expect(narrow.svgs[3]!.alt).toBe('Dials: Balanced · tune how the agent works')
+})
+
+test('the cache gauge and the cost stay on the rail when the state starts over, from what the store kept', async ($, on) => {
+  // As after a reload or a rename: no state, but this session's last reply
+  // a minute ago and its tokens kept in the store.
+  world(on, { isRepo: false, store: { rail: { sessionId: 'abcdef123456', repliedAt: 1_000_000 - 60_000, tokens: { input: 20_100_000, output: 86_700 } } } })
+  await startSession($)
+  const band = await $.ui.mount({
+    plugin: 'fishstack',
+    surface: 'desktop',
+    component: 'AbovePrompt',
+    props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 200, scroll: { offset: 0, bodyRows: 10 }, view: {} },
+  })
+  const tree = await band.drawn()
+  const alt = (id: string) => (byKey(tree, `drawn-rail-${id}-press`) as { children: { props: { alt: string; source: string } }[] }).children[0]!.props
+  expect(alt('cache').alt).toBe('Cache warm, 4:00 left: replies now are cheaper')
+  expect(alt('tokens').source).toContain('>≈ $0.42<')
+  expect(alt('tokens').alt).toBe('↑ 20.1M sent · ↓ 86.7k received · API list price, not your bill')
+})
+
+test("another session's kept figures are not this one's: the gauge waits, the cost still shows", async ($, on) => {
+  world(on, { isRepo: false, store: { rail: { sessionId: 'someone-else', repliedAt: 1_000_000 - 60_000, tokens: { input: 5, output: 5 } } } })
+  await startSession($)
+  const band = await $.ui.mount({
+    plugin: 'fishstack',
+    surface: 'desktop',
+    component: 'AbovePrompt',
+    props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 200, scroll: { offset: 0, bodyRows: 10 }, view: {} },
+  })
+  const tree = await band.drawn()
+  const alt = (id: string) => (byKey(tree, `drawn-rail-${id}-press`) as { children: { props: { alt: string; source: string } }[] }).children[0]!.props
+  expect(alt('cache').alt).toBe('Prompt cache: the gauge starts with the next reply')
+  expect(alt('tokens').alt).toBe('≈ $0.42 at API list price, not your bill')
 })
 
 // The element drawn under a key, hover and all (find leaves hover out).

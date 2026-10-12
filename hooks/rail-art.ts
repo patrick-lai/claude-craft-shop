@@ -117,31 +117,35 @@ export function railArt(figures: RailArtFigures, iconOnly: ReadonlySet<Compactab
     pill('brand', width, 'pane', 'Open fishStack', left => isIcon ? fishMark(left + 12, mid - 8) : `${fishMark(left + 12, mid - 8)}<text x="${left + 12 + 18 + 7}" y="${mid + 4.6}" font-family="${ROUNDED}" font-size="13.5" font-weight="700" fill="url(#brandText)" letter-spacing="0.1">${word}</text>`)
   }
 
-  if (figures.cacheSecondsLeft !== null) {
+  // The cache gauge is always there: empty until a reply has been seen.
+  {
     const left = figures.cacheSecondsLeft
-    const isWarm = figures.isWorking || left > 0
-    const lit = figures.isWorking ? 5 : Math.ceil(left / 60)
+    const isWarm = figures.isWorking || (left !== null && left > 0)
+    const lit = figures.isWorking ? 5 : left === null ? 0 : Math.ceil(left / 60)
     const width = 12 + 14 + 7 + 5 * 6 + 4 * 3 + 12
     const caption = figures.isWorking
       ? 'Prompt cache in use'
-      : isWarm
-        ? `Cache warm, ${clock(left)} left: replies now are cheaper`
-        : 'Cache cold: the next message rereads the chat'
+      : left === null
+        ? 'Prompt cache: the gauge starts with the next reply'
+        : isWarm
+          ? `Cache warm, ${clock(left)} left: replies now are cheaper`
+          : 'Cache cold: the next message rereads the chat'
     pill('cache', width, 'context', caption, left => {
       const bars = BARS.map((color, index) => `<rect x="${left + 12 + 14 + 7 + index * 9}" y="${mid - 7}" width="6" height="14" rx="3" fill="${index < lit ? color : 'var(--track)'}"/>`).join('')
       return `${flame(left + 12, mid - 7.5, isWarm)}${bars}`
     })
   }
 
-  if (figures.tokens !== null) {
-    const sent = compact(figures.tokens.input)
-    const received = compact(figures.tokens.output)
+  // The cost whenever Claude Code has one, the tokens sent when it has not;
+  // the tokens under the pointer once any are counted.
+  if (figures.tokens !== null || figures.costUsd !== null) {
+    const sent = figures.tokens === null ? null : compact(figures.tokens.input)
+    const received = figures.tokens === null ? null : compact(figures.tokens.output)
     const cost = figures.costUsd === null ? null : `≈ $${figures.costUsd.toFixed(2)}`
-    // The cost when Claude Code has one, the tokens sent when it has not; the
-    // tokens either way under the pointer.
-    const label = cost ?? sent
+    const label = cost ?? sent ?? ''
     const width = 12 + 12 + 7 + textWidth(label, 12.5, true) + 14
-    const caption = `↑ ${sent} sent · ↓ ${received} received` + (cost === null ? '' : ' · API list price, not your bill')
+    const counted = sent === null ? null : `↑ ${sent} sent · ↓ ${received} received`
+    const caption = [counted, cost === null ? null : counted === null ? `${cost} at API list price, not your bill` : 'API list price, not your bill'].filter(Boolean).join(' · ')
     pill('tokens', width, 'context', caption, left => `${updown(left + 12, mid)}<text x="${left + 12 + 12 + 7}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5" font-weight="600" fill="var(--text)" class="num">${escape(label)}</text>`)
   }
 

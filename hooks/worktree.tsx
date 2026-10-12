@@ -39,6 +39,9 @@ const lastReplyAt = atom({ plugin: 'fishstack', key: 'lastReplyAt' } as const, n
 // The rail pill under the pointer, kept to this process: a hover is one
 // window's, not the session's.
 let railHover: string | null = null
+// The rail's figures for one session, kept in the store under one key.
+const RAIL_STORE_KEY = 'rail'
+type RailKept = { sessionId: string; repliedAt: number | null; tokens: { input: number; output: number } | null }
 const tokenTotals = atom({ plugin: 'fishstack', key: 'tokenTotals' } as const, null)
 
 type $ = EngineInterface
@@ -462,14 +465,25 @@ export function registerWorktree(on: On, options: PluginOptions): void {
     // its own, and /cost's dollars are list price, not what anyone is billed.
     const used = e.usage
     if (used !== undefined) {
+      if ((await read($, tokenTotals)) === null) {
+        const kept = await $.store.get(RAIL_STORE_KEY)
+        if (kept !== null && typeof kept === 'object' && (kept as RailKept).sessionId === (await $.session.id()) && (kept as RailKept).tokens !== null) {
+          await update($, tokenTotals, () => (kept as RailKept).tokens)
+        }
+      }
       await update($, tokenTotals, now => ({
         input: (now?.input ?? 0) + used.input_tokens + used.cache_read_input_tokens + used.cache_creation_input_tokens,
         output: (now?.output ?? 0) + used.output_tokens,
       }))
     }
-    if (e.agentId !== undefined) return done
+    const sessionId = await $.session.id()
+    if (e.agentId !== undefined) {
+      await $.store.set(RAIL_STORE_KEY, { sessionId, repliedAt: await read($, lastReplyAt), tokens: await read($, tokenTotals) })
+      return done
+    }
     const repliedAt = await $.clock.now()
     await update($, lastReplyAt, () => repliedAt)
+    await $.store.set(RAIL_STORE_KEY, { sessionId, repliedAt, tokens: await read($, tokenTotals) })
     await update($, isTurnRunning, () => false)
     if ((await read($, worktree)).phase === 'ready') await update($, isBandHidden, () => true)
     return done
@@ -508,7 +522,11 @@ export function registerWorktree(on: On, options: PluginOptions): void {
       // With no worktree news, the band is fishStack's status rail. Reading
       // isTurnRunning redraws it as each turn starts and ends.
       const isWorking = await read($, isTurnRunning)
-      const repliedAt = await read($, lastReplyAt)
+      // State starts over on a reload or a rename; the store keeps this
+      // session's last reply and token totals across both.
+      const kept = await $.store.get(RAIL_STORE_KEY)
+      const keptHere = kept !== null && typeof kept === 'object' && (kept as RailKept).sessionId === (await $.session.id()) ? (kept as RailKept) : null
+      const repliedAt = (await read($, lastReplyAt)) ?? keptHere?.repliedAt ?? null
       const now = await $.clock.now()
       const cacheSecondsLeft = repliedAt === null ? null : Math.max(0, Math.round((CACHE_TTL_MS - (now - repliedAt)) / 1000))
       tickWhileWarm($, cacheSecondsLeft !== null && cacheSecondsLeft > 0 && !isWorking)
@@ -525,7 +543,7 @@ export function registerWorktree(on: On, options: PluginOptions): void {
           isWorking,
           cacheSecondsLeft,
           cachePercent: last === null || input === 0 ? null : Math.round((last.cache_read_input_tokens / input) * 100),
-          tokens: await read($, tokenTotals),
+          tokens: (await read($, tokenTotals)) ?? keptHere?.tokens ?? null,
           costUsd: usage.cost?.usd ?? null,
           preset: presetName(values),
           presetLevels: [values.foresight, values.crew, values.tenacity, values.autonomy, values.proof, values.voice],

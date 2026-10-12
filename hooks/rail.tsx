@@ -90,44 +90,48 @@ export function drawRail(ui: Ui, figures: RailFigures, open: (tab: Tab | null) =
           ▸ fishStack
         </Text>,
       )}
-      {left !== null && (
-        <Box gap={1} alignItems="center">
-          {Svg !== undefined ? (
-            <Svg source={cacheGauge(left, figures.isWorking, figures.cachePercent)} alt={isWarm ? `Prompt cache warm, ${clock} left` : 'Prompt cache cold'} width={70} height={20} isInteractive />
-          ) : (
-            <Text color={isWarm ? 'warning' : undefined} dimColor={!isWarm}>
-              {'▮'.repeat(figures.isWorking ? 5 : Math.ceil(left / 60))}
-              {'▯'.repeat(figures.isWorking ? 0 : 5 - Math.ceil(left / 60))}
-            </Text>
-          )}
-          {item(
-            'rail-cache',
-            'context',
-            figures.isWorking ? (
-              <Text dimColor>Working</Text>
-            ) : isWarm ? (
+      <Box gap={1} alignItems="center">
+        {Svg !== undefined ? (
+          <Svg source={cacheGauge(left ?? 0, figures.isWorking, figures.cachePercent)} alt={isWarm ? `Prompt cache warm, ${clock} left` : 'Prompt cache cold'} width={70} height={20} isInteractive />
+        ) : (
+          <Text color={isWarm ? 'warning' : undefined} dimColor={!isWarm}>
+            {'▮'.repeat(figures.isWorking ? 5 : Math.ceil((left ?? 0) / 60))}
+            {'▯'.repeat(figures.isWorking ? 0 : 5 - Math.ceil((left ?? 0) / 60))}
+          </Text>
+        )}
+        {item(
+          'rail-cache',
+          'context',
+          figures.isWorking ? (
+            <Text dimColor>Working</Text>
+          ) : left === null ? (
+            <Text dimColor>Cache starts next reply</Text>
+          ) : isWarm ? (
               <Text>
                 <Text dimColor>Cache warm </Text>
                 <Text bold>{clock}</Text>
               </Text>
             ) : (
-              <Text dimColor>Cache cold</Text>
-            ),
-          )}
-        </Box>
-      )}
-      {figures.tokens !== null &&
+            <Text dimColor>Cache cold</Text>
+          ),
+        )}
+      </Box>
+      {(figures.tokens !== null || figures.costUsd !== null) &&
         item(
           'rail-tokens',
           'context',
           <Text>
-            <Text color="suggestion">↑</Text>
-            <Text bold>{tokens(figures.tokens.input)}</Text>
-            <Text dimColor> in </Text>
-            <Text color="success">↓</Text>
-            <Text bold>{tokens(figures.tokens.output)}</Text>
-            <Text dimColor> out</Text>
-            {figures.costUsd !== null && <Text dimColor> · ≈ ${figures.costUsd.toFixed(2)} API price</Text>}
+            {figures.tokens !== null && (
+              <Text>
+                <Text color="suggestion">↑</Text>
+                <Text bold>{tokens(figures.tokens.input)}</Text>
+                <Text dimColor> in </Text>
+                <Text color="success">↓</Text>
+                <Text bold>{tokens(figures.tokens.output)}</Text>
+                <Text dimColor> out</Text>
+              </Text>
+            )}
+            {figures.costUsd !== null && <Text dimColor>{figures.tokens !== null ? ' · ' : ''}≈ ${figures.costUsd.toFixed(2)} API price</Text>}
           </Text>,
         )}
       {item(

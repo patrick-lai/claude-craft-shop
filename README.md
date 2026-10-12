@@ -20,6 +20,16 @@ Answer `y` to add the marketplace, then pick a scope (user scope is first). Next
 
 Open the pane with `/craft`, or `/craft worktree|dials|context` to go straight to a tab. The pane opens by itself where the surface docks panes: the desktop app, and the terminal's fullscreen layout (`/tui fullscreen`). Keys `1`–`3` switch tabs while the pane has focus.
 
+The rail above the prompt shows Craftshop's status at a glance:
+- how full the context window is;
+- how much of the last request the prompt cache served;
+- the session's cost;
+- the dials preset;
+- how many sources are on;
+- the worktree's branch.
+
+Click an item to open its tab. While the pane is closed, the rail starts with **▸ Craftshop**. While a worktree is being prepared, the rail shows its progress instead.
+
 ## Options
 
 | Option | Default | What it does |

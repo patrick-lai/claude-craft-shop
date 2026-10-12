@@ -9,7 +9,9 @@ import type { EngineInterface, On, PluginOptions, Timer } from 'claude-code'
 import type { Slot, Tab, Worktree, WorktreePhase } from '../types'
 import { frame, PANE, PANE_TITLE, resolveUi } from './ui'
 import type { Ui } from './ui'
+import { BALANCED, presetName } from './dials'
 import { branchArt, card, label, segmented, svg } from './kit'
+import { drawRail } from './rail'
 
 export const IDLE_WORKTREE: Worktree = {
   phase: 'off',
@@ -30,6 +32,8 @@ const slots = atom({ plugin: 'craft-shop', key: 'slots' } as const, [])
 const tab = atom({ plugin: 'craft-shop', key: 'tab' } as const, 'worktree')
 const worktree = atom({ plugin: 'craft-shop', key: 'worktree' } as const, IDLE_WORKTREE)
 const isStepsShown = atom({ plugin: 'craft-shop', key: 'isStepsShown' } as const, false)
+const dials = atom({ plugin: 'craft-shop', key: 'dials' } as const, BALANCED)
+const sources = atom({ plugin: 'craft-shop', key: 'sources' } as const, [])
 
 type $ = EngineInterface
 
@@ -481,13 +485,30 @@ export function registerWorktree(on: On, options: PluginOptions): void {
     const state = await read($, worktree)
     if (e.props.hasSurvey) return next(e)
     if (state.phase === 'off' || (await read($, isBandHidden))) {
-      // With no worktree news, the band offers a way back to a closed pane.
-      if ((await $.ui.panes()).some(one => one.id === PANE)) return next(e)
-      const { Button } = $.ui.resolve(e)
-      return (
-        <Button key="open-craftshop" plain dimColor onPress={() => void $.ui.open({ id: PANE, title: PANE_TITLE, focus: true })}>
-          ▸ Craftshop
-        </Button>
+      // With no worktree news, the band is Craftshop's status rail. Reading
+      // isTurnRunning redraws it as each turn starts and ends.
+      await read($, isTurnRunning)
+      const usage = await $.session.usage({ breakdown: 'summary' })
+      const breakdown = usage.context.breakdown
+      const last = breakdown?.apiUsage ?? null
+      const input = last === null ? 0 : last.input_tokens + last.cache_read_input_tokens + last.cache_creation_input_tokens
+      const list = await read($, sources)
+      const ui: Ui = resolveUi($.ui.resolve(e), e.surface)
+      return drawRail(
+        ui,
+        {
+          isPaneOpen: (await $.ui.panes()).some(one => one.id === PANE),
+          percent: breakdown?.percentage ?? usage.context.percent ?? 0,
+          used: breakdown?.totalTokens ?? usage.context.tokens ?? 0,
+          window: breakdown?.rawMaxTokens ?? usage.context.window,
+          cachePercent: last === null || input === 0 ? null : Math.round((last.cache_read_input_tokens / input) * 100),
+          costUsd: usage.cost?.usd ?? null,
+          preset: presetName(await read($, dials)),
+          sourcesOn: list.filter(one => one.mode !== 'off').length,
+          sourcesTotal: list.length,
+          branch: state.phase === 'ready' ? state.branch : null,
+        },
+        at => void openAt($, at),
       )
     }
 
@@ -700,6 +721,12 @@ export function registerWorktree(on: On, options: PluginOptions): void {
       </Box>,
     )
   })
+}
+
+// The rail's items open the pane, at their tab when they name one.
+async function openAt($: $, at: Tab | null): Promise<void> {
+  if (at !== null) await update($, tab, () => at)
+  await $.ui.open({ id: PANE, title: PANE_TITLE, focus: true })
 }
 
 // A home folder spelled ~, as the terminal shows paths.

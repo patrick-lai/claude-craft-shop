@@ -31,7 +31,17 @@ export function world(on: On, { isRepo = true, isDialogSlow = false } = {}): Wor
   on('session.root', () => ({ value: REPO }))
   on('session.cwd', () => ({ value: REPO }))
   on('session.id', () => ({ value: 'abcdef123456' }))
-  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200_000 }, rateLimits: [] } }))
+  // A session a few turns in: the fields Craftshop reads, the rest left out.
+  const breakdown = {
+    totalTokens: 68_000,
+    rawMaxTokens: 200_000,
+    percentage: 34,
+    categories: [{ name: 'Messages', tokens: 41_000, kind: 'used' }],
+    apiUsage: { input_tokens: 1_200, output_tokens: 800, cache_read_input_tokens: 52_000, cache_creation_input_tokens: 3_000 },
+  }
+  on('session.usage', () => ({
+    value: { startedAt: 0, context: { window: 200_000, tokens: 68_000, percent: 34, breakdown: breakdown as never }, rateLimits: [], cost: { usd: 0.42 } as never },
+  }))
   const panes: string[] = []
   on('ui.open', ($, e) => {
     if (!panes.includes(e.id)) panes.push(e.id)

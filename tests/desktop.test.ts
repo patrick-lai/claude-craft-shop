@@ -10,7 +10,7 @@ declare const console: { log: (...args: unknown[]) => void }
 
 type Drawing = Awaited<ReturnType<typeof mountPane>>
 
-async function show(ui: Drawing, name: string) {
+async function show(ui: Pick<Drawing, "drawn">, name: string) {
   const tree = await ui.drawn()
   expect(tree).toBeDefined()
   console.log(`PREVIEW ${name} ${JSON.stringify(tree)}`)
@@ -55,6 +55,14 @@ test('every tab draws on the desktop with content in it', async ($, on) => {
 
   await ui.press({ key: 'tab-worktree' })
   await show(ui, 'worktree-off')
+
+  const band = await $.ui.mount({
+    plugin: 'craft-shop',
+    surface: 'desktop',
+    component: 'AbovePrompt',
+    props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 120, scroll: { offset: 0, bodyRows: 10 }, view: {} },
+  })
+  await show(band, 'rail')
 })
 
 test('the worktree tab draws its steps and slots on the desktop', { options: { autoWorktree: true } }, async ($, on) => {

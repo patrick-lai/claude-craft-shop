@@ -108,7 +108,7 @@ function levelOf(dial: Dial, values: DialValues): Level {
   return dial.levels[values[dial.key] - 1]!
 }
 
-function presetName(values: DialValues): string {
+export function presetName(values: DialValues): string {
   const preset = PRESETS.find(one => DIALS.every(dial => one.values[dial.key] === values[dial.key]))
   return preset?.name ?? 'Custom'
 }

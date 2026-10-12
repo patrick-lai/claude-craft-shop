@@ -36,10 +36,8 @@ test('/craft opens the pane on the tab it names', async ($, on) => {
   expect(await ui.find({ type: 'Button', key: 'pip-crew-1' })).toBeDefined()
 })
 
-test('with the pane closed, the band above the prompt offers a button that opens Craftshop', async ($, on) => {
+test('with no worktree news the band is a status rail whose items open their tab', async ($, on) => {
   world(on, { isRepo: false })
-  // Beneath the plugin, the engine's own band draws nothing here.
-  on('ui.render', { component: 'AbovePrompt' }, ($, e) => $.ui.resolve(e).Box({}))
   await startSession($)
   const band = await $.ui.mount({
     plugin: 'craft-shop',
@@ -48,7 +46,12 @@ test('with the pane closed, the band above the prompt offers a button that opens
     props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 100, scroll: { offset: 0, bodyRows: 10 }, view: {} },
   })
   expect(await band.find({ type: 'Button', key: 'open-craftshop' })).toBeDefined()
-  await band.press({ key: 'open-craftshop' })
+  expect((await band.find({ type: 'Button', key: 'rail-dials' }))?.text).toContain('Dials Balanced')
+  expect((await band.find({ type: 'Button', key: 'rail-sources' }))?.text).toContain('0 sources on')
+  expect((await band.find({ type: 'Button', key: 'rail-worktree' }))?.text).toContain('Worktree off')
+  await band.press({ key: 'rail-dials' })
+  const pane = await mountPane($, 'desktop')
+  expect(await pane.find({ type: 'Button', key: 'dial-foresight' })).toBeDefined()
   await band.redraw()
   expect(await band.find({ type: 'Button', key: 'open-craftshop' })).toBeUndefined()
 })

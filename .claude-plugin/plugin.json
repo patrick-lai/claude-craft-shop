@@ -27,6 +27,12 @@
       "title": "Setup command",
       "description": "A shell command run in a new slot before the session moves in (say `pnpm install`). Empty runs nothing.",
       "default": ""
+    },
+    "minFreeGb": {
+      "type": "number",
+      "title": "Free disk to keep (GB)",
+      "description": "Perm worktree stops warming new slots when less than this much disk is free, as CommissionAI does at 20 GB.",
+      "default": 20
     }
   }
 }

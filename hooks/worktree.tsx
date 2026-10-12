@@ -56,9 +56,10 @@ const HEARTBEAT_MS = 60_000
 const LEASE_TTL_MS = 3 * HEARTBEAT_MS
 const SETUP_TIMEOUT_MS = 10 * 60_000
 const LOCK_STALE_MS = 30_000
-// As CommissionAI's: three slots ready, and no warming below 20 GB free.
+// As CommissionAI's: three slots ready, and no warming below 20 GB free
+// (the minFreeGb option).
 export const POOL_SIZE = 3
-const MIN_FREE_KB = 20 * 1024 * 1024
+const DEFAULT_MIN_FREE_GB = 20
 const SETUP_PREFIX = 'setup:'
 type SetupRun = { command: string; lockHash: string }
 const LOCKFILES = ['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lock', 'bun.lockb']
@@ -386,7 +387,8 @@ async function freeKb($: $, dir: string): Promise<number> {
 
 // Keeps the pool warm, as CommissionAI does: at least POOL_SIZE slots, at
 // least one of them idle, each made, seeded and set up ahead of any session,
-// one at a time in the background. Stops below MIN_FREE_KB of free disk.
+// one at a time in the background. Pauses below minFreeGb of free disk, and
+// says so in the tab.
 let isWarming = false
 // A top-up asked for while one runs: run once more when it ends, as a claim
 // made meanwhile may have taken the spare it was counting on.
@@ -402,6 +404,8 @@ async function prewarm($: $, options: PluginOptions, main: string): Promise<void
     const branchName = await defaultBranch($, main)
     const fetched = await git($, ['fetch', '-q', 'origin', branchName], main)
     const sha = await gitOut($, ['rev-parse', fetched.exitCode === 0 ? `origin/${branchName}` : branchName], main, 'Could not resolve the base.')
+    const minFreeGb = Number(options.minFreeGb ?? DEFAULT_MIN_FREE_GB)
+    let note = ''
     for (let made = 0; made < POOL_SIZE; made++) {
       const listed = await worktreePaths($, main)
       let total = 0
@@ -413,8 +417,9 @@ async function prewarm($: $, options: PluginOptions, main: string): Promise<void
       }
       if (total >= POOL_SIZE && idle >= 1) break
       await $.process.run(['mkdir', '-p', repoDir])
-      if ((await freeKb($, repoDir)) < MIN_FREE_KB) {
-        await update($, poolNote, () => 'Paused: less than 20 GB of disk is free.')
+      const free = await freeKb($, repoDir)
+      if (free < minFreeGb * 1024 * 1024) {
+        note = `Paused: ${(free / 1024 / 1024).toFixed(1)} GB of disk free, under the ${minFreeGb} GB it keeps.`
         break
       }
       await lock($, repoDir)
@@ -431,7 +436,7 @@ async function prewarm($: $, options: PluginOptions, main: string): Promise<void
       await seedDependencies($, options, main, path)
       await refreshSlotsFor($, options, main)
     }
-    await update($, poolNote, () => '')
+    await update($, poolNote, () => note)
   } catch (error) {
     $.ui.log(`prewarm stopped: ${String(error)}`, { to: 'debug' })
     await update($, poolNote, () => (error instanceof StepError ? `Warming stopped: ${error.message}` : 'Warming stopped.'))

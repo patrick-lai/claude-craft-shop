@@ -126,3 +126,15 @@ test('the pane tabs are the surface\'s own buttons, with keys 1 to 3', async ($,
   await ui.press({ key: 'tab-dials' })
   expect(await ui.find({ type: 'Button', key: 'dial-foresight' })).toBeDefined()
 })
+
+test('with too little free disk the pool does not warm, and the tab says why', { options: { worktreeRoot: '/slots', setupCommand: '', minFreeGb: 10_000 } }, async ($, on) => {
+  const { clock, commands } = world(on)
+  await startSession($)
+  const ui = await mountPane($, 'desktop')
+  await activate(ui, 'tab-worktree')
+  await activate(ui, 'auto-worktree')
+  await clock.advance(1)
+  expect(created(commands)).toEqual([])
+  await ui.redraw()
+  expect(await ui.find({ text: /Paused: .* GB of disk free, under the 10000 GB it keeps/ })).toBeDefined()
+})

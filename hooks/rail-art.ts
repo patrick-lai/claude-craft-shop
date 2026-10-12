@@ -104,7 +104,7 @@ export function railArt(figures: RailArtFigures): RailPill[] {
   {
     const word = 'Craftshop'
     const width = 12 + 18 + 7 + textWidth(word, 13.5, true) + 14
-    pill('brand', width, 'pane', 'Open Craftshop: perm worktree, dials and context.', left => `${anvil(left + 12, mid - 8)}<text x="${left + 12 + 18 + 7}" y="${mid + 4.6}" font-family="${ROUNDED}" font-size="13.5" font-weight="700" fill="url(#brandText)" letter-spacing="0.1">${word}</text>`)
+    pill('brand', width, 'pane', 'Open Craftshop', left => `${anvil(left + 12, mid - 8)}<text x="${left + 12 + 18 + 7}" y="${mid + 4.6}" font-family="${ROUNDED}" font-size="13.5" font-weight="700" fill="url(#brandText)" letter-spacing="0.1">${word}</text>`)
   }
 
   if (figures.cacheSecondsLeft !== null) {
@@ -113,11 +113,11 @@ export function railArt(figures: RailArtFigures): RailPill[] {
     const lit = figures.isWorking ? 5 : Math.ceil(left / 60)
     const width = 12 + 14 + 7 + 5 * 6 + 4 * 3 + 12
     const caption = figures.isWorking
-      ? 'Prompt cache in use while the agent works.'
+      ? 'Prompt cache in use'
       : isWarm
-        ? `Prompt cache warm, ${clock(left)} left: a message now reuses the chat, faster and cheaper.`
-        : 'Prompt cache cold: the next message reads the whole chat again.'
-    pill('cache', width, 'context', caption + (figures.cachePercent === null ? '' : ` Last request ${figures.cachePercent}% cached.`), left => {
+        ? `Cache warm, ${clock(left)} left: replies now are cheaper`
+        : 'Cache cold: the next message rereads the chat'
+    pill('cache', width, 'context', caption, left => {
       const bars = BARS.map((color, index) => `<rect x="${left + 12 + 14 + 7 + index * 9}" y="${mid - 7}" width="6" height="14" rx="3" fill="${index < lit ? color : 'var(--track)'}"/>`).join('')
       return `${flame(left + 12, mid - 7.5, isWarm)}${bars}`
     })
@@ -130,7 +130,7 @@ export function railArt(figures: RailArtFigures): RailPill[] {
     const outX = 12 + 14 + textWidth(sent, 12.5, true) + 12
     const costX = outX + 14 + textWidth(received, 12.5, true) + 10
     const width = (cost === null ? costX - 10 : costX + 10 + textWidth(cost, 12.5)) + 12
-    const caption = `↑ ${sent} tokens sent, ↓ ${received} received, subagents included.` + (cost === null ? '' : ` ${cost} at API list prices, not your plan's bill.`)
+    const caption = cost === null ? `${sent} tokens sent, ${received} received` : `${cost} at API list prices, not your bill`
     pill('tokens', width, 'context', caption, left => {
       const text = (x: number, value: string) => `<text x="${left + x}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5" font-weight="600" fill="var(--text)" class="num">${value}</text>`
       const spend = cost === null ? '' : `<rect x="${left + costX - 0.5}" y="${mid - 7}" width="1" height="14" fill="var(--pillLine)"/><text x="${left + costX + 10}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5" fill="var(--dim)" class="num">${escape(cost)}</text>`
@@ -141,20 +141,20 @@ export function railArt(figures: RailArtFigures): RailPill[] {
   {
     const label = figures.preset
     const width = 12 + 14 + 7 + textWidth(label, 12.5, true) + 14
-    pill('dials', width, 'dials', `Dials: ${label}. How the agent plans, delegates, persists, asks, proves and talks.`, left => `${radarMini(left + 12, mid - 7, figures.presetLevels)}<text x="${left + 12 + 14 + 7}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5" font-weight="600" fill="var(--text)">${escape(label)}</text>`)
+    pill('dials', width, 'dials', 'Tune how the agent works', left => `${radarMini(left + 12, mid - 7, figures.presetLevels)}<text x="${left + 12 + 14 + 7}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5" font-weight="600" fill="var(--text)">${escape(label)}</text>`)
   }
 
   {
     const count = figures.sourcesTotal === figures.sourcesOn ? String(figures.sourcesOn) : `${figures.sourcesOn}/${figures.sourcesTotal}`
     const word = figures.sourcesTotal === 1 ? ' source' : ' sources'
     const width = 12 + 14 + 7 + textWidth(count, 12.5, true) + textWidth(word, 12.5) + 14
-    pill('sources', width, 'context', figures.sourcesTotal === 0 ? 'No context sources yet: add files, links or notes.' : `${figures.sourcesOn} of ${figures.sourcesTotal} context sources reach the agent.`, left => `${pages(left + 12, mid - 7.5)}<text x="${left + 12 + 14 + 7}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5"><tspan font-weight="650" fill="var(--text)">${count}</tspan><tspan fill="var(--dim)">${word}</tspan></text>`)
+    pill('sources', width, 'context', figures.sourcesTotal === 0 ? 'Add files, links or notes' : `${figures.sourcesOn} of ${figures.sourcesTotal} sources reach the agent`, left => `${pages(left + 12, mid - 7.5)}<text x="${left + 12 + 14 + 7}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5"><tspan font-weight="650" fill="var(--text)">${count}</tspan><tspan fill="var(--dim)">${word}</tspan></text>`)
   }
 
   {
     const label = figures.branch ?? 'No worktree'
     const width = 12 + 14 + 7 + textWidth(label, 12.5, figures.branch !== null) + 14
-    pill('worktree', width, 'worktree', figures.branch === null ? 'Perm worktree is off for this session.' : `This session works in a perm worktree on ${figures.branch}.`, left => `${branch(left + 12, mid - 7, figures.branch !== null)}<text x="${left + 12 + 14 + 7}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5" font-weight="${figures.branch === null ? 500 : 600}" fill="${figures.branch === null ? 'var(--dim)' : 'var(--text)'}">${escape(label)}</text>`)
+    pill('worktree', width, 'worktree', figures.branch === null ? 'Perm worktree is off' : `Working in perm worktree ${figures.branch}`, left => `${branch(left + 12, mid - 7, figures.branch !== null)}<text x="${left + 12 + 14 + 7}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5" font-weight="${figures.branch === null ? 500 : 600}" fill="${figures.branch === null ? 'var(--dim)' : 'var(--text)'}">${escape(label)}</text>`)
   }
 
   return pills

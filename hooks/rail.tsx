@@ -24,30 +24,29 @@ export type RailFigures = {
   branch: string | null
 }
 
-// On the desktop each pill is its own picture with a Client over it for the
-// press and the hover (kit.tsx's drawnButton). The hovered pill swaps to its
-// lit drawing, the same size, and its caption fills a row that is always
-// there, so nothing moves under the pointer.
+// On the desktop the rail is one row: each pill its own picture with a Client
+// over it for the press and the hover (kit.tsx's drawnButton), then the
+// hovered pill's caption in the room left. The lit pill is the same size and
+// the caption's box is sized by the row, not its text, so nothing moves. A
+// narrow row clips the last pills; it never wraps.
 export function drawRail(ui: Ui, figures: RailFigures, open: (tab: Tab | null) => void, hover: string | null, onHover: (id: string, isOn: boolean) => void) {
   const { Box, Text, Button, Svg } = ui
   if (Svg !== undefined && ui.Client !== undefined) {
     const pills = railArt(figures)
     const caption = pills.find(pill => pill.id === hover)?.caption ?? ''
     return (
-      <Box flexDirection="column">
-        <Box key="rail-caption" height={1} overflow="hidden">
+      <Box key="rail-row" gap={1} alignItems="center" flexWrap="nowrap" overflow="hidden">
+        {pills.map(pill =>
+          drawnButton(ui, `rail-${pill.id}-press`, pill.source, pill.caption, pill.width, pill.height, () => open(pill.tab === 'pane' ? null : pill.tab), {
+            hotSource: pill.hotSource,
+            isHot: pill.id === hover,
+            onHover: isOn => onHover(pill.id, isOn),
+          }),
+        )}
+        <Box key="rail-caption" flexGrow={1} flexShrink={1} minWidth={0} overflow="hidden">
           <Text dimColor wrap="truncate-end">
             {caption === '' ? ' ' : caption}
           </Text>
-        </Box>
-        <Box gap={1} alignItems="center" flexWrap="wrap">
-          {pills.map(pill =>
-            drawnButton(ui, `rail-${pill.id}-press`, pill.source, pill.caption, pill.width, pill.height, () => open(pill.tab === 'pane' ? null : pill.tab), {
-              hotSource: pill.hotSource,
-              isHot: pill.id === hover,
-              onHover: isOn => onHover(pill.id, isOn),
-            }),
-          )}
         </Box>
       </Box>
     )

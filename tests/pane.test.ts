@@ -124,13 +124,17 @@ test('on the desktop each rail pill is a picture whose hover the surface lights 
     await band.redraw()
   }
   await point('tokens', 'enter')
-  expect(await lit()).toEqual({ hot: ['tokens'], caption: expect.stringContaining('at API list prices, not your plan') })
+  expect(await lit()).toEqual({ hot: ['tokens'], caption: '≈ $0.42 at API list prices, not your bill' })
+  // One row: the caption sits beside the pills, and nothing wraps.
+  const row = byKey(await band.drawn(), 'rail-row') as { props: Record<string, unknown>; children: { props: { key?: string } }[] }
+  expect(row.props).toMatchObject({ flexWrap: 'nowrap', overflow: 'hidden' })
+  expect(row.children.map(child => child.props.key).slice(-1)).toEqual(['rail-caption'])
   expect((byKey(await band.drawn(), 'hot-rail-tokens-press') as { children: { props: { source: string } }[] }).children[0]!.props.source).toContain('class="pill hot"')
   expect(await layout()).toBe(resting)
   // Straight onto the next pill, its leave landing after: only the new one lit.
   await point('dials', 'enter')
   await point('tokens', 'leave')
-  expect(await lit()).toEqual({ hot: ['dials'], caption: expect.stringContaining('Dials: Balanced') })
+  expect(await lit()).toEqual({ hot: ['dials'], caption: 'Tune how the agent works' })
   // A post that is not a hover changes nothing.
   await band.post({ hover: 'x' }, { in: 'rail-dials-press' })
   await band.redraw()

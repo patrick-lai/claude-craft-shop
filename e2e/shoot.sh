@@ -13,7 +13,10 @@ node "$here/preview.mjs" "$out" < "$out/test.txt"
 for page in "$out"/*.html; do
   name="$(basename "$page" .html)"
   [ "$name" = index ] && continue
+  # The rail is one row as wide as the composer: shot wide and short.
+  size=820,1500
+  case "$name" in rail*) size=1280,110 ;; esac
   "$chrome" --headless=new --disable-gpu --hide-scrollbars --force-device-scale-factor=2 \
-    --window-size=820,1500 --screenshot="$out/png/$name.png" "file://$page" >/dev/null 2>&1
+    --window-size="$size" --screenshot="$out/png/$name.png" "file://$page" >/dev/null 2>&1
 done
 ls "$out/png"

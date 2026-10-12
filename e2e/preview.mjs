@@ -40,6 +40,7 @@ function boxStyle(p) {
   if (p.width !== undefined) s.push('width:' + px(p.width, COL), 'box-sizing:border-box')
   if (p.height !== undefined) s.push('height:' + px(p.height, ROW), 'box-sizing:border-box')
   if (p.overflow) s.push('overflow:' + p.overflow)
+  if (p.minWidth !== undefined) s.push('min-width:' + px(p.minWidth, COL))
   if (p.alignSelf) s.push('align-self:' + p.alignSelf)
   if (p.position) s.push('position:' + p.position)
   for (const [side, unit] of [['top', ROW], ['bottom', ROW], ['left', COL], ['right', COL]]) if (p[side] !== undefined) s.push(`${side}:${p[side] * unit}px`)

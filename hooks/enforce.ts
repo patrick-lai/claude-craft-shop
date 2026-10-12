@@ -57,6 +57,16 @@ export function isCheckCommand(command: string): boolean {
   return CHECK.test(command)
 }
 
+// A shell command that plainly writes a file: a redirect into one (not
+// /dev/null, not 2>&1), an in-place edit, or a copy, move, touch or tee.
+// Anything else, git and npm included, is not counted as a change: a
+// command merely not known to be a read must never hold a turn back.
+const SHELL_WRITE = /(^|[^0-9&>])>{1,2}\s*(?!\/dev\/null|&)[^\s|;&]|\bsed\s+(-[a-zA-Z]*\s+)*-i\b|\bperl\s+-[a-z]*i|\btee\b|(^|[\s;&|(])(cp|mv|touch|install)\s/
+
+export function isShellWrite(command: string): boolean {
+  return SHELL_WRITE.test(command)
+}
+
 const DOC = /\.(md|mdx|txt|rst|adoc|png|jpe?g|gif|svg)$/i
 
 export function isDocPath(path: string): boolean {

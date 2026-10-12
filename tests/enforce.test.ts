@@ -108,6 +108,24 @@ test('the end of a request that changed code is held back once for its checks an
   expect((await stop($, 'Acceptance criteria\n1. VERIFIED')).block).toContain('run the tests')
 })
 
+test('commands that only look things up are not changes: no hold-back for them', async ($, on) => {
+  world(on, { isRepo: false, store: { dials: { ...AUTOPILOT, foresight: 1 } } })
+  const chat = transcript(on)
+  await startSession($)
+  await turn($, chat, 'is it pushed?')
+  // The very commands that once held a request back that changed nothing.
+  for (const command of ['git status --short | head; git log --oneline -1; git ls-remote github refs/heads/main', 'npm view claude-fish-stack-mod version 2>&1 | tail -1', 'gh release view v0.5.1 --json url', 'ls -la docs/media 2>/dev/null']) {
+    await bash($, command)
+  }
+  expect((await stop($, 'Yes, all pushed.')).block).toBeUndefined()
+  // A command that plainly writes a file still counts.
+  for (const command of ["echo 'x' > src/a.ts", "sed -i '' s/a/b/ src/a.ts", 'cp a.ts b.ts']) {
+    await turn($, chat, command)
+    await bash($, command)
+    expect((await stop($, 'Done.')).block, command).toContain('run the tests')
+  }
+})
+
 test('docs alone are not held back for tests', async ($, on) => {
   world(on, { isRepo: false, store: { dials: { ...AUTOPILOT, foresight: 1, tenacity: 3 } } })
   const chat = transcript(on)

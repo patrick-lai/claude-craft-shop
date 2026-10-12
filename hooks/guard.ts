@@ -3,7 +3,7 @@ import type { EngineInterface, On } from 'claude-code'
 
 import { isReadOnlyShell } from './readonly'
 import { BALANCED } from './dials'
-import { crewRefusal, EDIT_TOOLS, foresightRefusal, isCheckCommand, noteAgent, noteChange, noteCheck, notePlan, stopReason, SUBAGENT_TOOLS, turnFacts } from './enforce'
+import { crewRefusal, EDIT_TOOLS, foresightRefusal, isCheckCommand, isShellWrite, noteAgent, noteChange, noteCheck, notePlan, stopReason, SUBAGENT_TOOLS, turnFacts } from './enforce'
 import { IDLE_WORKTREE, isReadOnlyPhase, READ_ONLY_DENY } from './worktree'
 
 const dials = atom({ plugin: 'fishstack', key: 'dials' } as const, BALANCED)
@@ -54,7 +54,7 @@ function record(call: Call, isError: boolean): void {
       // A check counts whether it passed or not: what it found is the
       // agent's to report.
       if (isCheckCommand(call.command)) noteCheck()
-      else if (!isError && !isReadOnlyShell(call.command)) noteChange(null)
+      else if (!isError && isShellWrite(call.command)) noteChange(null)
       return
     }
     if (isError) return

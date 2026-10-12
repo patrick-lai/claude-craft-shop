@@ -60,7 +60,7 @@ export function label(ui: Ui, text: string) {
   const { Text } = ui
   return (
     <Text dimColor bold>
-      {text.toUpperCase()}
+      {text}
     </Text>
   )
 }

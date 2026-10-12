@@ -530,6 +530,8 @@ export function registerContext(on: On): void {
         [
           <Box justifyContent="space-between" alignItems="center" gap={1}>
             <Box gap={1} alignItems="center" flexShrink={1}>
+              {members.length > 0 && onOff(`folder-toggle-${folder.id}`, state, () => void setFolderOn($, folder.id, state !== 'on'))}
+              {rich && svg(ui, glyph('folder'), 'folder', 18, 18)}
               <Button key={`fold-${folder.id}`} plain onPress={() => void toggleFolderOpen($, folder.id)}>
                 <Text dimColor>{isOpen ? '▾ ' : '▸ '}</Text>
                 <Text bold>{folder.name}</Text>
@@ -537,10 +539,8 @@ export function registerContext(on: On): void {
                   {members.length === 0 ? '  empty' : `  ${members.length} ${members.length === 1 ? 'source' : 'sources'} · ${onCount} on`}
                 </Text>
               </Button>
-              {rich && svg(ui, glyph('folder'), 'folder', 18, 18)}
             </Box>
             <Box gap={1} alignItems="center" flexShrink={0}>
-              {members.length > 0 && onOff(`folder-toggle-${folder.id}`, state, () => void setFolderOn($, folder.id, state !== 'on'))}
               <Button key={`folder-delete-${folder.id}`} dimColor onPress={go({ deletingFolder: folder.id })}>
                 Remove
               </Button>

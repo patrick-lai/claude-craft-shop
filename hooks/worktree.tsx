@@ -831,13 +831,10 @@ export function registerWorktree(on: On, options: PluginOptions): void {
     const isAuto = await isAutoOn($, options)
     const note = await read($, poolNote)
     const idle = list.filter(one => !one.isLeased).length
-    const autoCard = card(
-      ui,
-      'worktree-auto',
-      [
-        <Box justifyContent="space-between" alignItems="center" gap={1}>
+    const autoCard = (
+        <Box key="worktree-head" justifyContent="space-between" alignItems="flex-start" gap={1}>
           <Box flexDirection="column" flexShrink={1}>
-            <Text bold>Perm worktree</Text>
+            <Text bold>Where the agent works</Text>
             <Text dimColor>
               {isAuto
                 ? "On: new sessions in a main checkout, and Claude's own worktrees, get a lasting slot. Read-only until it is ready, then the lock lifts."
@@ -853,13 +850,12 @@ export function registerWorktree(on: On, options: PluginOptions): void {
               </Text>
             )}
           </Box>
-          <Box flexShrink={0}>
+          <Box flexShrink={0} gap={1} alignItems="center">
+            <Text dimColor>Perm worktree</Text>
             {drawnButton(ui, 'auto-worktree', switchArt(isAuto ? 'on' : 'off'), isAuto ? 'Perm worktree on' : 'Perm worktree off', 36, 22, () => void setAuto($, options, !isAuto)) ??
               segmented(ui, 'auto-worktree', AUTO_CHOICES, isAuto ? 'on' : 'off', choice => void setAuto($, options, choice === 'on'))}
           </Box>
-        </Box>,
-      ],
-      { tone: 'muted' },
+        </Box>
     )
 
     if (state.phase === 'off') {

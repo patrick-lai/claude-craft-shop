@@ -55,7 +55,7 @@ export type ContextDraft = { input: string }
 
 declare module 'claude-code' {
   interface PluginState {
-    'craft-shop': {
+    'fishstack': {
       tab: Tab
       worktree: Worktree
       slots: Slot[]

@@ -34,8 +34,8 @@ export function textWidth(text: string, size: number, isBold = false): number {
   return units * size * (isBold ? 1.0 : 0.95)
 }
 
-export function anvilMark(x: number, y: number): string {
-  return `<g transform="translate(${x} ${y})"><defs><linearGradient id="anvil" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f0a35e"/><stop offset="1" stop-color="#d97757"/></linearGradient></defs><path d="M1 4.5h12.5c0 2.6-2.1 4.5-4.6 4.6l1.6 3.4H13v2H3v-2h2.3l1.6-3.4C3.6 8.9 1 7.4 1 4.5z" fill="url(#anvil)"/><path d="M14.6 4.5h2.4" stroke="#d97757" stroke-width="1.6" stroke-linecap="round"/><circle cx="16.5" cy="1.8" r="1" fill="#f6c177"/></g>`
+export function fishMark(x: number, y: number): string {
+  return `<g transform="translate(${x} ${y})"><defs><linearGradient id="fishBody" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5eead4"/><stop offset="1" stop-color="#3b82f6"/></linearGradient></defs><path d="M1 8.5C3.4 4.4 7 3 10.2 3.9c1.6.5 2.9 1.6 3.9 3.1l3.6-2.6v8.2L14.1 10c-1 1.5-2.3 2.6-3.9 3.1C7 14 3.4 12.6 1 8.5z" fill="url(#fishBody)"/><path d="M8.6 5.6c.9 1.7.9 4.1 0 5.8" fill="none" stroke="#0b1b2e" stroke-opacity="0.35" stroke-width="1.1" stroke-linecap="round"/><circle cx="4.6" cy="7.6" r="1.05" fill="#0b1b2e"/></g>`
 }
 
 function tabIcon(id: Tab, x: number, y: number, isActive: boolean): string {
@@ -63,9 +63,9 @@ export function tabsArt(tabs: { id: Tab; label: string }[], current: Tab): Segme
   const mid = height / 2
   const parts: string[] = []
   const segments: Segments['segments'] = []
-  parts.push(anvilMark(2, mid - 8))
-  parts.push(`<text x="27" y="${mid + 5}" font-family="${ROUNDED}" font-size="15" font-weight="750" fill="url(#brand)" letter-spacing="0.1">Craftshop</text>`)
-  let x = 27 + textWidth('Craftshop', 15, true) + 20
+  parts.push(fishMark(2, mid - 8))
+  parts.push(`<text x="27" y="${mid + 5}" font-family="${ROUNDED}" font-size="15" font-weight="750" fill="url(#brand)" letter-spacing="0.1">fishStack</text>`)
+  let x = 27 + textWidth('fishStack', 15, true) + 20
   const trayX = x
   const widths = tabs.map(tab => 14 + 16 + 8 + textWidth(tab.label, 13, tab.id === current) + 16)
   const trayWidth = widths.reduce((sum, one) => sum + one, 0) + 8
@@ -81,7 +81,7 @@ export function tabsArt(tabs: { id: Tab; label: string }[], current: Tab): Segme
     x += width
   })
   const width = Math.ceil(trayX + trayWidth + 2)
-  const defs = `<defs><linearGradient id="brand" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#f2a65a"/><stop offset="1" stop-color="#e0715a"/></linearGradient></defs>`
+  const defs = `<defs><linearGradient id="brand" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#5eead4"/><stop offset="1" stop-color="#3b82f6"/></linearGradient></defs>`
   return { width, height, segments, source: `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${THEME}${defs}${paint(parts.join(''))}</svg>` }
 }
 

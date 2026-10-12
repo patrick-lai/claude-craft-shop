@@ -59,7 +59,7 @@ test('every tab draws on the desktop with content in it', async ($, on) => {
 
   await $.turn.complete({ turnId: 't1', answer: 'done', durationMs: 1_000, reason: 'answer', isAborted: false, usage: { input_tokens: 1_200, output_tokens: 3_400, cache_read_input_tokens: 48_000, cache_creation_input_tokens: 2_100, model: 'claude-opus-5-5' } } as never)
   const band = await $.ui.mount({
-    plugin: 'craft-shop',
+    plugin: 'fishstack',
     surface: 'desktop',
     component: 'AbovePrompt',
     props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 120, scroll: { offset: 0, bodyRows: 10 }, view: {} },
@@ -72,7 +72,7 @@ test('every tab draws on the desktop with content in it', async ($, on) => {
   await show(band, 'rail-hover')
   // About 490px, as a narrow window leaves the composer.
   const narrow = await $.ui.mount({
-    plugin: 'craft-shop',
+    plugin: 'fishstack',
     surface: 'desktop',
     component: 'AbovePrompt',
     props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 70, scroll: { offset: 0, bodyRows: 10 }, view: {} },

@@ -1,16 +1,16 @@
 {
-  "name": "claude-craft-shop",
+  "name": "claude-fishstack",
   "owner": {
     "name": "Patrick Lai"
   },
   "metadata": {
-    "description": "Craftshop: a Claude Code mod with a perm worktree head start, crew dials and a context library."
+    "description": "fishStack: a Claude Code mod with a perm worktree head start, crew dials and a context library."
   },
   "plugins": [
     {
-      "name": "craft-shop",
+      "name": "fishstack",
       "source": "./",
-      "description": "Perm worktree head start, crew dials and a context library in one Craftshop pane."
+      "description": "Perm worktree head start, crew dials and a context library in one fishStack pane."
     }
   ]
 }

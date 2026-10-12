@@ -26,20 +26,20 @@ export const IDLE_WORKTREE: Worktree = {
   error: null,
 }
 
-const isBandHidden = atom({ plugin: 'craft-shop', key: 'isBandHidden' } as const, false)
-const isHeadStartPrompted = atom({ plugin: 'craft-shop', key: 'isHeadStartPrompted' } as const, false)
-const isTurnRunning = atom({ plugin: 'craft-shop', key: 'isTurnRunning' } as const, false)
-const slots = atom({ plugin: 'craft-shop', key: 'slots' } as const, [])
-const tab = atom({ plugin: 'craft-shop', key: 'tab' } as const, 'worktree')
-const worktree = atom({ plugin: 'craft-shop', key: 'worktree' } as const, IDLE_WORKTREE)
-const isStepsShown = atom({ plugin: 'craft-shop', key: 'isStepsShown' } as const, false)
-const dials = atom({ plugin: 'craft-shop', key: 'dials' } as const, BALANCED)
-const sources = atom({ plugin: 'craft-shop', key: 'sources' } as const, [])
-const lastReplyAt = atom({ plugin: 'craft-shop', key: 'lastReplyAt' } as const, null)
+const isBandHidden = atom({ plugin: 'fishstack', key: 'isBandHidden' } as const, false)
+const isHeadStartPrompted = atom({ plugin: 'fishstack', key: 'isHeadStartPrompted' } as const, false)
+const isTurnRunning = atom({ plugin: 'fishstack', key: 'isTurnRunning' } as const, false)
+const slots = atom({ plugin: 'fishstack', key: 'slots' } as const, [])
+const tab = atom({ plugin: 'fishstack', key: 'tab' } as const, 'worktree')
+const worktree = atom({ plugin: 'fishstack', key: 'worktree' } as const, IDLE_WORKTREE)
+const isStepsShown = atom({ plugin: 'fishstack', key: 'isStepsShown' } as const, false)
+const dials = atom({ plugin: 'fishstack', key: 'dials' } as const, BALANCED)
+const sources = atom({ plugin: 'fishstack', key: 'sources' } as const, [])
+const lastReplyAt = atom({ plugin: 'fishstack', key: 'lastReplyAt' } as const, null)
 // The rail pill under the pointer, kept to this process: a hover is one
 // window's, not the session's.
 let railHover: string | null = null
-const tokenTotals = atom({ plugin: 'craft-shop', key: 'tokenTotals' } as const, null)
+const tokenTotals = atom({ plugin: 'fishstack', key: 'tokenTotals' } as const, null)
 
 type $ = EngineInterface
 
@@ -50,10 +50,10 @@ const SETUP_TIMEOUT_MS = 10 * 60_000
 const LOCKFILES = ['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lock', 'bun.lockb']
 
 export const READ_ONLY_DENY =
-  'Read-only until the worktree is ready. Craftshop is preparing a worktree for this session; read, search and plan for now, and you will be moved there with full access.'
+  'Read-only until the worktree is ready. fishStack is preparing a worktree for this session; read, search and plan for now, and you will be moved there with full access.'
 
 export function headStartNote(main: string): string {
-  return `Read-only head start: your worktree is still being prepared, so for now you run read-only in the main checkout at \`${main}\`. It may sit on another branch or be behind origin, so treat it as a reference. Investigate, read code and plan; do not edit files, commit or run commands that change anything. When your plan is ready, write it in your reply and end your turn. When the worktree is ready, Craftshop moves you there with full access and tells you to continue.`
+  return `Read-only head start: your worktree is still being prepared, so for now you run read-only in the main checkout at \`${main}\`. It may sit on another branch or be behind origin, so treat it as a reference. Investigate, read code and plan; do not edit files, commit or run commands that change anything. When your plan is ready, write it in your reply and end your turn. When the worktree is ready, fishStack moves you there with full access and tells you to continue.`
 }
 
 function continueNote(path: string, branch: string): string {
@@ -98,7 +98,7 @@ async function expandHome($: $, path: string): Promise<string> {
 }
 
 async function slotsRoot($: $, options: PluginOptions, main: string): Promise<string> {
-  const root = await expandHome($, String(options.worktreeRoot || '~/.claude-craft/worktrees'))
+  const root = await expandHome($, String(options.worktreeRoot || '~/.fishstack/worktrees'))
   const name = main.split('/').pop() ?? 'repo'
   return `${root}/${name}-${await hash6(main)}`
 }
@@ -284,7 +284,7 @@ async function prepare($: $, options: PluginOptions): Promise<void> {
       await setStep($, `Could not fetch origin; starting from the local ${branchName}`, true)
     }
     const baseSha = await gitOut($, ['rev-parse', base], main, `Could not resolve ${base}.`)
-    const branch = `craft/${(await $.session.id()).slice(0, 6)}`
+    const branch = `fish/${(await $.session.id()).slice(0, 6)}`
     await update($, worktree, current => ({ ...current, base, baseSha, branch }))
 
     await setStep($, 'Claiming a slot')
@@ -353,7 +353,7 @@ async function startWorktree($: $, options: PluginOptions, cwd: string, isForced
     await beginWorktree($, options)
     return
   }
-  // Off, Craftshop stays out of the way: no slot, no read-only guard, and
+  // Off, fishStack stays out of the way: no slot, no read-only guard, and
   // Claude Code's own worktree handling applies.
   if (!isForced && !(await isAutoOn($, options))) return
 
@@ -389,7 +389,7 @@ async function claimForCreate($: $, options: PluginOptions, cwd: string, name: s
     const fetched = await git($, ['fetch', '-q', 'origin', branchName], main)
     const base = fetched.exitCode === 0 ? `origin/${branchName}` : branchName
     const baseSha = await gitOut($, ['rev-parse', base], main, `Could not resolve ${base}.`)
-    const branch = `craft/${name.replace(/[^A-Za-z0-9._-]+/g, '-').slice(0, 40) || (await $.session.id()).slice(0, 6)}`
+    const branch = `fish/${name.replace(/[^A-Za-z0-9._-]+/g, '-').slice(0, 40) || (await $.session.id()).slice(0, 6)}`
     hasStarted = true
     await update($, worktree, (): Worktree => ({ ...IDLE_WORKTREE, phase: 'preparing', step: 'Claiming a slot', main, base, baseSha, branch }))
     const path = await claimSlot($, options, main, base, branch)
@@ -488,7 +488,7 @@ export function registerWorktree(on: On, options: PluginOptions): void {
     return opened
   })
 
-  on('ui.press', { plugin: 'craft-shop', element: 'tab-worktree' }, async ($, e, next) => {
+  on('ui.press', { plugin: 'fishstack', element: 'tab-worktree' }, async ($, e, next) => {
     const pressed = await next(e)
     await refreshSlots($, options)
     return pressed
@@ -505,7 +505,7 @@ export function registerWorktree(on: On, options: PluginOptions): void {
       return next(e)
     }
     if (state.phase === 'off' || (await read($, isBandHidden))) {
-      // With no worktree news, the band is Craftshop's status rail. Reading
+      // With no worktree news, the band is fishStack's status rail. Reading
       // isTurnRunning redraws it as each turn starts and ends.
       const isWorking = await read($, isTurnRunning)
       const repliedAt = await read($, lastReplyAt)
@@ -600,7 +600,7 @@ export function registerWorktree(on: On, options: PluginOptions): void {
             <Text dimColor>
               {isAuto
                 ? "On: new sessions in a main checkout, and Claude's own worktrees, get a lasting slot. Read-only until it is ready, then the lock lifts."
-                : "Off: Craftshop leaves worktrees to Claude Code (the desktop's worktree option, claude --worktree, EnterWorktree)."}
+                : "Off: fishStack leaves worktrees to Claude Code (the desktop's worktree option, claude --worktree, EnterWorktree)."}
             </Text>
           </Box>
           <Box flexShrink={0}>

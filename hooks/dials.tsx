@@ -12,10 +12,10 @@ import type { Ui } from './ui'
 
 export const BALANCED: DialValues = { foresight: 3, crew: 3, tenacity: 3, autonomy: 3, proof: 3, voice: 3 }
 
-const dials = atom({ plugin: 'craft-shop', key: 'dials' } as const, BALANCED)
-const isBriefShown = atom({ plugin: 'craft-shop', key: 'isBriefShown' } as const, false)
-const selectedDial = atom({ plugin: 'craft-shop', key: 'selectedDial' } as const, null)
-const tab = atom({ plugin: 'craft-shop', key: 'tab' } as const, 'worktree')
+const dials = atom({ plugin: 'fishstack', key: 'dials' } as const, BALANCED)
+const isBriefShown = atom({ plugin: 'fishstack', key: 'isBriefShown' } as const, false)
+const selectedDial = atom({ plugin: 'fishstack', key: 'selectedDial' } as const, null)
+const tab = atom({ plugin: 'fishstack', key: 'tab' } as const, 'worktree')
 
 type Level = { label: string; summary: string; prompt: string }
 type Dial = { key: DialKey; name: string; question: string; levels: Level[] }
@@ -103,7 +103,7 @@ const PRESETS: { name: string; values: DialValues }[] = [
 ]
 
 export const DIALS_STORE_KEY = 'dials'
-export const DIALS_SECTION_ID = 'craft-shop:dials'
+export const DIALS_SECTION_ID = 'fishstack:dials'
 
 function levelOf(dial: Dial, values: DialValues): Level {
   return dial.levels[values[dial.key] - 1]!

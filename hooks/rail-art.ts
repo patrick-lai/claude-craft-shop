@@ -1,4 +1,4 @@
-// The desktop rail's pills, each its own picture: a Craftshop wordmark, then
+// The desktop rail's pills, each its own picture: a fishStack wordmark, then
 // the prompt cache, tokens, dials, sources and worktree, each with its icon.
 // Every pill comes drawn twice, at rest and lit, so the surface can swap them
 // on hover without a round trip (rail.tsx), and with the caption it shows.
@@ -59,8 +59,8 @@ function updown(x: number, mid: number): string {
   return `<path transform="translate(${x} ${mid - 6})" d="M3 11V1.5M.5 4 3 1.5 5.5 4" fill="none" stroke="#5aaeff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path transform="translate(${x + 6} ${mid - 6})" d="M3 1v9.5M.5 8 3 10.5 5.5 8" fill="none" stroke="#3fb950" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>`
 }
 
-function anvil(x: number, y: number): string {
-  return `<g transform="translate(${x} ${y})"><defs><linearGradient id="brandMark" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f0a35e"/><stop offset="1" stop-color="#d97757"/></linearGradient></defs><path d="M1 4.5h12.5c0 2.6-2.1 4.5-4.6 4.6l1.6 3.4H13v2H3v-2h2.3l1.6-3.4C3.6 8.9 1 7.4 1 4.5z" fill="url(#brandMark)"/><path d="M14.6 4.5h2.4" stroke="#d97757" stroke-width="1.6" stroke-linecap="round"/><circle cx="16.5" cy="1.8" r="1" fill="#f6c177"/></g>`
+function fishMark(x: number, y: number): string {
+  return `<g transform="translate(${x} ${y})"><defs><linearGradient id="brandMark" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5eead4"/><stop offset="1" stop-color="#3b82f6"/></linearGradient></defs><path d="M1 8.5C3.4 4.4 7 3 10.2 3.9c1.6.5 2.9 1.6 3.9 3.1l3.6-2.6v8.2L14.1 10c-1 1.5-2.3 2.6-3.9 3.1C7 14 3.4 12.6 1 8.5z" fill="url(#brandMark)"/><path d="M8.6 5.6c.9 1.7.9 4.1 0 5.8" fill="none" stroke="#0b1b2e" stroke-opacity="0.35" stroke-width="1.1" stroke-linecap="round"/><circle cx="4.6" cy="7.6" r="1.05" fill="#0b1b2e"/></g>`
 }
 
 function flame(x: number, y: number, isWarm: boolean): string {
@@ -111,10 +111,10 @@ export function railArt(figures: RailArtFigures, iconOnly: ReadonlySet<Compactab
   }
 
   {
-    const word = 'Craftshop'
+    const word = 'fishStack'
     const isIcon = iconOnly.has('brand')
     const width = isIcon ? 12 + 18 + 10 : 12 + 18 + 7 + textWidth(word, 13.5, true) + 14
-    pill('brand', width, 'pane', 'Open Craftshop', left => isIcon ? anvil(left + 12, mid - 8) : `${anvil(left + 12, mid - 8)}<text x="${left + 12 + 18 + 7}" y="${mid + 4.6}" font-family="${ROUNDED}" font-size="13.5" font-weight="700" fill="url(#brandText)" letter-spacing="0.1">${word}</text>`)
+    pill('brand', width, 'pane', 'Open fishStack', left => isIcon ? fishMark(left + 12, mid - 8) : `${fishMark(left + 12, mid - 8)}<text x="${left + 12 + 18 + 7}" y="${mid + 4.6}" font-family="${ROUNDED}" font-size="13.5" font-weight="700" fill="url(#brandText)" letter-spacing="0.1">${word}</text>`)
   }
 
   if (figures.cacheSecondsLeft !== null) {
@@ -177,4 +177,4 @@ const STYLE = `<style>
   .pill.hot { fill: var(--hot); stroke: var(--hotLine); }
 </style>`
 
-const DEFS = `<defs><linearGradient id="brandText" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#f2a65a"/><stop offset="1" stop-color="#e0715a"/></linearGradient></defs>`
+const DEFS = `<defs><linearGradient id="brandText" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#5eead4"/><stop offset="1" stop-color="#3b82f6"/></linearGradient></defs>`

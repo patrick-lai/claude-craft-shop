@@ -3,8 +3,8 @@ import type { Elements, RenderElement } from 'claude-code'
 import type { Tab } from '../types'
 import { tabsArt } from './art'
 
-export const PANE = 'craft-shop'
-export const PANE_TITLE = 'Craftshop'
+export const PANE = 'fishstack'
+export const PANE_TITLE = 'fishStack'
 
 // The elements the pane draws with, so it draws on every surface: mobile has
 // no Input or Select, the terminal no Svg, and the tabs leave those out where
@@ -51,7 +51,7 @@ export function frame(ui: Ui, current: Tab, columns: number, onSelect: (id: Tab)
     return (
       <Box flexDirection="column" width={columns} gap={1}>
         <Box key="tabs-art" position="relative" alignSelf="flex-start">
-          <Svg source={art.source} alt={`Craftshop tabs: ${TABS.map(one => one.label).join(', ')}; ${current} shown`} width={art.width} height={art.height} />
+          <Svg source={art.source} alt={`fishStack tabs: ${TABS.map(one => one.label).join(', ')}; ${current} shown`} width={art.width} height={art.height} />
           <Box position="absolute" top={0} left={0} right={0} bottom={0}>
             <Client key="tabs-click" module="./rail-click.tsx" props={{ width: art.width, segments: art.segments }} width="100%" height="100%" />
           </Box>
@@ -77,7 +77,7 @@ export function frame(ui: Ui, current: Tab, columns: number, onSelect: (id: Tab)
             />
           ))}
         </Box>
-        <Text dimColor>Craftshop</Text>
+        <Text dimColor>fishStack</Text>
       </Box>
       {body}
     </Box>

@@ -1,6 +1,6 @@
-# Claude Craftshop
+# Claude fishStack
 
-A Claude Code mod that adds a **Craftshop** pane with three tabs (**Perm worktree · Dials · Context**). It brings three CommissionAI features into Claude Code:
+A Claude Code mod that adds a **fishStack** pane with three tabs (**Perm worktree · Dials · Context**). It brings three CommissionAI features into Claude Code:
 
 1. **Perm worktree with a read-only head start.** When it is on, each new session claims a lasting worktree slot. The agent reads, searches and plans while the slot is prepared, then the session moves in and the lock lifts. It is off by default.
 2. **Crew dials.** Six dials set how the agent works: Foresight, Crew, Tenacity, Autonomy, Proof and Voice.
@@ -13,37 +13,39 @@ A Claude Code mod that adds a **Craftshop** pane with three tabs (**Perm worktre
 At the prompt of a Claude Code terminal session (2.1.296 or newer):
 
 ```
-/plugin install craft-shop --marketplace patrick-lai/claude-craft-shop
+/plugin install fishstack --marketplace patrick-lai/claude-fishstack
 ```
 
 Answer `y` to add the marketplace, then pick a scope (user scope is first). Next you get a screen of options. The defaults work as they are.
 
-Open the pane with `/craft`, or `/craft worktree|dials|context` to go straight to a tab. The pane opens by itself where the surface docks panes: the desktop app, and the terminal's fullscreen layout (`/tui fullscreen`). Keys `1`–`3` switch tabs while the pane has focus.
+fishStack was called Craftshop. Its first session copies what Craftshop saved (dials, context libraries, the Perm worktree switch) into its own store, once, and never over anything fishStack already holds. Options set under `pluginConfigs["craft-shop"]` do not carry over: set them again in `/config`.
 
-The rail above the prompt shows Craftshop's status at a glance:
+Open the pane with `/fish`, or `/fish worktree|dials|context` to go straight to a tab. The pane opens by itself where the surface docks panes: the desktop app, and the terminal's fullscreen layout (`/tui fullscreen`). Keys `1`–`3` switch tabs while the pane has focus.
+
+The rail above the prompt shows fishStack's status at a glance:
 - the prompt cache: a flame and five bars that run down over the 5 minutes after each reply, as in CommissionAI. While they last, your next message reuses the cached chat, so it is faster and cheaper. Hover it for details;
 - tokens sent and received, with Claude Code's ≈ $ estimate at API list prices (not a plan's bill);
 - the dials preset;
 - how many sources are on;
 - the worktree's branch.
 
-In the desktop app each pill is drawn with its icon; hover one and it lights, with a line about it in the row above (always there, so nothing moves), and click it to open its tab. In the terminal it is text, and each item opens its tab too. The rail starts with **Craftshop**, which opens the pane. While a worktree is being prepared, the rail shows its progress instead.
+In the desktop app each pill is drawn with its icon; hover one and it lights, with a line about it in the row above (always there, so nothing moves), and click it to open its tab. In the terminal it is text, and each item opens its tab too. The rail starts with **fishStack**, which opens the pane. While a worktree is being prepared, the rail shows its progress instead.
 
 ## Options
 
 | Option | Default | What it does |
 | - | - | - |
 | `autoWorktree` | `false` | The Perm worktree toggle's starting value. Once you press the toggle, your choice is kept across sessions. |
-| `worktreeRoot` | `~/.claude-craft/worktrees` | Where slots live: `<root>/<repo>-<hash>/<n>`. |
+| `worktreeRoot` | `~/.fishstack/worktrees` | Where slots live: `<root>/<repo>-<hash>/<n>`. |
 | `setupCommand` | empty | Runs in a new slot before the session moves in (`pnpm install`, say). Times out after 10 minutes. |
 
-Change them in `/config`. They are also stored in settings under `pluginConfigs["craft-shop"].options`.
+Change them in `/config`. They are also stored in settings under `pluginConfigs["fishstack"].options`.
 
 ## Perm worktree
 
 ![Perm worktree tab after the move](shots/desktop/worktree-ready.png)
 
-The tab's toggle is **Off** by default. While it is off, Craftshop leaves worktrees to Claude Code: the desktop app's worktree option, `claude --worktree` and `EnterWorktree` work as they always do, and the session is never locked. **Create worktree now** claims a slot for the current session.
+The tab's toggle is **Off** by default. While it is off, fishStack leaves worktrees to Claude Code: the desktop app's worktree option, `claude --worktree` and `EnterWorktree` work as they always do, and the session is never locked. **Create worktree now** claims a slot for the current session.
 
 While it is **On**:
 
@@ -53,7 +55,7 @@ While it is **On**:
 Preparing a slot takes four steps:
 
 1. **Fetch.** Runs `git fetch origin <default>`. If the fetch fails, it starts from the local default branch and shows a warning.
-2. **Claim a slot.** Reuses an idle slot (no live lease, clean status, listed in `git worktree list`) with `git checkout -B craft/<name>`. Otherwise it adds a new slot with `git worktree add -B craft/<name>`.
+2. **Claim a slot.** Reuses an idle slot (no live lease, clean status, listed in `git worktree list`) with `git checkout -B fish/<name>`. Otherwise it adds a new slot with `git worktree add -B fish/<name>`.
 3. **Seed dependencies.** If the main checkout has `node_modules` and the lockfiles match, it clones them with `cp -c -R`, an APFS copy-on-write clone. Then it runs `setupCommand`.
 4. **Move in.** Calls `EnterWorktree` on the slot as soon as it is ready, even mid-turn, as the agent could itself. Claude Code asks you once to confirm the move, because the slot is outside `.claude/worktrees/`. If you prompted during the head start, the agent then gets a note to carry on from its plan.
 
@@ -79,12 +81,12 @@ The Context tab holds the sources the agent reads. It is kept per repository.
 
 - **Add.**
   - **Choose files…** opens the macOS file dialog. Pick one or more text files, in the repository or anywhere on your Mac.
-  - **Choose folder…** brings a folder's text files (up to 40) in as one group. It is a group in Craftshop only; nothing is made on disk.
+  - **Choose folder…** brings a folder's text files (up to 40) in as one group. It is a group in fishStack only; nothing is made on disk.
   - The field below takes the rest. A link (`https://…`) is fetched as text, 12,000 characters at most. A repository path is read too. Anything else becomes a note.
 
   The dialogs run through `osascript`, so they need Claude Code running on a Mac. Elsewhere, type a path in the field.
 - **On or Off.** Each source has a switch. A source that is On also has a **Strict** pill. Strict sources are binding ground truth, and the agent must say so if the code disagrees. The others guide the agent.
-- **Folders.** A folder you chose is one group with one switch: it turns all its sources on or off, and reads **Some on** when they differ. **Remove** takes the group and its sources out of Craftshop; the files on disk stay.
+- **Folders.** A folder you chose is one group with one switch: it turns all its sources on or off, and reads **Some on** when they differ. **Remove** takes the group and its sources out of fishStack; the files on disk stay.
 - **Details.** Click a source's title to see its text, rename it, edit a note, refresh a link or file, or delete it.
 - **Meter and window.** The meter counts the sources that are On against a budget of about 12k tokens. A footer shows the live context window (amber from 65%, red from 85%), with **Details** for tokens per category and **Compact**.
 

@@ -1,11 +1,11 @@
 {
-  "name": "craft-shop",
+  "name": "fishstack",
   "version": "0.1.0",
-  "description": "A Craftshop pane for Claude Code: a perm worktree with a read-only head start, crew dials and a context library.",
+  "description": "A fishStack pane for Claude Code: a perm worktree with a read-only head start, crew dials and a context library.",
   "author": {
     "name": "Patrick Lai"
   },
-  "repository": "https://github.com/patrick-lai/claude-craft-shop",
+  "repository": "https://github.com/patrick-lai/claude-fishstack",
   "types": "./types/index.d.ts",
   "userConfig": {
     "autoWorktree": {
@@ -18,7 +18,7 @@
       "type": "string",
       "title": "Worktree root",
       "description": "Where worktree slots are kept.",
-      "default": "~/.claude-craft/worktrees"
+      "default": "~/.fishstack/worktrees"
     },
     "setupCommand": {
       "type": "string",

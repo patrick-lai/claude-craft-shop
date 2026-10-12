@@ -6,7 +6,7 @@ import { activate, COMPOSE, keysOf, mountPane, startSession, world } from './wor
 type Drawing = Awaited<ReturnType<typeof mountPane>>
 
 async function contextSection($: Engine) {
-  return (await $.prompt.compose(COMPOSE)).sections.find(section => section.id === 'craft-shop:context')?.text
+  return (await $.prompt.compose(COMPOSE)).sections.find(section => section.id === 'fishstack:context')?.text
 }
 
 async function keyOf(ui: Drawing, pattern: RegExp): Promise<string> {

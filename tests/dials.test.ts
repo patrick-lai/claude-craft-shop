@@ -5,7 +5,7 @@ import { activate, COMPOSE, mountPane, startSession, world } from './world'
 
 async function dialsSection($: Engine) {
   const composed = await $.prompt.compose(COMPOSE)
-  return composed.sections.find(section => section.id === 'craft-shop:dials')?.text ?? ''
+  return composed.sections.find(section => section.id === 'fishstack:dials')?.text ?? ''
 }
 
 test('dragging a dot on the desktop radar sets that dial, and the agent is told', async ($, on) => {
@@ -72,7 +72,7 @@ test('a dial changed mid-session reaches the model with the next prompt, once', 
   await activate(ui, 'tab-dials')
   await ui.press({ key: 'pip-voice-5' })
   const told = await submit()
-  expect(told).toContain('Craftshop update')
+  expect(told).toContain('fishStack update')
   expect(told).toContain('Voice (Teach)')
   expect(await submit()).toBe('')
 })

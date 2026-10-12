@@ -1,4 +1,4 @@
-// The rail above the prompt while there is no worktree news: Craftshop's
+// The rail above the prompt while there is no worktree news: fishStack's
 // status at a glance (context window, prompt cache, cost, dials, sources,
 // worktree), each item opening its tab. worktree.tsx gathers the figures.
 import type { RenderElement } from 'claude-code'
@@ -84,10 +84,10 @@ export function drawRail(ui: Ui, figures: RailFigures, open: (tab: Tab | null) =
   return (
     <Box gap={2} alignItems="center" flexWrap="wrap">
       {item(
-        'open-craftshop',
+        'open-fishstack',
         null,
-        <Text bold color="claude">
-          ▸ Craftshop
+        <Text bold color="suggestion">
+          ▸ fishStack
         </Text>,
       )}
       {left !== null && (

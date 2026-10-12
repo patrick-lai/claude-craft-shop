@@ -22,16 +22,16 @@ test('the tabs switch on press and each draws its empty state', async ($, on) =>
   }
 })
 
-test('/craft opens the pane on the tab it names', async ($, on) => {
+test('/fish opens the pane on the tab it names', async ($, on) => {
   world(on, { isRepo: false })
   await startSession($)
   const opened = await $.command.run({
-    command: 'craft',
+    command: 'fish',
     args: 'dials',
     origin: { kind: 'composer' },
     presentation: { isFullscreen: true, columns: 200 },
   })
-  expect(opened.text).toBe('Opened Craftshop · Dials.')
+  expect(opened.text).toBe('Opened fishStack · Dials.')
   const ui = await mountPane($, 'terminal')
   expect(await ui.find({ type: 'Button', key: 'pip-crew-1' })).toBeDefined()
 })
@@ -41,7 +41,7 @@ test("the rail's cache gauge runs down for 5 minutes after a reply, then goes co
   on('turn.complete', ($, e) => ({ text: e.answer }))
   await startSession($)
   const band = await $.ui.mount({
-    plugin: 'craft-shop',
+    plugin: 'fishstack',
     surface: 'terminal',
     component: 'AbovePrompt',
     props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 100, scroll: { offset: 0, bodyRows: 10 }, view: {} },
@@ -64,12 +64,12 @@ test('with no worktree news the band is a status rail whose items open their tab
   world(on, { isRepo: false })
   await startSession($)
   const band = await $.ui.mount({
-    plugin: 'craft-shop',
+    plugin: 'fishstack',
     surface: 'terminal',
     component: 'AbovePrompt',
     props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 100, scroll: { offset: 0, bodyRows: 10 }, view: {} },
   })
-  expect(await band.find({ type: 'Button', key: 'open-craftshop' })).toBeDefined()
+  expect(await band.find({ type: 'Button', key: 'open-fishstack' })).toBeDefined()
   expect((await band.find({ type: 'Button', key: 'rail-dials' }))?.text).toContain('Dials Balanced')
   expect((await band.find({ type: 'Button', key: 'rail-sources' }))?.text).toContain('0 sources on')
   expect((await band.find({ type: 'Button', key: 'rail-worktree' }))?.text).toContain('Worktree off')
@@ -77,7 +77,7 @@ test('with no worktree news the band is a status rail whose items open their tab
   const pane = await mountPane($, 'desktop')
   expect(await pane.find({ type: 'Button', key: 'dial-foresight' })).toBeDefined()
   await band.redraw()
-  expect(await band.find({ type: 'Button', key: 'open-craftshop' })).toBeDefined()
+  expect(await band.find({ type: 'Button', key: 'open-fishstack' })).toBeDefined()
 })
 
 test('on the desktop each rail pill is a picture whose hover the surface lights and captions, and whose press opens its tab', async ($, on) => {
@@ -89,7 +89,7 @@ test('on the desktop each rail pill is a picture whose hover the surface lights 
   await $.turn.complete({ turnId: 't1', answer: 'done', durationMs: 1_000, reason: 'answer', isAborted: false, usage } as never)
   await $.turn.complete({ turnId: 't2', agentId: 'a1', answer: 'done', durationMs: 1_000, reason: 'answer', isAborted: false, usage } as never)
   const band = await $.ui.mount({
-    plugin: 'craft-shop',
+    plugin: 'fishstack',
     surface: 'desktop',
     component: 'AbovePrompt',
     props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 100, scroll: { offset: 0, bodyRows: 10 }, view: {} },
@@ -156,7 +156,7 @@ test('on the desktop the rail fits its one row: the least needed pills give up t
   await $.turn.complete({ turnId: 't1', answer: 'done', durationMs: 1_000, reason: 'answer', isAborted: false, usage } as never)
   const at = async (bodyColumns: number) => {
     const band = await $.ui.mount({
-      plugin: 'craft-shop',
+      plugin: 'fishstack',
       surface: 'desktop',
       component: 'AbovePrompt',
       props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns, scroll: { offset: 0, bodyRows: 10 }, view: {} },

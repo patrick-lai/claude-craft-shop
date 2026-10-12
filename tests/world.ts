@@ -12,9 +12,14 @@ function ran(stdout = '', exitCode = 0) {
   return { value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
 }
 
-export function world(on: On, { isRepo = true, isDialogSlow = false } = {}): World {
+// `store` is what the plugin's store holds at the start; `files`, text files
+// on disk by path, which fs.exists, fs.list and fs.read answer from.
+export function world(
+  on: On,
+  { isRepo = true, isDialogSlow = false, store = {}, files }: { isRepo?: boolean; isDialogSlow?: boolean; store?: Record<string, unknown>; files?: Record<string, string> } = {},
+): World {
   const clock = mock.clock(on, { now: 1_000_000 })
-  mock.store(on)
+  mock.store(on, store)
   mock.env(on, { HOME: '/home/me' })
   const toolCalls: string[] = []
   const fetched: string[] = []
@@ -24,14 +29,14 @@ export function world(on: On, { isRepo = true, isDialogSlow = false } = {}): Wor
   on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
   on('prompt.compose', () => ({ sections: [{ id: 'intro', text: 'You are Claude Code.', scope: 'shared' }] }))
   on('command.register', ($, e) => ({ value: { command: e.name } }))
-  on('tool.register', ($, e) => ({ value: { tool: `mcp__craft-shop__${e.name}` } }))
+  on('tool.register', ($, e) => ({ value: { tool: `mcp__fishstack__${e.name}` } }))
   on('session.repo', () => ({
     value: isRepo ? { root: REPO, remote: 'git@example.com:me/repo.git', internal: false, name: null } : null,
   }))
   on('session.root', () => ({ value: REPO }))
   on('session.cwd', () => ({ value: REPO }))
   on('session.id', () => ({ value: 'abcdef123456' }))
-  // A session a few turns in: the fields Craftshop reads, the rest left out.
+  // A session a few turns in: the fields fishStack reads, the rest left out.
   const breakdown = {
     totalTokens: 68_000,
     rawMaxTokens: 200_000,
@@ -48,7 +53,16 @@ export function world(on: On, { isRepo = true, isDialogSlow = false } = {}): Wor
     return { value: { isPlaced: true } }
   })
   on('ui.panes', () => ({ value: panes.map(id => ({ id, title: id, isShown: true, isFocused: false, isPlaced: true })) }))
-  on('fs.exists', () => ({ value: false }))
+  const dirOf = (path: string) => path.slice(0, path.lastIndexOf('/'))
+  on('fs.exists', ($, e) => ({ value: files !== undefined && Object.keys(files).some(path => path === e.path || dirOf(path) === e.path) }))
+  if (files !== undefined) {
+    on('fs.list', ($, e) => ({
+      value: Object.keys(files)
+        .filter(path => dirOf(path) === e.path)
+        .map(path => ({ name: path.slice(e.path.length + 1), kind: 'file' as const, size: files[path]!.length, mtimeMs: 0, isLink: false })),
+    }))
+    on('fs.read', ($, e) => ({ value: files[e.path] ?? '' }))
+  }
   on('fs.stat', ($, e) => ({ value: { kind: /\.\w+$/.test(e.path) ? 'file' : 'dir', size: 0, mtimeMs: 0, isLink: false, realPath: e.path } }))
   on('http.fetch', ($, e) => {
     fetched.push(e.url)
@@ -68,7 +82,7 @@ export function world(on: On, { isRepo = true, isDialogSlow = false } = {}): Wor
     if (command === 'git fetch -q origin main') return ran()
     if (command === 'git rev-parse origin/main') return ran('0123456789abcdef\n')
     if (command === 'git worktree list --porcelain') return ran(`worktree ${REPO}\nbranch refs/heads/main\n`)
-    if (command.startsWith('git worktree add -q -B craft/')) return ran()
+    if (command.startsWith('git worktree add -q -B fish/')) return ran()
     return ran('', 1)
   })
   on('tool.call', ($, e) => {
@@ -83,7 +97,7 @@ export async function startSession($: Engine): Promise<void> {
 }
 
 export const PANE_PROPS: RenderPropsOf['Pane'] = {
-  title: 'Craftshop',
+  title: 'fishStack',
   isFocused: true,
   bodyColumns: 90,
   placement: 'dock',
@@ -93,7 +107,7 @@ export const PANE_PROPS: RenderPropsOf['Pane'] = {
 
 
 export async function mountPane($: Engine, surface: 'terminal' | 'desktop') {
-  return $.ui.mount({ plugin: 'craft-shop', surface, component: 'Pane', requestId: 'craft-shop', props: PANE_PROPS })
+  return $.ui.mount({ plugin: 'fishstack', surface, component: 'Pane', requestId: 'fishstack', props: PANE_PROPS })
 }
 
 export const COMPOSE: PromptComposeInput = {

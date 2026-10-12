@@ -12,24 +12,24 @@ import { card, chip, drawnButton, folderArt, glyph, GLYPH_COLOR, isRich, svg, ti
 import { bar, frame, PANE, resolveUi, tokens } from './ui'
 import type { Ui } from './ui'
 
-const contextDraft = atom({ plugin: 'craft-shop', key: 'contextDraft' } as const, { input: '' })
-const contextStatus = atom({ plugin: 'craft-shop', key: 'contextStatus' } as const, '')
-const contextView = atom({ plugin: 'craft-shop', key: 'contextView' } as const, {
+const contextDraft = atom({ plugin: 'fishstack', key: 'contextDraft' } as const, { input: '' })
+const contextStatus = atom({ plugin: 'fishstack', key: 'contextStatus' } as const, '')
+const contextView = atom({ plugin: 'fishstack', key: 'contextView' } as const, {
   openFolders: [],
   openId: null,
   picking: null,
   deletingFolder: null,
   isEditingText: false,
 })
-const folders = atom({ plugin: 'craft-shop', key: 'folders' } as const, [])
-const isTurnRunning = atom({ plugin: 'craft-shop', key: 'isTurnRunning' } as const, false)
-const isWindowShown = atom({ plugin: 'craft-shop', key: 'isWindowShown' } as const, false)
-const sources = atom({ plugin: 'craft-shop', key: 'sources' } as const, [])
-const tab = atom({ plugin: 'craft-shop', key: 'tab' } as const, 'worktree')
+const folders = atom({ plugin: 'fishstack', key: 'folders' } as const, [])
+const isTurnRunning = atom({ plugin: 'fishstack', key: 'isTurnRunning' } as const, false)
+const isWindowShown = atom({ plugin: 'fishstack', key: 'isWindowShown' } as const, false)
+const sources = atom({ plugin: 'fishstack', key: 'sources' } as const, [])
+const tab = atom({ plugin: 'fishstack', key: 'tab' } as const, 'worktree')
 
 type $ = EngineInterface
 
-export const CONTEXT_SECTION_ID = 'craft-shop:context'
+export const CONTEXT_SECTION_ID = 'fishstack:context'
 const CHAR_CAP = 12_000
 const TOKEN_BUDGET = 12_000
 const IMPORT_CAP = 40
@@ -262,8 +262,8 @@ async function pickPaths($: $, kind: 'file' | 'folder'): Promise<string[] | null
   const top = (await $.session.root()).replace(/"/g, '')
   const chooser =
     kind === 'file'
-      ? `choose file with prompt "Add files to Craftshop context" default location (POSIX file "${top}") with multiple selections allowed`
-      : `choose folder with prompt "Add folders to Craftshop context" default location (POSIX file "${top}") with multiple selections allowed`
+      ? `choose file with prompt "Add files to fishStack context" default location (POSIX file "${top}") with multiple selections allowed`
+      : `choose folder with prompt "Add folders to fishStack context" default location (POSIX file "${top}") with multiple selections allowed`
   const ran = await $.process
     .run(['osascript', '-e', 'activate', '-e', `set picked to ${chooser}`, '-e', 'set out to ""', '-e', 'repeat with one in picked', '-e', 'set out to out & POSIX path of one & linefeed', '-e', 'end repeat', '-e', 'return out'], { timeoutMs: 600_000 })
     .catch(() => null)

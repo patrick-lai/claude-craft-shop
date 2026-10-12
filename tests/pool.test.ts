@@ -115,6 +115,40 @@ test('the setup command is skipped when it and the lockfiles are what it last ra
   expect(ranIn(`${dir}/3`)).toBe(true)
 })
 
+test('on a reused slot with its setup skipped, the stepper keeps up with the log while the move waits', { options: { autoWorktree: true, worktreeRoot: '/slots', setupCommand: 'pnpm install' } }, async ($, on) => {
+  const dir = await repoDir()
+  const state = world(on, { slots: [`${dir}/1`], store: { [`setup:${dir}/1`]: { command: 'pnpm install', lockHash: '' } }, isMoveHeld: true })
+  const { clock } = state
+  await startSession($)
+  await clock.advance(1)
+  const ui = await mountPane($, 'terminal')
+  await activate(ui, 'tab-worktree')
+  const stages = async () => ((await ui.find({ text: /Move in/ }))?.text ?? '').replace(/\s+/g, ' ')
+  expect(await ui.find({ text: /Reusing slot 1/ })).toBeDefined()
+  expect(await ui.find({ text: /Setup already done for these lockfiles/ })).toBeDefined()
+  expect(await stages()).toContain('✓ Fetch ─ ✓ Claim a slot ─ ✓ Seed ─ ● Move in')
+  state.confirmMove()
+  await clock.advance(1)
+  await ui.redraw()
+  expect(await ui.find({ text: /Ready/ })).toBeDefined()
+})
+
+test("the pool's warming after a claim adds nothing to the session's steps", { options: { autoWorktree: true, worktreeRoot: '/slots', setupCommand: 'pnpm install' } }, async ($, on) => {
+  const { clock, commands } = world(on)
+  await startSession($)
+  await clock.advance(1)
+  // The pool warmed slot 1 and ran the setup in each of its slots; the
+  // session took slot 1, its setup already done. None of the pool's runs is
+  // the session's, so its log shows none of them.
+  expect(commands.filter(one => one.endsWith('$ /bin/bash -lc pnpm install')).length).toBe(3)
+  const ui = await mountPane($, 'terminal')
+  await activate(ui, 'tab-worktree')
+  await activate(ui, 'steps-toggle')
+  expect(await ui.find({ text: /Setup already done for these lockfiles/ })).toBeDefined()
+  expect(await ui.find({ text: /Running pnpm install/ })).toBeUndefined()
+  expect(await ui.find({ text: /✓ Fetch\s+─\s+✓ Claim a slot\s+─\s+✓ Seed\s+─\s+✓ Move in/ })).toBeDefined()
+})
+
 test('the pane tabs are the surface\'s own buttons, with keys 1 to 3', async ($, on) => {
   world(on, { isRepo: false })
   await startSession($)

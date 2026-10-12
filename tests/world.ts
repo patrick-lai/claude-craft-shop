@@ -25,6 +25,8 @@ export type World = {
   notices: (string | undefined)[]
   // What the plugin last saved under each store key.
   saved: Record<string, unknown>
+  // With isMoveHeld, confirms the held EnterWorktree, as the person would.
+  confirmMove: () => void
 }
 
 function ran(stdout = '', exitCode = 0) {
@@ -43,6 +45,7 @@ export function world(
     nodeModules = {},
     slots = [],
     folders = [],
+    isMoveHeld = false,
   }: {
     isRepo?: boolean
     isDialogSlow?: boolean
@@ -53,6 +56,8 @@ export function world(
     slots?: string[]
     // Folders already on disk, by path.
     folders?: string[]
+    // EnterWorktree waits for state.confirmMove, as Claude Code's dialog does.
+    isMoveHeld?: boolean
   } = {},
 ): World {
   const clock = mock.clock(on, { now: 1_000_000 })
@@ -76,7 +81,7 @@ export function world(
   const panes: string[] = []
   const commands: string[] = []
   const dirty = new Set<string>()
-  const state: World = { clock, toolCalls, fetched, dialogs: 0, closeDialog: () => undefined, panes, commands, dirty, answer: () => undefined, notified: [], notices: [], saved: {} }
+  const state: World = { clock, toolCalls, fetched, dialogs: 0, closeDialog: () => undefined, panes, commands, dirty, answer: () => undefined, notified: [], notices: [], saved: {}, confirmMove: () => undefined }
 
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
@@ -207,6 +212,9 @@ export function world(
     toolCalls.push(String(e.tool))
     // A question waits for the person, as the dialog does, until the test
     // answers it with state.answer.
+    if (String(e.tool) === 'EnterWorktree' && isMoveHeld) {
+      return new Promise(resolve => (state.confirmMove = () => resolve({ result: 'ok' } as never)))
+    }
     if (String(e.tool) === 'AskUserQuestion') {
       const asked = (e as unknown as { questions: unknown[] }).questions
       return new Promise(resolve => (state.answer = answers => resolve({ result: { questions: asked, answers } as never })))

@@ -329,7 +329,13 @@ async function nodeModulesIn($: $, dir: string): Promise<string[]> {
 // idle sibling slot pinned to the same lockfiles, or else the main checkout,
 // into a staging folder renamed into place. Then the setup command, skipped
 // when it and the lockfiles are what it last ran with in this slot.
-async function seedDependencies($: $, options: PluginOptions, main: string, path: string) {
+// What seeding says as it goes: a session's claim logs each step for its
+// band and stepper; the pool's warming says nothing there, as no session
+// waits on it.
+type Report = (label: string, isWarning?: boolean) => Promise<void>
+const SILENT: Report = async () => undefined
+
+async function seedDependencies($: $, options: PluginOptions, main: string, path: string, report: Report) {
   const hash = await lockHash($, path)
   if (hash !== '') {
     let donor: string | null = null
@@ -348,7 +354,7 @@ async function seedDependencies($: $, options: PluginOptions, main: string, path
         if (!(await $.fs.exists(`${path}/${relative}`))) missing.push(relative)
       }
       if (missing.length > 0) {
-        await setStep($, `Cloning ${missing.length === 1 ? 'node_modules' : `${missing.length} node_modules folders`} from ${donor === main ? 'the main checkout' : `slot ${donor.split('/').pop()}`}`)
+        await report(`Cloning ${missing.length === 1 ? 'node_modules' : `${missing.length} node_modules folders`} from ${donor === main ? 'the main checkout' : `slot ${donor.split('/').pop()}`}`)
         for (const [index, relative] of missing.entries()) {
           const target = `${path}/${relative}`
           const staging = `${path}/.fish-seed-${index}`
@@ -357,7 +363,7 @@ async function seedDependencies($: $, options: PluginOptions, main: string, path
           if (copied.exitCode !== 0) {
             $.ui.log(`cp -c failed: ${copied.stderr.trim()}`, { to: 'debug' })
             await $.process.run(['rm', '-rf', staging])
-            await setStep($, 'Could not clone node_modules; the setup command has to install them', true)
+            await report('Could not clone node_modules; the setup command has to install them', true)
             break
           }
           await $.process.run(['mv', staging, target])
@@ -370,10 +376,10 @@ async function seedDependencies($: $, options: PluginOptions, main: string, path
   if (setup === '') return
   const last = await $.store.get(SETUP_PREFIX + path)
   if (last !== null && typeof last === 'object' && (last as SetupRun).command === setup && (last as SetupRun).lockHash === hash) {
-    await setStep($, 'Setup already done for these lockfiles')
+    await report('Setup already done for these lockfiles')
     return
   }
-  await setStep($, `Running ${setup}`)
+  await report(`Running ${setup}`)
   const ran = await $.process.run(['/bin/bash', '-lc', setup], { cwd: path, timeoutMs: SETUP_TIMEOUT_MS })
   if (ran.exitCode !== 0) {
     $.ui.log(`setup command failed: ${ran.stderr.trim()}`, { to: 'debug' })
@@ -438,7 +444,7 @@ async function prewarm($: $, options: PluginOptions, main: string): Promise<void
       }
       await update($, poolNote, () => `Warming slot ${path.split('/').pop()} of ${Math.max(POOL_SIZE, total + 1)}…`)
       await createSlot($, main, path, sha)
-      await seedDependencies($, options, main, path)
+      await seedDependencies($, options, main, path, SILENT)
       await refreshSlotsFor($, options, main)
     }
     await update($, poolNote, () => note)
@@ -478,6 +484,9 @@ async function fail($: $, error: unknown): Promise<void> {
 async function enter($: $, options: PluginOptions): Promise<void> {
   const { path, branch } = await read($, worktree)
   if (path === null || branch === null) return
+  // Claude Code may ask the person to confirm the move: the stepper says
+  // where things stand meanwhile.
+  await setStep($, 'Moving the session in')
   const entered = await $.tool.call({ tool: 'EnterWorktree', path })
   if (entered.deny !== undefined || entered.isError === true) {
     $.ui.log(`EnterWorktree refused: ${entered.deny ?? entered.text ?? ''}`, { to: 'debug' })
@@ -513,7 +522,7 @@ async function prepare($: $, options: PluginOptions): Promise<void> {
     const path = await claimSlot($, options, main, base, baseSha, branch)
     await update($, worktree, current => ({ ...current, path }))
     startHeartbeat($, path)
-    await seedDependencies($, options, main, path)
+    await seedDependencies($, options, main, path, (label, isWarning) => setStep($, label, isWarning))
     await refreshSlots($, options)
     $.clock.after(0, () => void prewarm($, options, main))
 
@@ -698,7 +707,7 @@ async function claimForCreate($: $, options: PluginOptions, cwd: string, name: s
 
 async function seedThenUnlock($: $, options: PluginOptions, main: string, path: string): Promise<void> {
   try {
-    await seedDependencies($, options, main, path)
+    await seedDependencies($, options, main, path, (label, isWarning) => setStep($, label, isWarning))
     await setStep($, 'Worktree ready')
     await update($, worktree, (current): Worktree => ({ ...current, phase: 'ready', error: null }))
     await refreshSlots($, options)
@@ -1148,7 +1157,7 @@ const STAGES = ['Fetch', 'Claim a slot', 'Seed', 'Move in']
 // Which of the four stages the steps so far have reached.
 function stageOf(state: Worktree): number {
   if (state.phase === 'ready') return STAGES.length
-  const patterns = [/^Fetching|^Could not fetch/, /^Claiming|^Reusing slot|^Creating a new worktree/, /^Cloning|^Could not clone|^Running/, /^Ready; moving/]
+  const patterns = [/^Fetching|^Could not fetch/, /^Claiming|^Reusing slot|^Creating a new worktree/, /^Cloning|^Could not clone|^Running|^Setup already done/, /^Moving the session in/]
   let reached = 0
   for (const step of state.steps) {
     patterns.forEach((pattern, index) => {

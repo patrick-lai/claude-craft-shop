@@ -33,6 +33,9 @@ export type RailArtFigures = {
   sourcesTotal: number
   branch: string | null
   autopilot: RailAutopilot | null
+  // The Use dials and Use context switches: off, their pills say Off.
+  isDialsOn: boolean
+  isContextOn: boolean
 }
 
 const HEIGHT = 28
@@ -169,7 +172,7 @@ export function railArt(figures: RailArtFigures, iconOnly: ReadonlySet<Compactab
   // waits, then a check once it answered. Same width either way, so nothing
   // beside it moves, and the icon stays when the pill gives up its words.
   {
-    const label = figures.preset
+    const label = figures.isDialsOn ? figures.preset : 'Off'
     const isIcon = iconOnly.has('dials')
     const width = isIcon ? 12 + 14 + 12 : 12 + 14 + 7 + textWidth(label, 12.5, true) + 14
     const auto = figures.autopilot
@@ -179,20 +182,26 @@ export function railArt(figures: RailArtFigures, iconOnly: ReadonlySet<Compactab
         : auto.kind === 'waiting'
           ? waitRing(left + 12, mid - 7, auto.secondsLeft / Math.max(1, auto.totalSeconds))
           : answeredMark(left + 12, mid - 7)
-    const caption =
-      auto === null
+    const caption = !figures.isDialsOn
+      ? 'Dials are off: the agent gets no working style'
+      : auto === null
         ? `Dials: ${label} · tune how the agent works`
         : auto.kind === 'waiting'
           ? `Autopilot picks ${auto.picked} ${auto.secondsLeft < 60 ? 'in under a minute' : `in ${Math.ceil(auto.secondsLeft / 60)} min`} unless you answer${auto.count > 1 ? ` · ${auto.count} questions waiting` : ''}`
           : `Autopilot answered ${auto.picked} at ${auto.at}: nobody had for ${auto.waitedMinutes} min`
     const tone = auto === null ? '' : auto.kind === 'waiting' ? ' wait' : ' done'
-    pill('dials', width, 'dials', caption, left => (isIcon ? icon(left) : `${icon(left)}<text x="${left + 12 + 14 + 7}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5" font-weight="600" fill="var(--text)">${escape(label)}</text>`), tone)
+    const drawn = (left: number) => (figures.isDialsOn ? icon(left) : `<g opacity="0.45">${icon(left)}</g>`)
+    const weight = figures.isDialsOn ? 600 : 500
+    const ink = figures.isDialsOn ? 'var(--text)' : 'var(--dim)'
+    pill('dials', width, 'dials', caption, left => (isIcon ? drawn(left) : `${drawn(left)}<text x="${left + 12 + 14 + 7}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5" font-weight="${weight}" fill="${ink}">${escape(label)}</text>`), tone)
   }
 
   {
-    const count = figures.sourcesTotal === figures.sourcesOn ? String(figures.sourcesOn) : `${figures.sourcesOn}/${figures.sourcesTotal}`
+    const isOn = figures.isContextOn
+    const count = !isOn ? 'Off' : figures.sourcesTotal === figures.sourcesOn ? String(figures.sourcesOn) : `${figures.sourcesOn}/${figures.sourcesTotal}`
     const width = 12 + 14 + 7 + textWidth(count, 12.5, true) + 14
-    pill('sources', width, 'context', figures.sourcesTotal === 0 ? 'Add files, links or notes' : `${figures.sourcesOn} of ${figures.sourcesTotal} sources reach the agent`, left => `${pages(left + 12, mid - 7.5)}<text x="${left + 12 + 14 + 7}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5"><tspan font-weight="650" fill="var(--text)">${count}</tspan></text>`)
+    const caption = !isOn ? 'Context is off: no source reaches the agent' : figures.sourcesTotal === 0 ? 'Add files, links or notes' : `${figures.sourcesOn} of ${figures.sourcesTotal} sources reach the agent`
+    pill('sources', width, 'context', caption, left => `<g opacity="${isOn ? 1 : 0.45}">${pages(left + 12, mid - 7.5)}</g><text x="${left + 12 + 14 + 7}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5"><tspan font-weight="${isOn ? 650 : 500}" fill="${isOn ? 'var(--text)' : 'var(--dim)'}">${count}</tspan></text>`)
   }
 
   {

@@ -4,8 +4,8 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, PluginOptions, PromptComposeSection, Timer } from 'claude-code'
 
 import type { AutopilotWait, DialValues, Folder, Source } from '../types'
-import { CONTEXT_SECTION_ID, contextSection, legacyStoreKey, libraryStoreKey, parseLibrary } from './context'
-import { BALANCED, brief, DIALS_SECTION_ID, DIALS_STORE_KEY, isDialValues } from './dials'
+import { CONTEXT_ON_KEY, CONTEXT_SECTION_ID, contextSection, legacyStoreKey, libraryStoreKey, parseLibrary } from './context'
+import { BALANCED, brief, DIALS_ON_KEY, DIALS_SECTION_ID, DIALS_STORE_KEY, isDialValues } from './dials'
 import { FISH_COMMANDS } from './pane'
 import { headStartNote, IDLE_WORKTREE, isReadOnlyPhase } from './worktree'
 
@@ -15,11 +15,23 @@ const sources = atom({ plugin: 'fishstack', key: 'sources' } as const, [])
 const worktree = atom({ plugin: 'fishstack', key: 'worktree' } as const, IDLE_WORKTREE)
 const isHeadStartPrompted = atom({ plugin: 'fishstack', key: 'isHeadStartPrompted' } as const, false)
 const toldStyle = atom({ plugin: 'fishstack', key: 'toldStyle' } as const, null)
+const isDialsOn = atom({ plugin: 'fishstack', key: 'isDialsOn' } as const, true)
+const isContextOn = atom({ plugin: 'fishstack', key: 'isContextOn' } as const, true)
 const autopilot = atom({ plugin: 'fishstack', key: 'autopilot' } as const, null)
 const railTick = atom({ plugin: 'fishstack', key: 'railTick' } as const, 0)
 
-function styleOf(values: DialValues, list: Source[], groups: Folder[]): string {
-  return [brief(values), contextSection(list, groups) ?? 'The user shares no project context now.'].join('\n\n')
+// What the agent is told of the dials and the context, as one text: what a
+// change mid-session compares against. A tab switched off says so, so an
+// agent told earlier lets it go.
+function styleOf(values: DialValues, list: Source[], groups: Folder[], isDials: boolean, isContext: boolean): string {
+  return [
+    isDials ? brief(values) : 'The user turned the working style dials off: follow no Working style section.',
+    isContext ? (contextSection(list, groups) ?? 'The user shares no project context now.') : 'The user turned the shared project context off: follow no Project context section.',
+  ].join('\n\n')
+}
+
+async function styleNow($: EngineInterface): Promise<string> {
+  return styleOf(await read($, dials), await read($, sources), await read($, folders), await read($, isDialsOn), await read($, isContextOn))
 }
 
 // Between tool calls the note rides beside a tool's result, where a model
@@ -154,6 +166,10 @@ function notice($: EngineInterface, id: string, text: string | undefined): void 
 async function loadSaved($: EngineInterface): Promise<void> {
   const storedDials = await $.store.get(DIALS_STORE_KEY)
   if (isDialValues(storedDials)) await update($, dials, () => storedDials)
+  const useDials = await $.store.get(DIALS_ON_KEY)
+  await update($, isDialsOn, () => useDials !== false)
+  const useContext = await $.store.get(CONTEXT_ON_KEY)
+  await update($, isContextOn, () => useContext !== false)
   const repo = await $.session.repo()
   const root = repo?.root ?? (await $.session.root())
   const library = parseLibrary(await $.store.get(libraryStoreKey(root)), await $.store.get(legacyStoreKey(root)))
@@ -170,7 +186,7 @@ export function registerSession(on: On, options: PluginOptions): void {
     const input = e as unknown as { questions?: AskedQuestion[]; metadata?: { source?: string } }
     // Only the agent's own questions: a plugin asking through $.ui.ask
     // carries a source, and is not Autopilot's to answer.
-    if ((await read($, dials)).autonomy < 5 || input.metadata?.source !== undefined || input.questions === undefined) return next(e)
+    if (!(await read($, isDialsOn)) || (await read($, dials)).autonomy < 5 || input.metadata?.source !== undefined || input.questions === undefined) return next(e)
     const ms = Math.max(0, Number(options.autoAnswerMinutes ?? AUTO_ANSWER_MINUTES)) * 60_000
     const id = e.tool_use_id ?? `call-${++calls}`
     const since = await $.clock.now()
@@ -191,7 +207,7 @@ export function registerSession(on: On, options: PluginOptions): void {
       // The dial may have come down while the question waited: read where a
       // change is saved, as this hook's own reads hold what it began with.
       const now = await $.store.get(DIALS_STORE_KEY)
-      if (isDialValues(now) && now.autonomy < 5) {
+      if ((isDialValues(now) && now.autonomy < 5) || (await $.store.get(DIALS_ON_KEY)) === false) {
         waitingOn.delete(id)
         await showWaiting($)
         notice($, id, undefined)
@@ -241,15 +257,18 @@ export function registerSession(on: On, options: PluginOptions): void {
     const values = await read($, dials)
     const list = await read($, sources)
     const groups = await read($, folders)
+    const isDials = await read($, isDialsOn)
+    const isContext = await read($, isContextOn)
     // The engine keeps a session's first system prompt for its requests, so
     // the style first composed for a request (not for /context's measure) is
     // the one the model holds until prompt.submit tells it otherwise.
     if (!e.traits.includes('analysis') && (await read($, toldStyle)) === null) {
-      await update($, toldStyle, () => styleOf(values, list, groups))
+      await update($, toldStyle, () => styleOf(values, list, groups, isDials, isContext))
     }
 
-    const added: PromptComposeSection[] = [{ id: DIALS_SECTION_ID, text: brief(values), scope: 'session' }]
-    const shared = contextSection(list, groups)
+    // A tab switched off adds nothing.
+    const added: PromptComposeSection[] = isDials ? [{ id: DIALS_SECTION_ID, text: brief(values), scope: 'session' }] : []
+    const shared = isContext ? contextSection(list, groups) : null
     if (shared !== null) added.push({ id: CONTEXT_SECTION_ID, text: shared, scope: 'session' })
     return { sections: [...composed.sections, ...added] }
   })
@@ -268,7 +287,7 @@ export function registerSession(on: On, options: PluginOptions): void {
       await update($, isHeadStartPrompted, () => true)
     }
     const told = await read($, toldStyle)
-    const style = styleOf(await read($, dials), await read($, sources), await read($, folders))
+    const style = await styleNow($)
     if (told !== null && told !== style) {
       notes.push(styleUpdate(style))
       await update($, toldStyle, () => style)
@@ -284,7 +303,7 @@ export function registerSession(on: On, options: PluginOptions): void {
     const done = await next(e)
     if (e.agent_id !== undefined) return done
     const told = await read($, toldStyle)
-    const style = styleOf(await read($, dials), await read($, sources), await read($, folders))
+    const style = await styleNow($)
     if (told === null || told === style) return done
     await update($, toldStyle, () => style)
     return { ...done, additionalContext: [...(done.additionalContext ?? []), styleUpdate(style, true)] }

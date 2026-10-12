@@ -24,6 +24,8 @@ export type RailFigures = {
   sourcesTotal: number
   branch: string | null
   autopilot: RailAutopilot | null
+  isDialsOn: boolean
+  isContextOn: boolean
 }
 
 // A desktop cell's width in pixels, guessed low: the band is measured in the
@@ -142,7 +144,7 @@ export function drawRail(ui: Ui, figures: RailFigures, open: (tab: Tab | null) =
         'dials',
         <Text>
           <Text dimColor>Dials </Text>
-          <Text bold>{figures.preset}</Text>
+          {figures.isDialsOn ? <Text bold>{figures.preset}</Text> : <Text dimColor>off</Text>}
           {figures.autopilot?.kind === 'waiting' && (
             <Text color="warning">
               {' '}· picks {figures.autopilot.picked} {figures.autopilot.secondsLeft < 60 ? 'in under a minute' : `in ${Math.ceil(figures.autopilot.secondsLeft / 60)} min`}
@@ -154,12 +156,16 @@ export function drawRail(ui: Ui, figures: RailFigures, open: (tab: Tab | null) =
       {item(
         'rail-sources',
         'context',
-        <Text>
-          <Text bold>{figures.sourcesOn}</Text>
-          <Text dimColor>
-            {figures.sourcesTotal === figures.sourcesOn ? '' : `/${figures.sourcesTotal}`} {figures.sourcesOn === 1 && figures.sourcesTotal <= 1 ? 'source on' : 'sources on'}
+        figures.isContextOn ? (
+          <Text>
+            <Text bold>{figures.sourcesOn}</Text>
+            <Text dimColor>
+              {figures.sourcesTotal === figures.sourcesOn ? '' : `/${figures.sourcesTotal}`} {figures.sourcesOn === 1 && figures.sourcesTotal <= 1 ? 'source on' : 'sources on'}
+            </Text>
           </Text>
-        </Text>,
+        ) : (
+          <Text dimColor>Context off</Text>
+        ),
       )}
       {item(
         'rail-worktree',

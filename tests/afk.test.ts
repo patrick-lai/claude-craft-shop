@@ -173,7 +173,7 @@ test('two questions waiting: the rail counts down the sooner and says how many',
 })
 
 test('the dials pill keeps its width whatever Autopilot is doing, compacted too', () => {
-  const base: RailArtFigures = { cacheSecondsLeft: null, isWorking: false, cachePercent: null, tokens: null, costUsd: null, preset: 'Autopilot', presetLevels: [4, 3, 5, 5, 4, 2], sourcesOn: 0, sourcesTotal: 0, branch: null, autopilot: null }
+  const base: RailArtFigures = { cacheSecondsLeft: null, isWorking: false, cachePercent: null, tokens: null, costUsd: null, preset: 'Autopilot', presetLevels: [4, 3, 5, 5, 4, 2], sourcesOn: 0, sourcesTotal: 0, branch: null, autopilot: null, isDialsOn: true, isContextOn: true }
   const widths = (compact: boolean) =>
     [
       null,

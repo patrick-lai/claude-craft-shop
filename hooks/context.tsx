@@ -8,7 +8,7 @@ import type { EngineInterface, On } from 'claude-code'
 
 import type { ContextView, Folder, Source, SourceMode, Tab } from '../types'
 import { switchArt } from './art'
-import { card, drawnButton, folderArt, glyph, GLYPH_COLOR, isRich, svg, tickMeter, track } from './kit'
+import { card, drawnButton, folderArt, glyph, GLYPH_COLOR, isRich, svg, tickMeter, track, useSwitch } from './kit'
 import { bar, frame, PANE, resolveUi, tokens } from './ui'
 import type { Ui } from './ui'
 
@@ -26,6 +26,16 @@ const isTurnRunning = atom({ plugin: 'fishstack', key: 'isTurnRunning' } as cons
 const isWindowShown = atom({ plugin: 'fishstack', key: 'isWindowShown' } as const, false)
 const sources = atom({ plugin: 'fishstack', key: 'sources' } as const, [])
 const tab = atom({ plugin: 'fishstack', key: 'tab' } as const, 'worktree')
+const isContextOn = atom({ plugin: 'fishstack', key: 'isContextOn' } as const, true)
+
+// The Use context switch, kept across sessions. Off, no source reaches the
+// agent, whatever each source's own switch says; the library is kept.
+export const CONTEXT_ON_KEY = 'useContext'
+
+async function setContextOn($: EngineInterface, isOn: boolean): Promise<void> {
+  await $.store.set(CONTEXT_ON_KEY, isOn)
+  await update($, isContextOn, () => isOn)
+}
 
 type $ = EngineInterface
 
@@ -631,6 +641,7 @@ export function registerContext(on: On): void {
       </Box>
     )
 
+    const isOn = await read($, isContextOn)
     const isEmpty = list.length === 0 && groups.length === 0
     return frame(
       ui,
@@ -638,9 +649,16 @@ export function registerContext(on: On): void {
       columns,
       (id: Tab) => void update($, tab, () => id),
       <Box flexDirection="column" gap={1}>
-        <Box flexDirection="column">
-          <Text bold>Context the agent reads</Text>
-          <Text dimColor>Sources that are On go into every request. A folder you choose comes in as a group you can switch at once.</Text>
+        <Box justifyContent="space-between" alignItems="flex-start" gap={1}>
+          <Box flexDirection="column" flexShrink={1}>
+            <Text bold>Context the agent reads</Text>
+            <Text dimColor>
+              {isOn
+                ? 'Sources that are On go into every request. A folder you choose comes in as a group you can switch at once.'
+                : 'Off: no source reaches the agent, whatever its own switch says. Your library is kept for when you turn it back on.'}
+            </Text>
+          </Box>
+          {useSwitch(ui, 'context-on', 'Use context', isOn, turned => void setContextOn($, turned))}
         </Box>
         {adder}
         {!isEmpty && meter}

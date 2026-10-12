@@ -10,8 +10,7 @@ import type { Slot, Tab, Worktree, WorktreePhase } from '../types'
 import { frame, PANE, PANE_TITLE, resolveUi } from './ui'
 import type { Ui } from './ui'
 import { BALANCED, presetName } from './dials'
-import { switchArt } from './art'
-import { branchArt, card, drawnButton, label, segmented, svg } from './kit'
+import { branchArt, card, label, svg, useSwitch } from './kit'
 import { drawRail } from './rail'
 
 export const IDLE_WORKTREE: Worktree = {
@@ -53,6 +52,8 @@ const poolNote = atom({ plugin: 'fishstack', key: 'poolNote' } as const, '')
 const tokenTotals = atom({ plugin: 'fishstack', key: 'tokenTotals' } as const, null)
 // Autopilot answering for a person who is away (session.ts sets it).
 const autopilot = atom({ plugin: 'fishstack', key: 'autopilot' } as const, null)
+const isDialsOn = atom({ plugin: 'fishstack', key: 'isDialsOn' } as const, true)
+const isContextOn = atom({ plugin: 'fishstack', key: 'isContextOn' } as const, true)
 
 type $ = EngineInterface
 
@@ -549,11 +550,6 @@ async function beginWorktree($: $, options: PluginOptions): Promise<void> {
   $.clock.after(0, () => void prepare($, options))
 }
 
-const AUTO_CHOICES = [
-  { value: 'off', label: 'Off' },
-  { value: 'on', label: 'On' },
-] as const
-
 const PHASE: Record<WorktreePhase, { label: string; color: string }> = {
   off: { label: 'Off', color: 'inactive' },
   preparing: { label: 'Preparing (read-only)', color: 'warning' },
@@ -868,8 +864,10 @@ export function registerWorktree(on: On, options: PluginOptions): void {
       const input = last === null ? 0 : last.input_tokens + last.cache_read_input_tokens + last.cache_creation_input_tokens
       const list = await read($, sources)
       const values = await read($, dials)
-      // Only while the dial is on Autopilot: lowered, nothing is answered.
-      const auto = values.autonomy === 5 ? await read($, autopilot) : null
+      // Only while the dial is on Autopilot: lowered, or the dials off,
+      // nothing is answered.
+      const isDials = await read($, isDialsOn)
+      const auto = isDials && values.autonomy === 5 ? await read($, autopilot) : null
       const ui: Ui = resolveUi($.ui.resolve(e), e.surface)
       return drawRail(
         ui,
@@ -884,6 +882,8 @@ export function registerWorktree(on: On, options: PluginOptions): void {
           sourcesOn: list.filter(one => one.mode !== 'off').length,
           sourcesTotal: list.length,
           branch: state.phase === 'ready' ? state.branch : null,
+          isDialsOn: isDials,
+          isContextOn: await read($, isContextOn),
           autopilot:
             auto === null
               ? null
@@ -972,11 +972,7 @@ export function registerWorktree(on: On, options: PluginOptions): void {
               </Box>
             )}
           </Box>
-          <Box flexShrink={0} gap={1} alignItems="center">
-            <Text dimColor>Use worktrees</Text>
-            {drawnButton(ui, 'auto-worktree', switchArt(isAuto ? 'on' : 'off'), isAuto ? 'Use worktrees: on' : 'Use worktrees: off', 36, 22, () => void setAuto($, options, !isAuto)) ??
-              segmented(ui, 'auto-worktree', AUTO_CHOICES, isAuto ? 'on' : 'off', choice => void setAuto($, options, choice === 'on'))}
-          </Box>
+          {useSwitch(ui, 'auto-worktree', 'Use worktrees', isAuto, isOn => void setAuto($, options, isOn))}
         </Box>
     )
 

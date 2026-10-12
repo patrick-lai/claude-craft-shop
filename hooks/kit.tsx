@@ -4,6 +4,7 @@
 // text in place of fills and pictures.
 import type { RenderElement } from 'claude-code'
 
+import { switchArt } from './art'
 import type { Ui } from './ui'
 
 // Fills read on dark and light themes alike; the terminal never gets them.
@@ -307,6 +308,23 @@ export function drawnButton(ui: Ui, key: string, source: string, alt: string, wi
       <Box position="absolute" top={0} left={0} right={0} bottom={0}>
         <Client key={key} module="./press.tsx" props={{ hovers: hover !== undefined }} width="100%" height="100%" />
       </Box>
+    </Box>
+  )
+}
+
+const ON_OFF = [
+  { value: 'off', label: 'Off' },
+  { value: 'on', label: 'On' },
+] as const
+
+// A tab's own on/off switch, its name beside it: "Use worktrees", "Use dials".
+export function useSwitch(ui: Ui, key: string, name: string, isOn: boolean, onChange: (isOn: boolean) => void) {
+  const { Box, Text } = ui
+  return (
+    <Box key={`${key}-row`} flexShrink={0} gap={1} alignItems="center">
+      <Text dimColor>{name}</Text>
+      {drawnButton(ui, key, switchArt(isOn ? 'on' : 'off'), `${name}: ${isOn ? 'on' : 'off'}`, 36, 22, () => onChange(!isOn)) ??
+        segmented(ui, key, ON_OFF, isOn ? 'on' : 'off', choice => onChange(choice === 'on'))}
     </Box>
   )
 }

@@ -6,7 +6,7 @@ import type { ClientProps, ElementConstructor, EngineInterface, On } from 'claud
 
 import type { DialKey, DialValues, Tab } from '../types'
 import { presetArt } from './art'
-import { card, chip, dialIcon, drawnButton, isRich, svg, track } from './kit'
+import { card, chip, dialIcon, drawnButton, isRich, svg, track, useSwitch } from './kit'
 import { bar, frame, PANE, resolveUi } from './ui'
 import type { Ui } from './ui'
 
@@ -16,6 +16,16 @@ const dials = atom({ plugin: 'fishstack', key: 'dials' } as const, BALANCED)
 const isBriefShown = atom({ plugin: 'fishstack', key: 'isBriefShown' } as const, false)
 const selectedDial = atom({ plugin: 'fishstack', key: 'selectedDial' } as const, null)
 const tab = atom({ plugin: 'fishstack', key: 'tab' } as const, 'worktree')
+const isDialsOn = atom({ plugin: 'fishstack', key: 'isDialsOn' } as const, true)
+
+// The Use dials switch, kept across sessions. Off, the agent gets no working
+// style and the dials do nothing; their settings are kept for when it is on.
+export const DIALS_ON_KEY = 'useDials'
+
+async function setDialsOn($: EngineInterface, isOn: boolean): Promise<void> {
+  await $.store.set(DIALS_ON_KEY, isOn)
+  await update($, isDialsOn, () => isOn)
+}
 
 type Level = { label: string; summary: string; prompt: string }
 type Dial = { key: DialKey; name: string; question: string; levels: Level[] }
@@ -400,6 +410,7 @@ export function registerDials(on: On): void {
       )
     }
 
+    const isOn = await read($, isDialsOn)
     return frame(
       ui,
       'dials',
@@ -409,17 +420,26 @@ export function registerDials(on: On): void {
         <Box justifyContent="space-between" alignItems="flex-start" gap={1}>
           <Box flexDirection="column" flexShrink={1}>
             <Text bold>How the agent works</Text>
-            <Text dimColor>Six dials for how it plans, delegates, persists, asks, proves and talks.</Text>
+            <Text dimColor>
+              {isOn
+                ? 'Six dials for how it plans, delegates, persists, asks, proves and talks.'
+                : 'Off: the agent gets no working style, and nothing below applies. Your dials are kept for when you turn them back on.'}
+            </Text>
           </Box>
-          <Button
-            key="brief-toggle"
-            label={isShown ? 'Hide brief' : 'What agents are told'}
-            hotkey="w"
-            dimColor
-            onPress={() => void update($, isBriefShown, now => !now)}
-          />
+          <Box flexDirection="column" alignItems="flex-end" gap={1} flexShrink={0}>
+            {useSwitch(ui, 'dials-on', 'Use dials', isOn, turned => void setDialsOn($, turned))}
+            {isOn && (
+              <Button
+                key="brief-toggle"
+                label={isShown ? 'Hide brief' : 'What agents are told'}
+                hotkey="w"
+                dimColor
+                onPress={() => void update($, isBriefShown, now => !now)}
+              />
+            )}
+          </Box>
         </Box>
-        {isShown && card(ui, 'brief', [<Markdown text={brief(values)} />], { tone: 'muted' })}
+        {isOn && isShown && card(ui, 'brief', [<Markdown text={brief(values)} />], { tone: 'muted' })}
         <Box gap={1} flexWrap="wrap" alignItems="center">
           {PRESETS.map(preset => {
             const isActive = preset.name === current

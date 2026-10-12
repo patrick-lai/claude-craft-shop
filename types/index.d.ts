@@ -70,6 +70,8 @@ declare module 'claude-code' {
       railTick: number
       autopilot: AutopilotWait | null
       isTurnRunning: boolean
+      isDialsOn: boolean
+      isContextOn: boolean
       lastReplyAt: number | null
       tokenTotals: { input: number; output: number } | null
       isBandHidden: boolean

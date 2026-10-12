@@ -1,12 +1,11 @@
-// The desktop rail drawn as one picture: a Craftshop wordmark, then pills for
-// the prompt cache, cost, dials, sources and worktree, each with its own icon.
-// It returns the SVG and where each segment sits, so the Client laid over it
-// (rail-click.tsx) can map a press or hover to its segment.
+// The desktop rail's pills, each its own picture: a Craftshop wordmark, then
+// the prompt cache, tokens, dials, sources and worktree, each with its icon.
+// Every pill comes drawn twice, at rest and lit, so the surface can swap them
+// on hover without a round trip (rail.tsx), and with the caption it shows.
 import type { Tab } from '../types'
+import { paint } from './art'
 
-export type RailSegment = { x0: number; x1: number; tab: Tab | 'pane'; caption: string }
-
-export type RailArt = { source: string; width: number; height: number; segments: RailSegment[] }
+export type RailPill = { id: string; tab: Tab | 'pane'; caption: string; width: number; height: number; source: string; hotSource: string }
 
 export type RailArtFigures = {
   cacheSecondsLeft: number | null
@@ -15,6 +14,9 @@ export type RailArtFigures = {
   // Tokens this session sent and received, summed from each turn's usage;
   // null before the first turn ends.
   tokens: { input: number; output: number } | null
+  // Claude Code's own estimate (/cost): each response priced at its model's
+  // API list price. Not what a subscription or plan is billed.
+  costUsd: number | null
   preset: string
   presetLevels: number[]
   sourcesOn: number
@@ -22,7 +24,7 @@ export type RailArtFigures = {
   branch: string | null
 }
 
-const HEIGHT = 34
+const HEIGHT = 28
 const SANS = `-apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif`
 const ROUNDED = `ui-rounded, 'SF Pro Rounded', -apple-system, system-ui, sans-serif`
 const BARS = ['#5aaeff', '#2fcfa6', '#74d16f', '#a8c94a', '#d8bf45']
@@ -84,25 +86,25 @@ function branch(x: number, y: number, isOn: boolean): string {
   return `<g transform="translate(${x} ${y})" fill="none" stroke="${color}" stroke-width="1.4" stroke-linecap="round"><circle cx="3.5" cy="2.5" r="1.8"/><circle cx="3.5" cy="12" r="1.8"/><circle cx="11" cy="4.5" r="1.8"/><path d="M3.5 4.3v5.9M11 6.3c0 3-3.2 2.8-6.3 4.2"/></g>`
 }
 
-export function railArt(figures: RailArtFigures, hover: number | null): RailArt {
-  const parts: string[] = []
-  const segments: RailSegment[] = []
+export function railArt(figures: RailArtFigures): RailPill[] {
+  const pills: RailPill[] = []
   const mid = HEIGHT / 2
-  let x = 0
 
-  const segment = (width: number, tab: RailSegment['tab'], caption: string, draw: (left: number) => string) => {
-    const index = segments.length
-    const isHover = hover === index
-    parts.push(`<rect x="${x + 0.5}" y="3.5" width="${width - 1}" height="${HEIGHT - 7}" rx="${(HEIGHT - 7) / 2}" class="pill${isHover ? ' hot' : ''}"/>`)
-    parts.push(draw(x))
-    segments.push({ x0: x, x1: x + width, tab, caption })
-    x += width + 6
+  const pill = (id: string, width: number, tab: RailPill['tab'], caption: string, draw: (left: number) => string) => {
+    const whole = Math.ceil(width)
+    const svg = (isHot: boolean) => {
+      const inner = `<rect x="0.5" y="0.5" width="${whole - 1}" height="${HEIGHT - 1}" rx="${(HEIGHT - 1) / 2}" class="pill${isHot ? ' hot' : ''}"/>${draw(0)}`
+      // Theme colours are custom properties, which a presentation attribute
+      // does not read everywhere; a style declaration does.
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="${whole}" height="${HEIGHT}" viewBox="0 0 ${whole} ${HEIGHT}">${STYLE}${DEFS}${paint(inner)}</svg>`
+    }
+    pills.push({ id, tab, caption, width: whole, height: HEIGHT, source: svg(false), hotSource: svg(true) })
   }
 
   {
     const word = 'Craftshop'
     const width = 12 + 18 + 7 + textWidth(word, 13.5, true) + 14
-    segment(width, 'pane', 'Open Craftshop', left => `${anvil(left + 12, mid - 8)}<text x="${left + 12 + 18 + 7}" y="${mid + 4.6}" font-family="${ROUNDED}" font-size="13.5" font-weight="700" fill="url(#brandText)" letter-spacing="0.1">${word}</text>`)
+    pill('brand', width, 'pane', 'Open Craftshop: perm worktree, dials and context.', left => `${anvil(left + 12, mid - 8)}<text x="${left + 12 + 18 + 7}" y="${mid + 4.6}" font-family="${ROUNDED}" font-size="13.5" font-weight="700" fill="url(#brandText)" letter-spacing="0.1">${word}</text>`)
   }
 
   if (figures.cacheSecondsLeft !== null) {
@@ -111,11 +113,11 @@ export function railArt(figures: RailArtFigures, hover: number | null): RailArt 
     const lit = figures.isWorking ? 5 : Math.ceil(left / 60)
     const width = 12 + 14 + 7 + 5 * 6 + 4 * 3 + 12
     const caption = figures.isWorking
-      ? 'Prompt cache in use: the agent is working, reusing your chat from the cache.'
+      ? 'Prompt cache in use while the agent works.'
       : isWarm
-        ? `Prompt cache warm, ${clock(left)} left: your next message reuses the chat, so it is faster and much cheaper. Good time to send a follow-up.`
-        : 'Prompt cache cold: more than 5 minutes since the last reply, so the next message reads the whole chat again.'
-    segment(width, 'context', caption + (figures.cachePercent === null ? '' : ` Last request: ${figures.cachePercent}% from the cache.`), left => {
+        ? `Prompt cache warm, ${clock(left)} left: a message now reuses the chat, faster and cheaper.`
+        : 'Prompt cache cold: the next message reads the whole chat again.'
+    pill('cache', width, 'context', caption + (figures.cachePercent === null ? '' : ` Last request ${figures.cachePercent}% cached.`), left => {
       const bars = BARS.map((color, index) => `<rect x="${left + 12 + 14 + 7 + index * 9}" y="${mid - 7}" width="6" height="14" rx="3" fill="${index < lit ? color : 'var(--track)'}"/>`).join('')
       return `${flame(left + 12, mid - 7.5, isWarm)}${bars}`
     })
@@ -124,48 +126,46 @@ export function railArt(figures: RailArtFigures, hover: number | null): RailArt 
   if (figures.tokens !== null) {
     const sent = compact(figures.tokens.input)
     const received = compact(figures.tokens.output)
-    const width = 12 + 10 + 4 + textWidth(sent, 12.5, true) + 12 + 10 + 4 + textWidth(received, 12.5, true) + 12
-    segment(width, 'context', `This session sent ${sent} tokens and received ${received}.`, left => {
-      const outX = left + 12 + 10 + 4 + textWidth(sent, 12.5, true) + 12
-      return `${arrow(left + 12, mid, true)}<text x="${left + 12 + 14}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5" font-weight="600" fill="var(--text)" class="num">${sent}</text>${arrow(outX, mid, false)}<text x="${outX + 14}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5" font-weight="600" fill="var(--text)" class="num">${received}</text>`
+    const cost = figures.costUsd === null ? null : `≈ $${figures.costUsd.toFixed(2)}`
+    const outX = 12 + 14 + textWidth(sent, 12.5, true) + 12
+    const costX = outX + 14 + textWidth(received, 12.5, true) + 10
+    const width = (cost === null ? costX - 10 : costX + 10 + textWidth(cost, 12.5)) + 12
+    const caption = `↑ ${sent} tokens sent, ↓ ${received} received, subagents included.` + (cost === null ? '' : ` ${cost} at API list prices, not your plan's bill.`)
+    pill('tokens', width, 'context', caption, left => {
+      const text = (x: number, value: string) => `<text x="${left + x}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5" font-weight="600" fill="var(--text)" class="num">${value}</text>`
+      const spend = cost === null ? '' : `<rect x="${left + costX - 0.5}" y="${mid - 7}" width="1" height="14" fill="var(--pillLine)"/><text x="${left + costX + 10}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5" fill="var(--dim)" class="num">${escape(cost)}</text>`
+      return `${arrow(left + 12, mid, true)}${text(12 + 14, sent)}${arrow(left + outX, mid, false)}${text(outX + 14, received)}${spend}`
     })
   }
 
   {
     const label = figures.preset
     const width = 12 + 14 + 7 + textWidth(label, 12.5, true) + 14
-    segment(width, 'dials', `Dials: ${label}. Open them to see how the agent plans, delegates, persists, asks, proves and talks.`, left => `${radarMini(left + 12, mid - 7, figures.presetLevels)}<text x="${left + 12 + 14 + 7}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5" font-weight="600" fill="var(--text)">${escape(label)}</text>`)
+    pill('dials', width, 'dials', `Dials: ${label}. How the agent plans, delegates, persists, asks, proves and talks.`, left => `${radarMini(left + 12, mid - 7, figures.presetLevels)}<text x="${left + 12 + 14 + 7}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5" font-weight="600" fill="var(--text)">${escape(label)}</text>`)
   }
 
   {
     const count = figures.sourcesTotal === figures.sourcesOn ? String(figures.sourcesOn) : `${figures.sourcesOn}/${figures.sourcesTotal}`
     const word = figures.sourcesTotal === 1 ? ' source' : ' sources'
     const width = 12 + 14 + 7 + textWidth(count, 12.5, true) + textWidth(word, 12.5) + 14
-    segment(width, 'context', figures.sourcesTotal === 0 ? 'No context sources yet. Open Context to add files, links or notes.' : `${figures.sourcesOn} of ${figures.sourcesTotal} context sources reach the agent.`, left => `${pages(left + 12, mid - 7.5)}<text x="${left + 12 + 14 + 7}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5"><tspan font-weight="650" fill="var(--text)">${count}</tspan><tspan fill="var(--dim)">${word}</tspan></text>`)
+    pill('sources', width, 'context', figures.sourcesTotal === 0 ? 'No context sources yet: add files, links or notes.' : `${figures.sourcesOn} of ${figures.sourcesTotal} context sources reach the agent.`, left => `${pages(left + 12, mid - 7.5)}<text x="${left + 12 + 14 + 7}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5"><tspan font-weight="650" fill="var(--text)">${count}</tspan><tspan fill="var(--dim)">${word}</tspan></text>`)
   }
 
   {
     const label = figures.branch ?? 'No worktree'
     const width = 12 + 14 + 7 + textWidth(label, 12.5, figures.branch !== null) + 14
-    segment(width, 'worktree', figures.branch === null ? 'Perm worktree is off for this session.' : `This session works in a perm worktree on ${figures.branch}.`, left => `${branch(left + 12, mid - 7, figures.branch !== null)}<text x="${left + 12 + 14 + 7}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5" font-weight="${figures.branch === null ? 500 : 600}" fill="${figures.branch === null ? 'var(--dim)' : 'var(--text)'}">${escape(label)}</text>`)
+    pill('worktree', width, 'worktree', figures.branch === null ? 'Perm worktree is off for this session.' : `This session works in a perm worktree on ${figures.branch}.`, left => `${branch(left + 12, mid - 7, figures.branch !== null)}<text x="${left + 12 + 14 + 7}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5" font-weight="${figures.branch === null ? 500 : 600}" fill="${figures.branch === null ? 'var(--dim)' : 'var(--text)'}">${escape(label)}</text>`)
   }
 
-  const width = Math.ceil(x - 6)
-  // Theme colours are custom properties, which a presentation attribute does
-  // not read everywhere; a style declaration does.
-  const painted = parts.join('').replace(/(fill|stroke)="var\((--[A-Za-z]+)\)"/g, 'style="$1: var($2)"')
-  const style = `<style>
-    svg { --text: #ecebe8; --dim: #9a9aa2; --track: rgba(154,154,162,0.28); --pill: rgba(255,255,255,0.045); --pillLine: rgba(255,255,255,0.09); --hot: rgba(143,156,255,0.16); --hotLine: rgba(143,156,255,0.55); }
-    @media (prefers-color-scheme: light) { svg { --text: #1f1f22; --dim: #6b6b72; --track: rgba(107,107,114,0.25); --pill: rgba(0,0,0,0.035); --pillLine: rgba(0,0,0,0.09); --hot: rgba(90,110,240,0.12); --hotLine: rgba(90,110,240,0.5); } }
-    .num { font-variant-numeric: tabular-nums; }
-    .pill { fill: var(--pill); stroke: var(--pillLine); }
-    .pill.hot { fill: var(--hot); stroke: var(--hotLine); }
-  </style>`
-  const defs = `<defs><linearGradient id="brandText" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#f2a65a"/><stop offset="1" stop-color="#e0715a"/></linearGradient></defs>`
-  return {
-    source: `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${HEIGHT}" viewBox="0 0 ${width} ${HEIGHT}">${style}${defs}${painted}</svg>`,
-    width,
-    height: HEIGHT,
-    segments,
-  }
+  return pills
 }
+
+const STYLE = `<style>
+  svg { --text: #ecebe8; --dim: #9a9aa2; --track: rgba(154,154,162,0.28); --pill: rgba(255,255,255,0.045); --pillLine: rgba(255,255,255,0.09); --hot: rgba(143,156,255,0.16); --hotLine: rgba(143,156,255,0.55); }
+  @media (prefers-color-scheme: light) { svg { --text: #1f1f22; --dim: #6b6b72; --track: rgba(107,107,114,0.25); --pill: rgba(0,0,0,0.035); --pillLine: rgba(0,0,0,0.09); --hot: rgba(90,110,240,0.12); --hotLine: rgba(90,110,240,0.5); } }
+  .num { font-variant-numeric: tabular-nums; }
+  .pill { fill: var(--pill); stroke: var(--pillLine); }
+  .pill.hot { fill: var(--hot); stroke: var(--hotLine); }
+</style>`
+
+const DEFS = `<defs><linearGradient id="brandText" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#f2a65a"/><stop offset="1" stop-color="#e0715a"/></linearGradient></defs>`

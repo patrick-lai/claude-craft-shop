@@ -38,6 +38,11 @@ function boxStyle(p) {
   if (p.flexGrow !== undefined) s.push('flex-grow:' + p.flexGrow)
   if (p.flexShrink !== undefined) s.push('flex-shrink:' + p.flexShrink)
   if (p.width !== undefined) s.push('width:' + px(p.width, COL), 'box-sizing:border-box')
+  if (p.height !== undefined) s.push('height:' + px(p.height, ROW), 'box-sizing:border-box')
+  if (p.overflow) s.push('overflow:' + p.overflow)
+  if (p.alignSelf) s.push('align-self:' + p.alignSelf)
+  if (p.position) s.push('position:' + p.position)
+  for (const [side, unit] of [['top', ROW], ['bottom', ROW], ['left', COL], ['right', COL]]) if (p[side] !== undefined) s.push(`${side}:${p[side] * unit}px`)
   const pad = (k, v, u) => v !== undefined && s.push(`${k}:${v * u}px`)
   pad('padding-left', p.paddingX ?? p.paddingLeft ?? p.padding, COL)
   pad('padding-right', p.paddingX ?? p.paddingRight ?? p.padding, COL)
@@ -71,15 +76,23 @@ function render(node) {
   const kids = (node.children ?? []).map(render).join('')
   switch (node.type) {
     case 'Box': {
+      // A hover lights the Box under the pointer, or, with a scope, every
+      // member of its group: the page's script marks the lit scope on body.
+      const hover = node.hover ?? p.hover
       let cls = ''
-      if (p.hover) {
+      let scope = ''
+      if (hover) {
         cls = `h${counter++}`
         const h = []
-        if (p.hover.backgroundColor) h.push('background:' + color(p.hover.backgroundColor) + ' !important')
-        if (p.hover.borderColor) h.push('border-color:' + color(p.hover.borderColor) + ' !important')
-        rules.push(`.${cls}:hover{${h.join(';')}}`)
+        if (hover.backgroundColor) h.push('background:' + color(hover.backgroundColor) + ' !important')
+        if (hover.borderColor) h.push('border-color:' + color(hover.borderColor) + ' !important')
+        if (hover.display) h.push('display:flex !important')
+        if (hover.scope) {
+          scope = ` data-scope="${esc(hover.scope)}"`
+          rules.push(`body[data-lit="${hover.scope}"] .${cls}{${h.join(';')}}`)
+        } else rules.push(`.${cls}:hover{${h.join(';')}}`)
       }
-      return `<div class="${cls}" style="${boxStyle(p)}">${kids}</div>`
+      return `<div class="${cls}"${scope} style="${boxStyle(p)}">${kids}</div>`
     }
     case 'Text':
       return `<span style="${textStyle(p)}">${kids}</span>`
@@ -122,6 +135,13 @@ body{margin:0;background:#1f1f1e;color:${THEME.text};font:13px/20px -apple-syste
 .md{opacity:.9}.md h4{margin:4px 0}.code{background:#1b1b1a;border-radius:8px;padding:8px;margin:2px 0;font:12px/18px ui-monospace,monospace}
 `
 
+const HOVER = `for (const el of document.querySelectorAll('[data-scope]')) {
+  const scope = el.dataset.scope
+  if (getComputedStyle(el).display === 'none') continue
+  el.addEventListener('mouseenter', () => (document.body.dataset.lit = scope))
+  el.addEventListener('mouseleave', () => delete document.body.dataset.lit)
+}`
+
 const lines = fs.readFileSync(0, 'utf8').split('\n').filter(line => line.startsWith('PREVIEW '))
 const index = []
 for (const line of lines) {
@@ -129,8 +149,14 @@ for (const line of lines) {
   const tree = JSON.parse(line.slice(`PREVIEW ${name} `.length))
   rules = []
   const body = render(tree)
-  fs.writeFileSync(path.join(out, `${name}.html`), `<!doctype html><meta charset="utf-8"><title>${name}</title><style>${CSS}${rules.join('')}</style><body><div class="pane">${body}</div></body>`)
+  const page = lit => `<!doctype html><meta charset="utf-8"><title>${name}</title><style>${CSS}${rules.join('')}</style><body${lit ? ` data-lit="${lit}"` : ''}><div class="pane">${body}</div><script>${HOVER}</script></body>`
+  fs.writeFileSync(path.join(out, `${name}.html`), page(null))
   index.push(name)
+  // The rail lit as a pointer on its tokens pill leaves it.
+  if (name === 'rail') {
+    fs.writeFileSync(path.join(out, 'rail-hover.html'), page('craft-rail-tokens'))
+    index.push('rail-hover')
+  }
 }
 fs.writeFileSync(path.join(out, 'index.html'), `<!doctype html><meta charset="utf-8"><style>${CSS}</style><body style="padding:16px">${index.map(n => `<p><a style="color:#8fa8ff" href="${n}.html">${n}</a></p>`).join('')}</body>`)
 console.log(`${index.length} previews in ${out}`)

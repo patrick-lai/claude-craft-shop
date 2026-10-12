@@ -1,10 +1,10 @@
 // The rail above the prompt while there is no worktree news: Craftshop's
 // status at a glance (context window, prompt cache, cost, dials, sources,
 // worktree), each item opening its tab. worktree.tsx gathers the figures.
-import type { ClientProps, ElementConstructor, RenderElement } from 'claude-code'
+import type { RenderElement } from 'claude-code'
 
 import type { Tab } from '../types'
-import { cacheGauge } from './kit'
+import { cacheGauge, drawnButton } from './kit'
 import { railArt } from './rail-art'
 import { tokens } from './ui'
 import type { Ui } from './ui'
@@ -16,6 +16,7 @@ export type RailFigures = {
   // Share of the last request's input the prompt cache served, null before one.
   cachePercent: number | null
   tokens: { input: number; output: number } | null
+  costUsd: number | null
   preset: string
   presetLevels: number[]
   sourcesOn: number
@@ -23,32 +24,35 @@ export type RailFigures = {
   branch: string | null
 }
 
-// On the desktop the rail is one picture with a Client over it for presses
-// and hovers. A hover lights its pill and changes nothing else: a row that
-// came and went with it moved the rail under the pointer, which flickered.
-export function drawRail(
-  ui: Ui,
-  figures: RailFigures,
-  open: (tab: Tab | null) => void,
-  hover: number | null,
-  Client: ElementConstructor<ClientProps> | undefined,
-) {
+// On the desktop each pill is its own picture with a Client over it for the
+// press (kit.tsx's drawnButton). Hovers never reach the hooks: the surface
+// swaps in the lit drawing and reveals the pill's caption in a row that is
+// always there, so nothing moves under the pointer.
+export function drawRail(ui: Ui, figures: RailFigures, open: (tab: Tab | null) => void) {
   const { Box, Text, Button, Svg } = ui
-  if (Svg !== undefined && Client !== undefined) {
-    const art = railArt(figures, hover)
+  if (Svg !== undefined && ui.Client !== undefined) {
+    const pills = railArt(figures)
     return (
       <Box flexDirection="column">
-        <Box key="rail-art" position="relative" alignSelf="flex-start">
-          <Svg source={art.source} alt={art.segments.map(one => one.caption).join(' ')} width={art.width} height={art.height} />
-          <Box position="absolute" top={0} left={0} right={0} bottom={0}>
-            <Client
-              key="rail-click"
-              module="./rail-click.tsx"
-              props={{ width: art.width, segments: art.segments.map(one => ({ x0: one.x0, x1: one.x1, tab: one.tab })) }}
-              width="100%"
-              height="100%"
-            />
-          </Box>
+        <Box key="rail-caption" height={1} overflow="hidden" position="relative">
+          <Text> </Text>
+          {pills.map(pill => (
+            <Box key={`caption-${pill.id}`} position="absolute" top={0} left={0} right={0} display="none" hover={{ display: 'flex', scope: `craft-rail-${pill.id}` }}>
+              <Text dimColor wrap="truncate-end">
+                {pill.caption}
+              </Text>
+            </Box>
+          ))}
+        </Box>
+        <Box gap={1} alignItems="center" flexWrap="wrap">
+          {pills.map(pill => (
+            <Box key={`rail-${pill.id}`} position="relative" flexShrink={0} hover={{ scope: `craft-rail-${pill.id}` }}>
+              {drawnButton(ui, `rail-${pill.id}-press`, pill.source, pill.caption, pill.width, pill.height, () => open(pill.tab === 'pane' ? null : pill.tab))}
+              <Box position="absolute" top={0} left={0} display="none" hover={{ display: 'flex', scope: `craft-rail-${pill.id}` }}>
+                <Svg source={pill.hotSource} alt={pill.caption} width={pill.width} height={pill.height} />
+              </Box>
+            </Box>
+          ))}
         </Box>
       </Box>
     )
@@ -107,6 +111,7 @@ export function drawRail(
             <Text color="success">↓</Text>
             <Text bold>{tokens(figures.tokens.output)}</Text>
             <Text dimColor> out</Text>
+            {figures.costUsd !== null && <Text dimColor> · ≈ ${figures.costUsd.toFixed(2)} API price</Text>}
           </Text>,
         )}
       {item(

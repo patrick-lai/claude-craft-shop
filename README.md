@@ -22,12 +22,12 @@ Open the pane with `/craft`, or `/craft worktree|dials|context` to go straight t
 
 The rail above the prompt shows Craftshop's status at a glance:
 - the prompt cache: a flame and five bars that run down over the 5 minutes after each reply, as in CommissionAI. While they last, your next message reuses the cached chat, so it is faster and cheaper. Hover it for details;
-- the session's cost;
+- tokens sent and received, with Claude Code's ≈ $ estimate at API list prices (not a plan's bill);
 - the dials preset;
 - how many sources are on;
 - the worktree's branch.
 
-In the desktop app the rail is drawn as one picture of pills with icons; hover a pill for a line about it, and click it to open its tab. In the terminal it is text, and each item opens its tab too. While the pane is closed, the rail starts with **▸ Craftshop**. While a worktree is being prepared, the rail shows its progress instead.
+In the desktop app each pill is drawn with its icon; hover one and it lights, with a line about it in the row above (always there, so nothing moves), and click it to open its tab. In the terminal it is text, and each item opens its tab too. The rail starts with **Craftshop**, which opens the pane. While a worktree is being prepared, the rail shows its progress instead.
 
 ## Options
 

@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { activate, mountPane, startSession, world } from './world'
+import { activate, keysOf, mountPane, startSession, world } from './world'
 
 test('the tabs switch on press and each draws its empty state', async ($, on) => {
   world(on, { isRepo: false })
@@ -80,7 +80,7 @@ test('with no worktree news the band is a status rail whose items open their tab
   expect(await band.find({ type: 'Button', key: 'open-craftshop' })).toBeDefined()
 })
 
-test('on the desktop the rail is one picture: hovering lights a pill without moving it, pressing opens its tab', async ($, on) => {
+test('on the desktop each rail pill is a picture whose hover the surface lights and captions, and whose press opens its tab', async ($, on) => {
   world(on, { isRepo: false })
   on('turn.complete', ($, e) => ({ text: e.answer }))
   await startSession($)
@@ -94,26 +94,31 @@ test('on the desktop the rail is one picture: hovering lights a pill without mov
     component: 'AbovePrompt',
     props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 100, scroll: { offset: 0, bodyRows: 10 }, view: {} },
   })
-  expect(await band.find({ type: 'Svg' })).toBeDefined()
-  const overlay = (await band.find({ type: 'Client', key: 'rail-click' }))!.props as {
-    props: { width: number; segments: { x0: number; x1: number; tab: string }[] }
-  }
-  const { width, segments } = overlay.props
-  expect(segments.map(one => one.tab)).toEqual(['pane', 'context', 'context', 'dials', 'context', 'worktree'])
-  const drawn = (await band.find({ type: 'Svg' }))!.props as { source: string }
-  expect(drawn.source).toContain('>112k<')
-  expect(drawn.source).toContain('>1.6k<')
+  // Each pill its own picture and press; its lit drawing and its caption wait
+  // hidden, for the surface to reveal on hover: no hook, nothing moves.
+  expect(await keysOf(band, /^rail-.*-press$/)).toEqual(['rail-brand-press', 'rail-cache-press', 'rail-tokens-press', 'rail-dials-press', 'rail-sources-press', 'rail-worktree-press'])
+  const drawn = JSON.stringify(await band.drawn())
+  expect(drawn).toContain('>112k<')
+  expect(drawn).toContain('>1.6k<')
+  expect(drawn).toContain('≈ $0.42')
+  const caption = byKey(await band.drawn(), 'caption-tokens')
+  expect(caption).toMatchObject({ props: { display: 'none' }, hover: { display: 'flex', scope: 'craft-rail-tokens' } })
+  expect(JSON.stringify(caption)).toContain('at API list prices, not your plan')
+  expect(byKey(await band.drawn(), 'rail-tokens')).toMatchObject({ hover: { scope: 'craft-rail-tokens' } })
 
-  // Lay the overlay out at 60 cells and point at the middle of the Dials pill.
-  await band.resize({ columns: 60, rows: 2, in: 'rail-click' })
-  const dials = segments[3]!
-  const x = Math.floor(((dials.x0 + dials.x1) / 2 / width) * 60)
-  await band.pointer({ type: 'move', x, y: 0, in: 'rail-click' })
-  await band.redraw()
-  const lit = (await band.find({ type: 'Svg' }))!.props as { source: string }
-  expect(lit.source.match(/class="pill hot"/g)).toHaveLength(1)
-  expect(await band.find({ text: /Dials: Balanced/ })).toBeUndefined()
-  await band.pointer({ type: 'down', x, y: 0, button: 'left', in: 'rail-click' })
+  await activate(band, 'rail-dials-press')
   const pane = await mountPane($, 'desktop')
   expect(await pane.find({ type: 'Button', key: 'dial-foresight' })).toBeDefined()
 })
+
+// The element drawn under a key, hover and all (find leaves hover out).
+function byKey(node: unknown, key: string): unknown {
+  if (node === null || typeof node !== 'object') return undefined
+  const element = node as { props?: { key?: unknown }; children?: unknown[] }
+  if (element.props?.key === key) return element
+  for (const child of element.children ?? []) {
+    const found = byKey(child, key)
+    if (found !== undefined) return found
+  }
+  return undefined
+}

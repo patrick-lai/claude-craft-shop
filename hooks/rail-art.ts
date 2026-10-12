@@ -25,6 +25,9 @@ export type RailArtFigures = {
 }
 
 const HEIGHT = 28
+// The pills are drawn at 28px and shown at 0.88 of that, icons and words
+// alike, so the rail stays a slim row beside the composer.
+const SCALE = 0.88
 const SANS = `-apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif`
 const ROUNDED = `ui-rounded, 'SF Pro Rounded', -apple-system, system-ui, sans-serif`
 const BARS = ['#5aaeff', '#2fcfa6', '#74d16f', '#a8c94a', '#d8bf45']
@@ -51,11 +54,9 @@ function compact(count: number): string {
   return String(count)
 }
 
-// Sent tokens go up (blue), received come down (green).
-function arrow(x: number, mid: number, isUp: boolean): string {
-  const color = isUp ? '#5aaeff' : '#3fb950'
-  const path = isUp ? 'M5 11V2M1.5 5.5 5 2l3.5 3.5' : 'M5 2v9M1.5 7.5 5 11l3.5-3.5'
-  return `<path transform="translate(${x} ${mid - 6.5})" d="${path}" fill="none" stroke="${color}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>`
+// Tokens both ways, as one glyph: up (blue) beside down (green).
+function updown(x: number, mid: number): string {
+  return `<path transform="translate(${x} ${mid - 6})" d="M3 11V1.5M.5 4 3 1.5 5.5 4" fill="none" stroke="#5aaeff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path transform="translate(${x + 6} ${mid - 6})" d="M3 1v9.5M.5 8 3 10.5 5.5 8" fill="none" stroke="#3fb950" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>`
 }
 
 function anvil(x: number, y: number): string {
@@ -87,9 +88,9 @@ function branch(x: number, y: number, isOn: boolean): string {
 }
 
 // The pills that can give up their words for the rail to fit one row, in the
-// order they do: four to their icon, then the tokens to what was sent and the
-// cost (what came back moves to the caption). The cache gauge never does.
-export const COMPACTABLE = ['brand', 'worktree', 'sources', 'dials', 'tokens'] as const
+// order they do, down to their icon (sources to its count). The cache gauge
+// and the cost never do.
+export const COMPACTABLE = ['brand', 'worktree', 'sources', 'dials'] as const
 export type Compactable = (typeof COMPACTABLE)[number]
 
 export function railArt(figures: RailArtFigures, iconOnly: ReadonlySet<Compactable> = new Set()): RailPill[] {
@@ -98,13 +99,15 @@ export function railArt(figures: RailArtFigures, iconOnly: ReadonlySet<Compactab
 
   const pill = (id: string, width: number, tab: RailPill['tab'], caption: string, draw: (left: number) => string) => {
     const whole = Math.ceil(width)
+    const shown = Math.ceil(whole * SCALE)
+    const tall = Math.round(HEIGHT * SCALE)
     const svg = (isHot: boolean) => {
       const inner = `<rect x="0.5" y="0.5" width="${whole - 1}" height="${HEIGHT - 1}" rx="${(HEIGHT - 1) / 2}" class="pill${isHot ? ' hot' : ''}"/>${draw(0)}`
       // Theme colours are custom properties, which a presentation attribute
       // does not read everywhere; a style declaration does.
-      return `<svg xmlns="http://www.w3.org/2000/svg" width="${whole}" height="${HEIGHT}" viewBox="0 0 ${whole} ${HEIGHT}">${STYLE}${DEFS}${paint(inner)}</svg>`
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="${shown}" height="${tall}" viewBox="0 0 ${whole} ${HEIGHT}">${STYLE}${DEFS}${paint(inner)}</svg>`
     }
-    pills.push({ id, tab, caption, width: whole, height: HEIGHT, source: svg(false), hotSource: svg(true) })
+    pills.push({ id, tab, caption, width: shown, height: tall, source: svg(false), hotSource: svg(true) })
   }
 
   {
@@ -134,21 +137,12 @@ export function railArt(figures: RailArtFigures, iconOnly: ReadonlySet<Compactab
     const sent = compact(figures.tokens.input)
     const received = compact(figures.tokens.output)
     const cost = figures.costUsd === null ? null : `≈ $${figures.costUsd.toFixed(2)}`
-    const isShort = iconOnly.has('tokens')
-    const outX = 12 + 14 + textWidth(sent, 12.5, true) + 12
-    const costX = isShort ? outX : outX + 14 + textWidth(received, 12.5, true) + 10
-    const width = (cost === null ? costX - 10 : costX + 10 + textWidth(cost, 12.5)) + 12
-    const caption = isShort
-      ? `↓ ${received} received` + (cost === null ? '' : ` · ${cost} at API list prices, not your bill`)
-      : cost === null
-        ? `${sent} tokens sent, ${received} received`
-        : `${cost} at API list prices, not your bill`
-    pill('tokens', width, 'context', caption, left => {
-      const text = (x: number, value: string) => `<text x="${left + x}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5" font-weight="600" fill="var(--text)" class="num">${value}</text>`
-      const spend = cost === null ? '' : `<rect x="${left + costX - 0.5}" y="${mid - 7}" width="1" height="14" fill="var(--pillLine)"/><text x="${left + costX + 10}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5" fill="var(--dim)" class="num">${escape(cost)}</text>`
-      const back = isShort ? '' : `${arrow(left + outX, mid, false)}${text(outX + 14, received)}`
-      return `${arrow(left + 12, mid, true)}${text(12 + 14, sent)}${back}${spend}`
-    })
+    // The cost when Claude Code has one, the tokens sent when it has not; the
+    // tokens either way under the pointer.
+    const label = cost ?? sent
+    const width = 12 + 12 + 7 + textWidth(label, 12.5, true) + 14
+    const caption = `↑ ${sent} sent · ↓ ${received} received` + (cost === null ? '' : ' · API list price, not your bill')
+    pill('tokens', width, 'context', caption, left => `${updown(left + 12, mid)}<text x="${left + 12 + 12 + 7}" y="${mid + 4.4}" font-family="${SANS}" font-size="12.5" font-weight="600" fill="var(--text)" class="num">${escape(label)}</text>`)
   }
 
   {

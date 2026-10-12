@@ -98,9 +98,9 @@ test('on the desktop each rail pill is a picture whose hover the surface lights 
   // hidden, for the surface to reveal on hover: no hook, nothing moves.
   expect(await keysOf(band, /^rail-.*-press$/)).toEqual(['rail-brand-press', 'rail-cache-press', 'rail-tokens-press', 'rail-dials-press', 'rail-sources-press', 'rail-worktree-press'])
   const drawn = JSON.stringify(await band.drawn())
-  expect(drawn).toContain('>112k<')
-  expect(drawn).toContain('>1.6k<')
-  expect(drawn).toContain('≈ $0.42')
+  // The tokens pill shows the cost alone; the tokens wait in its caption.
+  expect(drawn).toContain('>≈ $0.42<')
+  expect(drawn).not.toContain('>112k<')
   // The pointer reaches the plugin through each pill's Client: entering lights
   // that pill and fills the caption row, which is always there.
   const lit = async () => {
@@ -124,7 +124,7 @@ test('on the desktop each rail pill is a picture whose hover the surface lights 
     await band.redraw()
   }
   await point('tokens', 'enter')
-  expect(await lit()).toEqual({ hot: ['tokens'], caption: '≈ $0.42 at API list prices, not your bill' })
+  expect(await lit()).toEqual({ hot: ['tokens'], caption: '↑ 112k sent · ↓ 1.6k received · API list price, not your bill' })
   // One row: the caption sits beside the pills, and nothing wraps.
   const row = byKey(await band.drawn(), 'rail-row') as { props: Record<string, unknown>; children: { props: { key?: string } }[] }
   expect(row.props).toMatchObject({ flexWrap: 'nowrap', overflow: 'hidden' })
@@ -163,28 +163,27 @@ test('on the desktop the rail fits its one row: the least needed pills give up t
     })
     const tree = await band.drawn()
     const ids = ['brand', 'cache', 'tokens', 'dials', 'sources', 'worktree']
-    const svgs = ids.map(id => (byKey(tree, `drawn-rail-${id}-press`) as { children: { props: { source: string; width: number; alt: string } }[] }).children[0]!.props)
+    const svgs = ids.map(id => (byKey(tree, `drawn-rail-${id}-press`) as { children: { props: { source: string; width: number; height: number; alt: string } }[] }).children[0]!.props)
     const width = svgs.reduce((sum, svg) => sum + svg.width, 0) + (svgs.length - 1) * 7
     const worded = Object.fromEntries(ids.map((id, index) => [id, /<text/.test(svgs[index]!.source) && !(id === 'sources' && !svgs[index]!.source.includes(' sources'))]))
     return { width, worded, svgs }
   }
   // Wide: every pill keeps its words.
   const wide = await at(200)
+  // Slim: every pill under 25px tall, and all six whole fit 120 columns.
+  expect(Math.max(...wide.svgs.map(svg => svg.height))).toBeLessThanOrEqual(25)
+  expect((await at(120)).worded).toEqual({ brand: true, cache: false, tokens: true, dials: true, sources: true, worktree: true })
+  expect((await at(120)).width).toBeLessThanOrEqual((120 - 3) * 7)
   expect(wide.worded).toEqual({ brand: true, cache: false, tokens: true, dials: true, sources: true, worktree: true })
-  // About 700px: the wordmark goes first, and the row fits.
-  const mid = await at(100)
-  expect(mid.width).toBeLessThanOrEqual((100 - 3) * 7)
-  expect(mid.worded.brand).toBe(false)
-  expect(mid.worded.tokens).toBe(true)
-  // Narrow: every pill that can is an icon, and the tokens keep what was
-  // sent and the cost; what came back moves to the caption. It still fits.
-  const narrow = await at(70)
-  expect(narrow.width).toBeLessThanOrEqual((70 - 3) * 7)
+  // About 560px: the wordmark goes first, and the row fits.
+  const mid = await at(80)
+  expect(mid.width).toBeLessThanOrEqual((80 - 3) * 7)
+  expect(mid.worded).toEqual({ brand: false, cache: false, tokens: true, dials: true, sources: true, worktree: true })
+  const narrow = await at(60)
+  expect(narrow.width).toBeLessThanOrEqual((60 - 3) * 7)
   expect(narrow.worded).toEqual({ brand: false, cache: false, tokens: true, dials: false, sources: false, worktree: false })
-  expect(narrow.svgs[2]!.source).toContain('≈ $0.42')
-  expect(narrow.svgs[2]!.source).toContain('>14.7M<')
-  expect(narrow.svgs[2]!.source).not.toContain('>67.0k<')
-  expect(narrow.svgs[2]!.alt).toBe('↓ 67.0k received · ≈ $0.42 at API list prices, not your bill')
+  expect(narrow.svgs[2]!.source).toContain('>≈ $0.42<')
+  expect(narrow.svgs[2]!.alt).toBe('↑ 14.7M sent · ↓ 67.0k received · API list price, not your bill')
   // An icon still says what it stands for when hovered.
   expect(narrow.svgs[3]!.alt).toBe('Dials: Balanced · tune how the agent works')
 })

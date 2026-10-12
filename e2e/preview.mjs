@@ -149,14 +149,8 @@ for (const line of lines) {
   const tree = JSON.parse(line.slice(`PREVIEW ${name} `.length))
   rules = []
   const body = render(tree)
-  const page = lit => `<!doctype html><meta charset="utf-8"><title>${name}</title><style>${CSS}${rules.join('')}</style><body${lit ? ` data-lit="${lit}"` : ''}><div class="pane">${body}</div><script>${HOVER}</script></body>`
-  fs.writeFileSync(path.join(out, `${name}.html`), page(null))
+  fs.writeFileSync(path.join(out, `${name}.html`), `<!doctype html><meta charset="utf-8"><title>${name}</title><style>${CSS}${rules.join('')}</style><body><div class="pane">${body}</div><script>${HOVER}</script></body>`)
   index.push(name)
-  // The rail lit as a pointer on its tokens pill leaves it.
-  if (name === 'rail') {
-    fs.writeFileSync(path.join(out, 'rail-hover.html'), page('craft-rail-tokens'))
-    index.push('rail-hover')
-  }
 }
 fs.writeFileSync(path.join(out, 'index.html'), `<!doctype html><meta charset="utf-8"><style>${CSS}</style><body style="padding:16px">${index.map(n => `<p><a style="color:#8fa8ff" href="${n}.html">${n}</a></p>`).join('')}</body>`)
 console.log(`${index.length} previews in ${out}`)

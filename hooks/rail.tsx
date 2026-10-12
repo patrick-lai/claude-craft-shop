@@ -25,34 +25,29 @@ export type RailFigures = {
 }
 
 // On the desktop each pill is its own picture with a Client over it for the
-// press (kit.tsx's drawnButton). Hovers never reach the hooks: the surface
-// swaps in the lit drawing and reveals the pill's caption in a row that is
-// always there, so nothing moves under the pointer.
-export function drawRail(ui: Ui, figures: RailFigures, open: (tab: Tab | null) => void) {
+// press and the hover (kit.tsx's drawnButton). The hovered pill swaps to its
+// lit drawing, the same size, and its caption fills a row that is always
+// there, so nothing moves under the pointer.
+export function drawRail(ui: Ui, figures: RailFigures, open: (tab: Tab | null) => void, hover: string | null, onHover: (id: string, isOn: boolean) => void) {
   const { Box, Text, Button, Svg } = ui
   if (Svg !== undefined && ui.Client !== undefined) {
     const pills = railArt(figures)
+    const caption = pills.find(pill => pill.id === hover)?.caption ?? ''
     return (
       <Box flexDirection="column">
-        <Box key="rail-caption" height={1} overflow="hidden" position="relative">
-          <Text> </Text>
-          {pills.map(pill => (
-            <Box key={`caption-${pill.id}`} position="absolute" top={0} left={0} right={0} display="none" hover={{ display: 'flex', scope: `craft-rail-${pill.id}` }}>
-              <Text dimColor wrap="truncate-end">
-                {pill.caption}
-              </Text>
-            </Box>
-          ))}
+        <Box key="rail-caption" height={1} overflow="hidden">
+          <Text dimColor wrap="truncate-end">
+            {caption === '' ? ' ' : caption}
+          </Text>
         </Box>
         <Box gap={1} alignItems="center" flexWrap="wrap">
-          {pills.map(pill => (
-            <Box key={`rail-${pill.id}`} position="relative" flexShrink={0} hover={{ scope: `craft-rail-${pill.id}` }}>
-              {drawnButton(ui, `rail-${pill.id}-press`, pill.source, pill.caption, pill.width, pill.height, () => open(pill.tab === 'pane' ? null : pill.tab))}
-              <Box position="absolute" top={0} left={0} display="none" hover={{ display: 'flex', scope: `craft-rail-${pill.id}` }}>
-                <Svg source={pill.hotSource} alt={pill.caption} width={pill.width} height={pill.height} />
-              </Box>
-            </Box>
-          ))}
+          {pills.map(pill =>
+            drawnButton(ui, `rail-${pill.id}-press`, pill.source, pill.caption, pill.width, pill.height, () => open(pill.tab === 'pane' ? null : pill.tab), {
+              hotSource: pill.hotSource,
+              isHot: pill.id === hover,
+              onHover: isOn => onHover(pill.id, isOn),
+            }),
+          )}
         </Box>
       </Box>
     )

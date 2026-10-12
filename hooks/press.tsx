@@ -1,14 +1,20 @@
 // The surface module laid over a drawn control (drawnButton in kit.tsx): a
 // press anywhere on it posts, and the press hook in pane.tsx runs what the
-// drawing registered under this Client's key. It draws nothing itself.
+// drawing registered under this Client's key. Given `hovers`, the pointer
+// entering and leaving posts too, so the control can light. It draws nothing.
 import type { ClientModule } from 'claude-code'
 
-const Press: ClientModule<Record<string, never>, true> = (props, surface) => {
+type Props = { hovers?: boolean }
+
+const Press: ClientModule<Props, true> = (props, surface) => {
   const { Box } = surface.elements
   if (surface.state === undefined) {
     surface.setState(true)
+    const hovers = props.hovers === true
     surface.onPointer(event => {
       if (event.type === 'down' && event.button !== 'right') surface.post({ press: true })
+      else if (hovers && event.type === 'enter') surface.post({ hover: true })
+      else if (hovers && event.type === 'leave') surface.post({ hover: false })
     })
   }
   return <Box width={surface.columns} height={surface.rows} />

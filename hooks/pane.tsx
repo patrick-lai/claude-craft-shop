@@ -1,7 +1,7 @@
 import { atom, update } from 'claude-code'
 import type { CommandSpec, On } from 'claude-code'
 
-import { pressHandlers } from './kit'
+import { hoverHandlers, pressHandlers } from './kit'
 import { isTab, PANE, PANE_TITLE, TABS } from './ui'
 
 const tab = atom({ plugin: 'craft-shop', key: 'tab' } as const, 'worktree')
@@ -20,9 +20,12 @@ export function registerPane(on: On): void {
     return next(e)
   })
 
-  // Every other drawn control: its press runs what its drawing registered.
+  // Every other drawn control: its press, or the pointer entering or leaving
+  // it, runs what its drawing registered.
   on('ui.message', async ($, e, next) => {
-    if ((e.data as { press?: unknown } | null)?.press === true) pressHandlers.get(e.element)?.()
+    const data = e.data as { press?: unknown; hover?: unknown } | null
+    if (data?.press === true) pressHandlers.get(e.element)?.()
+    else if (typeof data?.hover === 'boolean') hoverHandlers.get(e.element)?.(data.hover)
     return next(e)
   })
 

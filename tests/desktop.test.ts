@@ -65,6 +65,11 @@ test('every tab draws on the desktop with content in it', async ($, on) => {
     props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 120, scroll: { offset: 0, bodyRows: 10 }, view: {} },
   })
   await show(band, 'rail')
+  // The pointer on the tokens pill, as its Client reports it.
+  await band.resize({ columns: 20, rows: 1, in: 'rail-tokens-press' })
+  await band.pointer({ type: 'enter', x: 5, y: 0, in: 'rail-tokens-press' })
+  await band.redraw()
+  await show(band, 'rail-hover')
 })
 
 test('the worktree tab draws its steps and slots on the desktop', { options: { autoWorktree: true } }, async ($, on) => {

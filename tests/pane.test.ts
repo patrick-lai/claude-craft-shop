@@ -101,10 +101,43 @@ test('on the desktop each rail pill is a picture whose hover the surface lights 
   expect(drawn).toContain('>112k<')
   expect(drawn).toContain('>1.6k<')
   expect(drawn).toContain('≈ $0.42')
-  const caption = byKey(await band.drawn(), 'caption-tokens')
-  expect(caption).toMatchObject({ props: { display: 'none' }, hover: { display: 'flex', scope: 'craft-rail-tokens' } })
-  expect(JSON.stringify(caption)).toContain('at API list prices, not your plan')
-  expect(byKey(await band.drawn(), 'rail-tokens')).toMatchObject({ hover: { scope: 'craft-rail-tokens' } })
+  // The pointer reaches the plugin through each pill's Client: entering lights
+  // that pill and fills the caption row, which is always there.
+  const lit = async () => {
+    const tree = await band.drawn()
+    const hot = ['brand', 'cache', 'tokens', 'dials', 'sources', 'worktree'].filter(
+      id => (byKey(tree, `hot-rail-${id}-press`) as { props: { display: string } }).props.display === 'flex',
+    )
+    const caption = ((await band.find({ key: 'rail-caption' }))?.text ?? '').trim()
+    return { hot, caption }
+  }
+  // The layout, hover aside: every Box's key and size.
+  const layout = async () =>
+    JSON.stringify(await band.drawn(), function (this: { type?: string }, key, value) {
+      return key === 'display' || (key === 'children' && this.type === 'Text') ? undefined : value
+    })
+  const resting = await layout()
+  expect(await lit()).toEqual({ hot: [], caption: '' })
+  const point = async (id: string, type: 'enter' | 'leave') => {
+    await band.resize({ columns: 6, rows: 1, in: `rail-${id}-press` })
+    await band.pointer({ type, x: 2, y: 0, in: `rail-${id}-press` })
+    await band.redraw()
+  }
+  await point('tokens', 'enter')
+  expect(await lit()).toEqual({ hot: ['tokens'], caption: expect.stringContaining('at API list prices, not your plan') })
+  expect((byKey(await band.drawn(), 'hot-rail-tokens-press') as { children: { props: { source: string } }[] }).children[0]!.props.source).toContain('class="pill hot"')
+  expect(await layout()).toBe(resting)
+  // Straight onto the next pill, its leave landing after: only the new one lit.
+  await point('dials', 'enter')
+  await point('tokens', 'leave')
+  expect(await lit()).toEqual({ hot: ['dials'], caption: expect.stringContaining('Dials: Balanced') })
+  // A post that is not a hover changes nothing.
+  await band.post({ hover: 'x' }, { in: 'rail-dials-press' })
+  await band.redraw()
+  expect((await lit()).hot).toEqual(['dials'])
+  await point('dials', 'leave')
+  expect(await lit()).toEqual({ hot: [], caption: '' })
+  expect(await layout()).toBe(resting)
 
   await activate(band, 'rail-dials-press')
   const pane = await mountPane($, 'desktop')

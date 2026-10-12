@@ -279,17 +279,33 @@ export function cacheGauge(secondsLeft: number, isWorking: boolean, hitPercent: 
 // drawing is made, run by the press hook in pane.tsx.
 export const pressHandlers = new Map<string, () => void>()
 
+// What a drawn control that lights on hover runs as the pointer enters and
+// leaves it, by its Client's key; run by the same hook in pane.tsx.
+export const hoverHandlers = new Map<string, (isOn: boolean) => void>()
+
+// How a drawn control lights: its lit picture, the same size, drawn always and
+// shown in place of the one at rest while `isHot`, so no image loads on hover.
+export type DrawnHover = { hotSource: string; isHot: boolean; onHover: (isOn: boolean) => void }
+
 // A picture that presses like a Button on the desktop: the Svg with a Client
 // laid over it. Where there is no Client, the caller draws a Button instead.
-export function drawnButton(ui: Ui, key: string, source: string, alt: string, width: number, height: number, onPress: () => void) {
+// The Client holds the pointer, so a hover reaches the plugin through it,
+// never through a Box's hover props.
+export function drawnButton(ui: Ui, key: string, source: string, alt: string, width: number, height: number, onPress: () => void, hover?: DrawnHover) {
   const { Box, Svg, Client } = ui
   if (Svg === undefined || Client === undefined) return null
   pressHandlers.set(key, onPress)
+  if (hover !== undefined) hoverHandlers.set(key, hover.onHover)
   return (
     <Box key={`drawn-${key}`} position="relative" flexShrink={0}>
       <Svg source={source} alt={alt} width={width} height={height} />
+      {hover !== undefined && (
+        <Box key={`hot-${key}`} position="absolute" top={0} left={0} display={hover.isHot ? 'flex' : 'none'}>
+          <Svg source={hover.hotSource} alt={alt} width={width} height={height} />
+        </Box>
+      )}
       <Box position="absolute" top={0} left={0} right={0} bottom={0}>
-        <Client key={key} module="./press.tsx" props={{}} width="100%" height="100%" />
+        <Client key={key} module="./press.tsx" props={{ hovers: hover !== undefined }} width="100%" height="100%" />
       </Box>
     </Box>
   )

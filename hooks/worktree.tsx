@@ -36,6 +36,9 @@ const isStepsShown = atom({ plugin: 'craft-shop', key: 'isStepsShown' } as const
 const dials = atom({ plugin: 'craft-shop', key: 'dials' } as const, BALANCED)
 const sources = atom({ plugin: 'craft-shop', key: 'sources' } as const, [])
 const lastReplyAt = atom({ plugin: 'craft-shop', key: 'lastReplyAt' } as const, null)
+// The rail pill under the pointer, kept to this process: a hover is one
+// window's, not the session's.
+let railHover: string | null = null
 const tokenTotals = atom({ plugin: 'craft-shop', key: 'tokenTotals' } as const, null)
 
 type $ = EngineInterface
@@ -497,7 +500,10 @@ export function registerWorktree(on: On, options: PluginOptions): void {
       $.clock.after(0, () => void $.ui.open({ id: PANE, title: PANE_TITLE }))
     }
     const state = await read($, worktree)
-    if (e.props.hasSurvey) return next(e)
+    if (e.props.hasSurvey) {
+      railHover = null
+      return next(e)
+    }
     if (state.phase === 'off' || (await read($, isBandHidden))) {
       // With no worktree news, the band is Craftshop's status rail. Reading
       // isTurnRunning redraws it as each turn starts and ends.
@@ -528,9 +534,19 @@ export function registerWorktree(on: On, options: PluginOptions): void {
           branch: state.phase === 'ready' ? state.branch : null,
         },
         at => void openAt($, at),
+        railHover,
+        (id, isOn) => {
+          // Leaving A may land after entering B: only A's own leave clears it.
+          const hovered = isOn ? id : railHover === id ? null : railHover
+          if (hovered === railHover) return
+          railHover = hovered
+          $.ui.invalidate('ui.render')
+        },
       )
     }
 
+    // The rail is not drawn, so its Clients send no leave: start unlit.
+    railHover = null
     const { Box, Text, Button } = $.ui.resolve(e)
     if (state.phase === 'preparing') {
       return (

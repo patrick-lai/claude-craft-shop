@@ -1,0 +1,6 @@
+.agents/
+.claude/
+.commission/
+.claude-plugin/types/
+node_modules/
+e2e/out/

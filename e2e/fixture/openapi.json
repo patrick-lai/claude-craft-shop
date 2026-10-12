@@ -1,0 +1,37 @@
+{
+  "openapi": "3.0.3",
+  "info": { "title": "Workshop API", "version": "1.0.0" },
+  "paths": {
+    "/": {
+      "get": { "tags": ["health"], "summary": "Health check", "responses": { "200": { "description": "The server is up" } } }
+    },
+    "/items": {
+      "get": {
+        "tags": ["items"],
+        "summary": "List items",
+        "responses": { "200": { "description": "Every item" } }
+      },
+      "post": {
+        "tags": ["items"],
+        "summary": "Create an item",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "type": "object", "properties": { "name": { "type": "string" } }, "required": ["name"] },
+              "example": { "name": "Plane" }
+            }
+          }
+        },
+        "responses": { "201": { "description": "Created" }, "422": { "description": "Missing name" } }
+      }
+    },
+    "/items/{id}": {
+      "get": {
+        "tags": ["items"],
+        "summary": "Get one item",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "The item" }, "404": { "description": "No such item" } }
+      }
+    }
+  }
+}

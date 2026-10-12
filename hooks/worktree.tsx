@@ -388,8 +388,14 @@ async function freeKb($: $, dir: string): Promise<number> {
 // least one of them idle, each made, seeded and set up ahead of any session,
 // one at a time in the background. Stops below MIN_FREE_KB of free disk.
 let isWarming = false
+// A top-up asked for while one runs: run once more when it ends, as a claim
+// made meanwhile may have taken the spare it was counting on.
+let isWarmAgain = false
 async function prewarm($: $, options: PluginOptions, main: string): Promise<void> {
-  if (isWarming) return
+  if (isWarming) {
+    isWarmAgain = true
+    return
+  }
   isWarming = true
   try {
     const repoDir = await slotsRoot($, options, main)
@@ -431,6 +437,10 @@ async function prewarm($: $, options: PluginOptions, main: string): Promise<void
     await update($, poolNote, () => (error instanceof StepError ? `Warming stopped: ${error.message}` : 'Warming stopped.'))
   } finally {
     isWarming = false
+    if (isWarmAgain) {
+      isWarmAgain = false
+      $.clock.after(0, () => void prewarm($, options, main))
+    }
   }
 }
 
@@ -551,6 +561,12 @@ async function startWorktree($: $, options: PluginOptions, cwd: string, isForced
   if (hasStarted) return
   hasStarted = true
   const current = await read($, worktree)
+  // On, the pool is checked at every load: a reload stops a warming run
+  // midway, and a pool left short by other sessions tops up here.
+  if (await isAutoOn($, options)) {
+    const poolMain = current.main ?? (await repoMain($))
+    if (poolMain !== null) $.clock.after(0, () => void prewarm($, options, poolMain))
+  }
   if (current.phase === 'ready' && current.path !== null) {
     startHeartbeat($, current.path)
     return

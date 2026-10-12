@@ -40,45 +40,47 @@ test('a note added in the one field reaches the agent, Strict when pressed, and 
   expect(await ui.find({ text: /0 of 2/ })).toBeDefined()
 })
 
-test('a folder groups sources, switches them at once and names them for the agent', async ($, on) => {
+test('a chosen folder is one group: switched at once, named for the agent, removed whole', async ($, on) => {
   world(on, { isRepo: false })
+  on('fs.list', () => ({
+    value: [
+      { name: 'refunds.md', kind: 'file', size: 10, mtimeMs: 0, isLink: false },
+      { name: 'currency.md', kind: 'file', size: 10, mtimeMs: 0, isLink: false },
+    ],
+  }))
+  on('fs.read', ($, e) => ({ value: `contents of ${e.path}` }))
   await startSession($)
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await mountPane($, surface)
     await ui.press({ key: 'tab-context' })
-    await ui.press({ key: 'folder-new' })
-    await ui.input({ key: 'folder-name', text: `Payments ${surface}` })
-    // A new folder becomes where new sources go.
-    expect(await ui.find({ text: new RegExp(`New sources go into Payments ${surface}`) }), surface).toBeDefined()
-    await ui.input({ key: 'add-input', text: 'Refunds settle in 5 business days.' })
-    await ui.input({ key: 'add-input', text: 'Amounts are integer cents.' })
-    expect(await ui.find({ text: /2 sources · 2 on/ }), surface).toBeDefined()
+    expect(await ui.find({ type: 'Button', key: 'folder-new' }), surface).toBeUndefined()
     await ui.unmount()
   }
-  expect(await contextSection($)).toContain('### Payments terminal › Refunds settle in 5 business days.')
 
   const ui = await mountPane($, 'terminal')
-  const [first] = (await ui.findAll({ type: 'Button' })).filter(one => one.key?.startsWith('folder-toggle-'))
-  await ui.press({ key: first!.key! })
-  expect(await contextSection($)).not.toContain('Payments terminal')
-  expect(await contextSection($)).toContain('Payments desktop')
+  await ui.press({ key: 'tab-context' })
+  await ui.press({ key: 'pick-folder' })
+  expect(await ui.find({ text: /2 sources · 2 on/ })).toBeDefined()
+  expect(await contextSection($)).toContain('### docs › refunds.md (docs/refunds.md)')
+
+  await ui.press({ key: await keyOf(ui, /^folder-toggle-/) })
+  expect(await contextSection($)).toBeUndefined()
 
   // One member back on leaves the folder partly on.
-  const [member] = (await ui.findAll({ type: 'Button' })).filter(one => one.key?.startsWith('toggle-'))
-  await ui.press({ key: member!.key! })
+  await ui.press({ key: await keyOf(ui, /^toggle-/) })
   expect(await ui.find({ text: /Some on/ })).toBeDefined()
 
-  // Deleting a folder but keeping its sources leaves them loose.
-  const [menu] = (await ui.findAll({ type: 'Button' })).filter(one => one.key?.startsWith('folder-menu-'))
-  await ui.press({ key: menu!.key! })
-  const [deleteKey] = (await ui.findAll({ type: 'Button' })).filter(one => one.key?.startsWith('folder-delete-'))
-  await ui.press({ key: deleteKey!.key! })
-  await ui.press({ key: 'delete-folder-keep' })
-  expect(await contextSection($)).toContain('### Refunds settle in 5 business days.')
+  // Removing the folder takes its sources with it.
+  await ui.press({ key: await keyOf(ui, /^folder-delete-/) })
+  await ui.press({ key: 'delete-folder' })
+  expect(await contextSection($)).toBeUndefined()
+  expect(await ui.find({ text: /No sources yet/ })).toBeDefined()
 })
 
-test('a view saved by an older version still draws, and a new folder works from it', async ($, on) => {
+test('a view saved by an older version still draws, and a folder comes in from it', async ($, on) => {
   world(on, { isRepo: false })
+  on('fs.list', () => ({ value: [{ name: 'adr.md', kind: 'file', size: 10, mtimeMs: 0, isLink: false }] }))
+  on('fs.read', ($, e) => ({ value: `contents of ${e.path}` }))
   // What the folder-cards version left in $.state, which outlives a reload:
   // served until this version writes the view.
   const older = { folderId: null, openId: null, adding: null, isRenaming: false, isConfirmingDelete: false }
@@ -94,30 +96,25 @@ test('a view saved by an older version still draws, and a new folder works from 
   await startSession($)
   const ui = await mountPane($, 'desktop')
   await ui.press({ key: 'tab-context' })
-  await ui.press({ key: 'folder-new' })
-  await ui.input({ key: 'folder-name', text: 'Payments' })
   expect(await ui.drawn()).toBeDefined()
-  expect(await ui.find({ text: /New sources go into Payments/ })).toBeDefined()
+  await ui.input({ key: 'add-input', text: 'docs/' })
+  expect(await ui.drawn()).toBeDefined()
+  expect(await ui.find({ text: /1 source · 1 on/ })).toBeDefined()
 })
 
-test('a source opens in place to rename, move into a folder and delete', async ($, on) => {
+test('a source opens in place to rename and delete', async ($, on) => {
   world(on, { isRepo: false })
   await startSession($)
   const ui = await mountPane($, 'desktop')
   await ui.press({ key: 'tab-context' })
-  await ui.press({ key: 'folder-new' })
-  await ui.input({ key: 'folder-name', text: 'Docs' })
-  await ui.select({ key: 'add-target', value: '' })
   await ui.input({ key: 'add-input', text: 'Use tabs.' })
 
   const open = await keyOf(ui, /^open-/)
   await ui.press({ key: open })
   const id = open.slice('open-'.length)
+  expect(await ui.find({ type: 'Select', key: `move-${id}` })).toBeUndefined()
   await ui.input({ key: `rename-source-${id}`, text: 'Indentation' })
   expect(await contextSection($)).toContain('### Indentation')
-  const move = (await ui.find({ type: 'Select', key: `move-${id}` }))!.props as { options: { value: string }[] }
-  await ui.select({ key: `move-${id}`, value: move.options.find(one => one.value !== '')!.value })
-  expect(await contextSection($)).toContain('### Docs › Indentation')
 
   await ui.press({ key: `remove-${id}` })
   expect(await contextSection($)).toBeUndefined()

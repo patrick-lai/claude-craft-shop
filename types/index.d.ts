@@ -41,22 +41,17 @@ export type Source = {
 export type Folder = { id: string; name: string }
 
 // Where the Context tab is: which folders are open, which source shows its
-// details, which folder new sources go into, and which form or confirmation
-// shows.
+// details, which file dialog or confirmation shows.
 export type ContextView = {
   openFolders: string[]
   openId: string | null
-  target: string | null
-  isNamingFolder: boolean
   // Which file dialog is open, while one is.
   picking: 'file' | 'folder' | null
-  menuFolder: string | null
-  renamingFolder: string | null
   deletingFolder: string | null
   isEditingText: boolean
 }
 
-export type ContextDraft = { input: string; name: string }
+export type ContextDraft = { input: string }
 
 declare module 'claude-code' {
   interface PluginState {

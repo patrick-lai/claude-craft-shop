@@ -22,22 +22,22 @@ async function buttons(ui: Drawing, key: RegExp) {
 
 test('every tab draws on the desktop with content in it', async ($, on) => {
   world(on, { isRepo: false })
+  on('fs.list', () => ({
+    value: [
+      { name: 'refunds.md', kind: 'file', size: 10, mtimeMs: 0, isLink: false },
+      { name: 'currency.md', kind: 'file', size: 10, mtimeMs: 0, isLink: false },
+    ],
+  }))
+  on('fs.read', ($, e) => ({ value: e.path.endsWith('refunds.md') ? 'Refunds settle in 5 business days. Partial refunds keep the original currency.' : 'Amounts are integer cents. Never use floats for money.' }))
   await startSession($)
   const ui = await mountPane($, 'desktop')
 
   await ui.press({ key: 'tab-context' })
   await show(ui, 'context-empty')
 
-  await ui.press({ key: 'folder-new' })
-  await show(ui, 'context-new-folder')
-  await ui.input({ key: 'folder-name', text: 'Payments' })
-  await ui.input({ key: 'add-input', text: 'Refunds settle in 5 business days. Partial refunds keep the original currency.' })
-  await ui.input({ key: 'add-input', text: 'Amounts are integer cents. Never use floats for money.' })
+  await ui.press({ key: 'pick-folder' })
   const [strict] = await buttons(ui, /^strict-/)
   await ui.press({ key: strict!.key! })
-  await ui.press({ key: 'folder-new' })
-  await ui.input({ key: 'folder-name', text: 'Design system' })
-  await ui.select({ key: 'add-target', value: '' })
   await ui.input({ key: 'add-input', text: 'Every endpoint returns JSON with snake_case keys. Paginate with cursor, never offset.' })
   await ui.input({ key: 'add-input', text: 'https://example.com/style' })
   const [off] = (await buttons(ui, /^toggle-/)).slice(-1)

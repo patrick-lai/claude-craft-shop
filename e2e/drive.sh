@@ -91,16 +91,13 @@ pass 'the agent echoes the working style it was given'
 
 echo '3. Context library'
 c type craft '/craft context'
-c click craft 'New folder' 0
-c click craft 'Folder name' 0
-c type craft 'Launch'
-c wait craft 'New sources go into Launch' 10
-pass 'a new folder becomes where new sources go'
-c click craft 'Paste a link' 0
+c click craft 'Or paste a link' 0
 c type craft "The Workshop API's launch codename is BLUE HERON."
-c wait craft '1 source · 1 on' 10
+c wait craft '1 of 1 sources on' 10
+pass 'a note added in the field is on'
 c click craft 'Make strict' 0
-pass 'a strict note sits in the Launch folder'
+c wait craft 'Strict' 10
+pass 'the note is strict'
 c shot craft "$out/05-context.ansi"
 tmux send-keys -t craft Escape
 c ask craft "What is the Workshop API's launch codename? Answer in two words."

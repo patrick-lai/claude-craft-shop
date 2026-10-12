@@ -11,16 +11,12 @@ import { card, chip, folderArt, glyph, GLYPH_COLOR, isRich, svg, tickMeter, trac
 import { bar, frame, PANE, resolveUi, tokens } from './ui'
 import type { Ui } from './ui'
 
-const contextDraft = atom({ plugin: 'craft-shop', key: 'contextDraft' } as const, { input: '', name: '' })
+const contextDraft = atom({ plugin: 'craft-shop', key: 'contextDraft' } as const, { input: '' })
 const contextStatus = atom({ plugin: 'craft-shop', key: 'contextStatus' } as const, '')
 const contextView = atom({ plugin: 'craft-shop', key: 'contextView' } as const, {
   openFolders: [],
   openId: null,
-  target: null,
-  isNamingFolder: false,
   picking: null,
-  menuFolder: null,
-  renamingFolder: null,
   deletingFolder: null,
   isEditingText: false,
 })
@@ -161,11 +157,7 @@ async function newId($: $): Promise<string> {
 const VIEW: ContextView = {
   openFolders: [],
   openId: null,
-  target: null,
-  isNamingFolder: false,
   picking: null,
-  menuFolder: null,
-  renamingFolder: null,
   deletingFolder: null,
   isEditingText: false,
 }
@@ -189,11 +181,8 @@ async function say($: $, text: string): Promise<void> {
 }
 
 async function addSource($: $, source: Omit<Source, 'id' | 'mode' | 'folderId'>): Promise<Source> {
-  const { target } = await readView($)
-  const added: Source = { ...source, id: await newId($), mode: 'guidance', folderId: target }
+  const added: Source = { ...source, id: await newId($), mode: 'guidance', folderId: null }
   await saveSources($, list => [...list, added])
-  // A source added into a folder shows there: the folder opens.
-  if (target !== null) await updateView($, now => ({ ...now, openFolders: [...new Set([...now.openFolders, target])] }))
   return added
 }
 
@@ -358,18 +347,6 @@ async function importDirectory($: $, directory: string, path: string): Promise<v
   await clearInput($, `Added ${path} as a folder of ${files.length} files`)
 }
 
-async function addFolder($: $, raw: string): Promise<void> {
-  const name = raw.trim()
-  if (name === '') return setView($, { isNamingFolder: false })
-  const folder: Folder = { id: await newId($), name }
-  await update($, folders, list => [...list, folder])
-  await save($)
-  await update($, contextDraft, now => ({ ...now, name: '' }))
-  await setView($, { isNamingFolder: false, target: folder.id })
-  await updateView($, now => ({ ...now, openFolders: [...now.openFolders, folder.id] }))
-  await say($, `Made ${name}. New sources go into ${name} until you pick another folder.`)
-}
-
 async function refresh($: $, source: Source): Promise<void> {
   await say($, `Refreshing ${source.title}`)
   let text: string | null = null
@@ -397,11 +374,6 @@ async function setFolderOn($: $, folderId: string, isOn: boolean): Promise<void>
   )
 }
 
-async function moveSource($: $, id: string, folderId: string | null): Promise<void> {
-  await saveSources($, list => list.map(one => (one.id === id ? { ...one, folderId } : one)))
-  if (folderId !== null) await updateView($, now => ({ ...now, openFolders: [...new Set([...now.openFolders, folderId])] }))
-}
-
 async function renameSource($: $, id: string, title: string): Promise<void> {
   if (title.trim() === '') return
   await saveSources($, list => list.map(one => (one.id === id ? { ...one, title: title.trim() } : one)))
@@ -417,19 +389,11 @@ async function removeSource($: $, id: string): Promise<void> {
   await setView($, { openId: null })
 }
 
-async function renameFolder($: $, id: string, name: string): Promise<void> {
-  if (name.trim() !== '') await update($, folders, list => list.map(one => (one.id === id ? { ...one, name: name.trim() } : one)))
-  await save($)
-  await setView($, { renamingFolder: null })
-}
-
-async function deleteFolder($: $, id: string, isKeepingSources: boolean): Promise<void> {
-  await update($, sources, list =>
-    isKeepingSources ? list.map(one => (one.folderId === id ? { ...one, folderId: null } : one)) : list.filter(one => one.folderId !== id),
-  )
+async function deleteFolder($: $, id: string): Promise<void> {
+  await update($, sources, list => list.filter(one => one.folderId !== id))
   await update($, folders, list => list.filter(one => one.id !== id))
   await save($)
-  await updateView($, now => ({ ...now, deletingFolder: null, target: now.target === id ? null : now.target, openFolders: now.openFolders.filter(one => one !== id) }))
+  await updateView($, now => ({ ...now, deletingFolder: null, openFolders: now.openFolders.filter(one => one !== id) }))
 }
 
 async function toggleFolderOpen($: $, id: string): Promise<void> {
@@ -443,7 +407,7 @@ export function registerContext(on: On): void {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
     if ((await read($, tab)) !== 'context') return next(e)
     const ui: Ui = resolveUi($.ui.resolve(e), e.surface)
-    const { Box, Text, Button, Input, Select, Markdown } = ui
+    const { Box, Text, Button, Input, Markdown } = ui
     const rich = isRich(ui)
     const list = await read($, sources)
     const groups = await read($, folders)
@@ -458,7 +422,6 @@ export function registerContext(on: On): void {
     const sharedTokens = approxTokens(sharedChars)
     const isOver = sharedTokens > TOKEN_BUDGET
     const loose = list.filter(one => one.folderId === null)
-    const targetName = view.target === null ? null : (groups.find(one => one.id === view.target)?.name ?? null)
     const isThin = (source: Source) => source.kind === 'link' && source.text.length < 200
 
     // On/Off is the main switch, drawn the same for a source and a folder.
@@ -481,7 +444,6 @@ export function registerContext(on: On): void {
     const sourceRow = (source: Source, isNested: boolean) => {
       const isOn = source.mode !== 'off'
       const isOpen = view.openId === source.id
-      const moveOptions = [{ value: '', label: 'No folder' }, ...groups.map(one => ({ value: one.id, label: one.name }))]
       const parts = [
               <Box justifyContent="space-between" alignItems="center" gap={1}>
                 <Box gap={1} alignItems="center" flexShrink={1}>
@@ -528,9 +490,6 @@ export function registerContext(on: On): void {
                         <Input key={`rename-source-${source.id}`} label="Title " value={source.title} submitLabel="rename" onSubmit={value => void renameSource($, source.id, value)} />
                       </Box>
                     )}
-                    {Select !== undefined && (
-                      <Select key={`move-${source.id}`} label="Folder " options={moveOptions} value={source.folderId ?? ''} onSelect={value => void moveSource($, source.id, value === '' ? null : value)} />
-                    )}
                   </Box>
                   <Box gap={1} justifyContent="flex-end" alignItems="center">
                     <Box flexGrow={1}>
@@ -563,7 +522,6 @@ export function registerContext(on: On): void {
       const onCount = members.filter(one => one.mode !== 'off').length
       const state = members.length === 0 || onCount === 0 ? 'off' : onCount === members.length ? 'on' : 'some'
       const isOpen = view.openFolders.includes(folder.id)
-      const isMenuOpen = view.menuFolder === folder.id
       return card(
         ui,
         `folder-card-${folder.id}`,
@@ -581,46 +539,28 @@ export function registerContext(on: On): void {
             </Box>
             <Box gap={1} alignItems="center" flexShrink={0}>
               {members.length > 0 && onOff(`folder-toggle-${folder.id}`, state, () => void setFolderOn($, folder.id, state !== 'on'))}
-              <Button key={`folder-menu-${folder.id}`} label="⋯" dimColor onPress={go({ menuFolder: isMenuOpen ? null : folder.id, renamingFolder: null, deletingFolder: null })} />
-            </Box>
-          </Box>,
-          isMenuOpen && (
-            <Box gap={1} justifyContent="flex-end" marginTop={1}>
-              <Button key={`folder-rename-${folder.id}`} label="Rename" dimColor onPress={go({ renamingFolder: folder.id, deletingFolder: null })} />
-              <Button key={`folder-delete-${folder.id}`} onPress={go({ deletingFolder: folder.id, renamingFolder: null })}>
-                <Text color="error">Delete folder</Text>
+              <Button key={`folder-delete-${folder.id}`} dimColor onPress={go({ deletingFolder: folder.id })}>
+                Remove
               </Button>
             </Box>
-          ),
-          view.renamingFolder === folder.id && Input !== undefined && (
-            <Box marginTop={1}>
-              <Input key="rename-folder" label="Name " value={folder.name} submitLabel="rename" autoFocus onSubmit={value => void renameFolder($, folder.id, value)} />
-            </Box>
-          ),
+          </Box>,
           view.deletingFolder === folder.id && (
             <Box flexDirection="column" marginTop={1} gap={1}>
               <Text>
-                Delete <Text bold>{folder.name}</Text>? <Text dimColor>The agent stops receiving its {members.length} sources.</Text>
+                Remove <Text bold>{folder.name}</Text> and its {members.length} sources? <Text dimColor>The files on disk stay as they are.</Text>
               </Text>
               <Box gap={1} justifyContent="flex-end" flexWrap="wrap">
-                <Button key="delete-cancel" label="Cancel" dimColor onPress={go({ deletingFolder: null, menuFolder: null })} />
-                <Button key="delete-folder-keep" label="Keep its sources" onPress={() => void deleteFolder($, folder.id, true)} />
-                <Button key="delete-folder" label="Delete folder and sources" variant="primary" onPress={() => void deleteFolder($, folder.id, false)} />
+                <Button key="delete-cancel" label="Cancel" dimColor onPress={go({ deletingFolder: null })} />
+                <Button key="delete-folder" label="Remove" variant="primary" onPress={() => void deleteFolder($, folder.id)} />
               </Box>
             </Box>
           ),
           ...(isOpen ? members.map(source => sourceRow(source, true)) : []),
-          isOpen && members.length === 0 && (
-            <Box marginTop={1} paddingLeft={2}>
-              <Text dimColor>Pick {folder.name} in "to" above and add a source, or move one in from its details.</Text>
-            </Box>
-          ),
         ],
         { tone: view.deletingFolder === folder.id ? 'danger' : state === 'off' ? 'muted' : 'plain' },
       )
     }
 
-    const targetOptions = [{ value: '', label: 'No folder' }, ...groups.map(one => ({ value: one.id, label: one.name }))]
     const isWarning = /^(Could|That link|No text|Skipped)/.test(status)
     const adder = (
       <Box flexDirection="column" gap={1}>
@@ -639,18 +579,8 @@ export function registerContext(on: On): void {
               dimColor={view.picking !== null}
               onPress={() => void choose($, 'folder')}
             />
-            <Button key="folder-new" label="New folder" variant={view.isNamingFolder ? 'secondary' : undefined} dimColor={!view.isNamingFolder} onPress={go({ isNamingFolder: !view.isNamingFolder })} />
           </Box>
-          {Select !== undefined && groups.length > 0 && (
-            <Select key="add-target" label="Into " options={targetOptions} value={view.target ?? ''} onSelect={value => void setView($, { target: value === '' ? null : value })} />
-          )}
         </Box>
-        {view.isNamingFolder && Input !== undefined && (
-          <Box gap={1} alignItems="center">
-            <Input key="folder-name" placeholder="Folder name, e.g. Payments" value={draft.name} submitLabel="create" autoFocus onInput={value => void update($, contextDraft, now => ({ ...now, name: value }))} onSubmit={value => void addFolder($, value)} />
-            <Button key="folder-cancel" label="Cancel" dimColor onPress={go({ isNamingFolder: false })} />
-          </Box>
-        )}
         {Input !== undefined && (
           <Input
             key="add-input"
@@ -661,9 +591,9 @@ export function registerContext(on: On): void {
             onSubmit={value => void addFromInput($, value)}
           />
         )}
-        {(status !== '' || targetName !== null) && (
+        {status !== '' && (
           <Text color={isWarning ? 'warning' : undefined} dimColor={!isWarning}>
-            {status !== '' ? status : `New sources go into ${targetName}.`}
+            {status}
           </Text>
         )}
       </Box>
@@ -699,7 +629,7 @@ export function registerContext(on: On): void {
       <Box flexDirection="column" gap={1}>
         <Box flexDirection="column">
           <Text bold>Context the agent reads</Text>
-          <Text dimColor>Sources that are On go into every request. Group them in folders and switch a folder at once.</Text>
+          <Text dimColor>Sources that are On go into every request. A folder you choose comes in as a group you can switch at once.</Text>
         </Box>
         {adder}
         {!isEmpty && meter}

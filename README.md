@@ -4,7 +4,7 @@ A Claude Code mod that adds a **Craftshop** pane with three tabs (**Perm worktre
 
 1. **Perm worktree with a read-only head start.** When it is on, each new session claims a lasting worktree slot. The agent reads, searches and plans while the slot is prepared, then the session moves in and the lock lifts. It is off by default.
 2. **Crew dials.** Six dials set how the agent works: Foresight, Crew, Tenacity, Autonomy, Proof and Voice.
-3. **Context.** A library of notes, links and repository files you share with the agent, each switched On or Off and grouped in folders.
+3. **Context.** A library of notes, links and files you share with the agent, each switched On or Off.
 
 ![The dials in the desktop app](shots/desktop/dials.png)
 
@@ -74,19 +74,19 @@ The brief is added to the system prompt as a "Working style" section. Claude Cod
 
 ## Context
 
-![Context tab with a folder](shots/desktop/context-library.png)
+![Context tab with a chosen folder](shots/desktop/context-library.png)
 
 The Context tab holds the sources the agent reads. It is kept per repository.
 
 - **Add.**
   - **Choose files…** opens the macOS file dialog. Pick one or more text files, in the repository or anywhere on your Mac.
-  - **Choose folder…** imports a folder's text files (up to 40) as a Craftshop folder.
+  - **Choose folder…** brings a folder's text files (up to 40) in as one group. It is a group in Craftshop only; nothing is made on disk.
   - The field below takes the rest. A link (`https://…`) is fetched as text, 12,000 characters at most. A repository path is read too. Anything else becomes a note.
 
-  **Into** picks the folder new sources go into. The dialogs run through `osascript`, so they need Claude Code running on a Mac. Elsewhere, type a path in the field.
+  The dialogs run through `osascript`, so they need Claude Code running on a Mac. Elsewhere, type a path in the field.
 - **On or Off.** Each source has a switch. A source that is On also has a **Strict** pill. Strict sources are binding ground truth, and the agent must say so if the code disagrees. The others guide the agent.
-- **Folders.** **New folder** makes a group. A folder's switch turns all its sources on or off at once, and reads **Some on** when they differ. **Add here** sends new sources into the folder. You can also rename a folder, or delete it with or without its sources.
-- **Details.** Click a source's title to see its text, rename it, move it to another folder, edit a note, refresh a link or file, or delete it.
+- **Folders.** A folder you chose is one group with one switch: it turns all its sources on or off, and reads **Some on** when they differ. **Remove** takes the group and its sources out of Craftshop; the files on disk stay.
+- **Details.** Click a source's title to see its text, rename it, edit a note, refresh a link or file, or delete it.
 - **Meter and window.** The meter counts the sources that are On against a budget of about 12k tokens. A footer shows the live context window (amber from 65%, red from 85%), with **Details** for tokens per category and **Compact**.
 
 The agent gets the sources that are On as a "Project context" section. Each is headed `Folder › Title` and marked Strict or Guidance. A change made mid-session reaches the agent with your next prompt.
@@ -107,4 +107,4 @@ e2e/shoot.sh                    # draw every tab on the desktop surface and scre
 
 `tests/desktop.test.ts` draws every tab on the desktop surface with real content and fails if the desktop would refuse any tree. `tests/dials.test.ts` drags the radar's dots with pointer events, as a person on the desktop would. `e2e/shoot.sh` turns those trees into pages laid out like the desktop pane and screenshots them into `e2e/out/preview/png`. The page is an approximation of the desktop's own paint, close enough to judge layout. `shots/desktop/` holds the latest set.
 
-`e2e/setup.sh` builds a fixture: a bare origin, plus a clone of it. `e2e/drive.sh` starts Claude Code with this mod in a 200×50 tmux session, in the fullscreen layout, with Perm worktree on. It then checks each feature as a person would: the read-only band and the held-back early write, the move into the slot, the dials echoed back by the agent, a strict note in a folder, and the agent citing it.
+`e2e/setup.sh` builds a fixture: a bare origin, plus a clone of it. `e2e/drive.sh` starts Claude Code with this mod in a 200×50 tmux session, in the fullscreen layout, with Perm worktree on. It then checks each feature as a person would: the read-only band and the held-back early write, the move into the slot, the dials echoed back by the agent, a strict note, and the agent citing it.

@@ -58,6 +58,9 @@ async function migrateStore($: EngineInterface): Promise<string[]> {
 
 export function registerSession(on: On): void {
   on('session.start', async ($, e, next) => {
+    // The commands first, so /fishstack answers from the first keystroke, not
+    // after the worktree claim and the store reads below.
+    for (const command of FISH_COMMANDS) await $.command.register(command)
     // Before the rest of the chain, so every later hook reads what came over
     // from Craftshop's store.
     await migrateStore($)
@@ -69,7 +72,6 @@ export function registerSession(on: On): void {
     const library = parseLibrary(await $.store.get(libraryStoreKey(root)), await $.store.get(legacyStoreKey(root)))
     await update($, sources, () => library.sources)
     await update($, folders, () => library.folders)
-    for (const command of FISH_COMMANDS) await $.command.register(command)
     return started
   })
 
@@ -105,5 +107,19 @@ export function registerSession(on: On): void {
       await update($, toldStyle, () => style)
     }
     return notes.length === 0 ? next(e) : next({ ...e, context: [...(e.context ?? []), ...notes] })
+  })
+
+  // A change made mid-turn reaches the agent before its next request, not at
+  // the next prompt: once a batch of tool calls resolves, the note rides with
+  // it as added context, after everything cached, so the cache holds. The
+  // main loop's batches only: a subagent told would mark it told for nobody.
+  on('classic.PostToolBatch', async ($, e, next) => {
+    const done = await next(e)
+    if (e.agent_id !== undefined) return done
+    const told = await read($, toldStyle)
+    const style = styleOf(await read($, dials), await read($, sources), await read($, folders))
+    if (told === null || told === style) return done
+    await update($, toldStyle, () => style)
+    return { ...done, additionalContext: [...(done.additionalContext ?? []), styleUpdate(style)] }
   })
 }

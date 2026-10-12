@@ -59,6 +59,8 @@ declare module 'claude-code' {
       tab: Tab
       worktree: Worktree
       slots: Slot[]
+      poolNote: string
+      railTick: number
       isTurnRunning: boolean
       lastReplyAt: number | null
       tokenTotals: { input: number; output: number } | null

@@ -2,7 +2,6 @@
 // pills, as SVG that follows light and dark. Presses reach them through a
 // Client laid over each (see drawnButton in kit.tsx, and the tab bar's own
 // overlay in ui.tsx).
-import type { Tab } from '../types'
 import { brandMark } from './brand'
 
 const SANS = `-apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif`
@@ -35,51 +34,14 @@ export function textWidth(text: string, size: number, isBold = false): number {
   return units * size * (isBold ? 1.0 : 0.95)
 }
 
-function tabIcon(id: Tab, x: number, y: number, isActive: boolean): string {
-  const color = isActive ? 'var(--text)' : 'var(--dim)'
-  const accent = { worktree: '#3fb950', dials: '#8f9cff', context: '#5cc8e8' }[id]
-  if (id === 'worktree') {
-    return `<g transform="translate(${x} ${y})" fill="none" stroke="${isActive ? accent : color}" stroke-width="1.5" stroke-linecap="round"><circle cx="3.5" cy="2.5" r="1.8"/><circle cx="3.5" cy="12.5" r="1.8"/><circle cx="11.5" cy="4.5" r="1.8"/><path d="M3.5 4.3v6.4M11.5 6.3c0 3.2-3.4 3-6.6 4.4"/></g>`
-  }
-  if (id === 'dials') {
-    const levels = [4, 3, 5, 5, 4, 2]
-    const point = (index: number, level: number) => {
-      const angle = ((-90 + index * 60) * Math.PI) / 180
-      return `${(7.5 + Math.cos(angle) * 7 * (level / 5)).toFixed(2)},${(7.5 + Math.sin(angle) * 7 * (level / 5)).toFixed(2)}`
-    }
-    return `<g transform="translate(${x} ${y})"><polygon points="${levels.map((_, i) => point(i, 5)).join(' ')}" fill="none" stroke="${color}" stroke-opacity="0.6"/><polygon points="${levels.map((level, i) => point(i, level)).join(' ')}" fill="${accent}" fill-opacity="${isActive ? 0.45 : 0.25}" stroke="${isActive ? accent : color}" stroke-width="1.3" stroke-linejoin="round"/></g>`
-  }
-  return `<g transform="translate(${x} ${y})" fill="none" stroke-width="1.4" stroke-linejoin="round"><rect x="4" y="0.6" width="9.5" height="11.5" rx="1.7" stroke="${isActive ? accent : color}" stroke-opacity="0.55"/><rect x="1.2" y="2.8" width="9.5" height="11.5" rx="1.7" stroke="${isActive ? accent : color}" fill="${isActive ? 'rgba(92,200,232,0.16)' : 'none'}"/><path d="M3.4 6.6h5M3.4 9.1h3.4" stroke="${isActive ? accent : color}" stroke-linecap="round"/></g>`
-}
-
-export type Segments = { width: number; height: number; source: string; segments: { x0: number; x1: number; tab: string }[] }
-
-// The wordmark, then the three tabs as one segmented control.
-export function tabsArt(tabs: { id: Tab; label: string }[], current: Tab): Segments {
-  const height = 40
+// The mark and the name, as the pane's head shows them: a still picture.
+export function wordmarkArt(): { source: string; width: number; height: number } {
+  const height = 32
   const mid = height / 2
-  const parts: string[] = []
-  const segments: Segments['segments'] = []
-  parts.push(brandMark(1, mid - 11, 22, 'paneMark'))
-  parts.push(`<text x="30" y="${mid + 5}" font-family="${ROUNDED}" font-size="15" font-weight="750" fill="url(#brand)" letter-spacing="0.1">fishStack</text>`)
-  let x = 30 + textWidth('fishStack', 15, true) + 20
-  const trayX = x
-  const widths = tabs.map(tab => 14 + 16 + 8 + textWidth(tab.label, 13, tab.id === current) + 16)
-  const trayWidth = widths.reduce((sum, one) => sum + one, 0) + 8
-  parts.push(`<rect x="${trayX + 0.5}" y="3.5" width="${trayWidth - 1}" height="${height - 7}" rx="${(height - 7) / 2}" fill="var(--pill)" stroke="var(--pillLine)"/>`)
-  x = trayX + 4
-  tabs.forEach((tab, index) => {
-    const width = widths[index]!
-    const isActive = tab.id === current
-    if (isActive) parts.push(`<rect x="${x}" y="7" width="${width}" height="${height - 14}" rx="${(height - 14) / 2}" fill="var(--active)" stroke="var(--activeLine)"/>`)
-    parts.push(tabIcon(tab.id, x + 14, mid - 7.5, isActive))
-    parts.push(`<text x="${x + 14 + 16 + 8}" y="${mid + 4.6}" font-family="${SANS}" font-size="13" font-weight="${isActive ? 650 : 500}" fill="${isActive ? 'var(--text)' : 'var(--dim)'}">${tab.label}</text>`)
-    segments.push({ x0: x, x1: x + width, tab: tab.id })
-    x += width
-  })
-  const width = Math.ceil(trayX + trayWidth + 2)
+  const width = Math.ceil(30 + textWidth('fishStack', 15, true) + 4)
   const defs = `<defs><linearGradient id="brand" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#5eead4"/><stop offset="1" stop-color="#3b82f6"/></linearGradient></defs>`
-  return { width, height, segments, source: `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${THEME}${defs}${paint(parts.join(''))}</svg>` }
+  const parts = brandMark(1, mid - 11, 22, 'paneMark') + `<text x="30" y="${mid + 5}" font-family="${ROUNDED}" font-size="15" font-weight="750" fill="url(#brand)" letter-spacing="0.1">fishStack</text>`
+  return { width, height, source: `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${THEME}${defs}${paint(parts)}</svg>` }
 }
 
 // An iOS-style switch: green and right when on, grey and left when off, amber

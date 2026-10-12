@@ -51,12 +51,13 @@ While it is **On**:
 
 - **A session started in a repository's main checkout** claims a slot in the background. Prompts work right away, but the session is read-only until the slot is ready.
 - **A worktree Claude Code creates** (`claude --worktree`, `EnterWorktree` with a name) goes through the mod's `WorktreeCreate` hook. Claude Code enters a claimed slot instead of a throwaway worktree, and the session stays read-only while the slot is seeded.
+- **A warm pool**, as CommissionAI keeps one. Turning the toggle on makes three slots in the background, one at a time, each seeded and set up before any session needs it; after every claim the pool tops up so one spare waits. It pauses below 20 GB of free disk. The tab shows **Pool: N slots, M ready**.
 
-Preparing a slot takes four steps:
+Preparing a slot takes four steps, made the way CommissionAI makes them:
 
 1. **Fetch.** Runs `git fetch origin <default>`. If the fetch fails, it starts from the local default branch and shows a warning.
-2. **Claim a slot.** Reuses an idle slot (no live lease, clean status, listed in `git worktree list`) with `git checkout -B fish/<name>`. Otherwise it adds a new slot with `git worktree add -B fish/<name>`.
-3. **Seed dependencies.** If the main checkout has `node_modules` and the lockfiles match, it clones them with `cp -c -R`, an APFS copy-on-write clone. Then it runs `setupCommand`.
+2. **Claim a slot.** Under a per-repository lock (an atomic `mkdir`, broken after 30 s if its holder died), picks an idle slot (no live lease, listed in `git worktree list`) or the next number. A new slot is `git worktree add --detach --no-checkout` at the base, then `reset --hard` with `core.checkStat=minimal`, then its index is warmed. A used one is scrubbed first: anything left uncommitted is kept under `refs/fish/backup/<slot>-<time>` (`git stash create`), then `reset --hard`, `clean -fd` (ignored files such as `node_modules` stay) and `checkout --detach`. Then `git checkout -B fish/<name>`. Git hooks never run on these writes.
+3. **Seed dependencies.** Every `node_modules` (six folders deep at most) missing from the slot is cloned copy-on-write (`cp -c -p -R`, APFS `clonefile`, so it costs no disk until a file changes) into a staging folder and renamed into place, from an idle sibling slot pinned to the same lockfiles or else the main checkout. Then `setupCommand` runs, unless it already ran in this slot with these lockfiles.
 4. **Move in.** Calls `EnterWorktree` on the slot as soon as it is ready, even mid-turn, as the agent could itself. Claude Code asks you once to confirm the move, because the slot is outside `.claude/worktrees/`. If you prompted during the head start, the agent then gets a note to carry on from its plan.
 
 ![An early prompt during the head start](shots/02-early-prompt.png)

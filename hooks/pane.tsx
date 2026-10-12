@@ -25,13 +25,6 @@ async function openPane($: EngineInterface, args: string): Promise<{ text: strin
 }
 
 export function registerPane(on: On): void {
-  // The drawn tab bar: its Client posts the tab pressed.
-  on('ui.message', { element: 'tabs-click' }, async ($, e, next) => {
-    const open = (e.data as { open?: unknown } | null)?.open
-    if (typeof open === 'string' && isTab(open)) await update($, tab, () => open)
-    return next(e)
-  })
-
   // Every other drawn control: its press, or the pointer entering or leaving
   // it, runs what its drawing registered.
   on('ui.message', async ($, e, next) => {

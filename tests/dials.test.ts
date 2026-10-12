@@ -76,3 +76,25 @@ test('a dial changed mid-session reaches the model with the next prompt, once', 
   expect(told).toContain('Voice (Teach)')
   expect(await submit()).toBe('')
 })
+
+test('a dial changed mid-turn reaches the agent before its next request, not only at the next prompt', async ($, on) => {
+  world(on, { isRepo: false })
+  on('classic.PostToolBatch', () => ({}))
+  await startSession($)
+  await $.prompt.compose(COMPOSE)
+  const batch = async (agentId?: string) =>
+    ((await $.classic.PostToolBatch({ tool_calls: [], ...(agentId === undefined ? {} : { agent_id: agentId }) } as never)).additionalContext ?? []).join('\n')
+  expect(await batch()).toBe('')
+
+  const ui = await mountPane($, 'terminal')
+  await activate(ui, 'tab-dials')
+  await ui.press({ key: 'pip-voice-5' })
+  // A subagent's batch does not take it: the main agent has not been told.
+  expect(await batch('sub-1')).toBe('')
+  const told = await batch()
+  expect(told).toContain('fishStack update')
+  expect(told).toContain('Voice (Teach)')
+  // Told once: neither the next batch nor the next prompt says it again.
+  expect(await batch()).toBe('')
+  expect((await $.prompt.submit({ text: 'go on', wait: false, origin: { kind: 'composer' } })).context?.join('\n') ?? '').toBe('')
+})

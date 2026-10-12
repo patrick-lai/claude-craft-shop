@@ -1,7 +1,7 @@
 import type { Elements, RenderElement } from 'claude-code'
 
 import type { Tab } from '../types'
-import { tabsArt } from './art'
+import { wordmarkArt } from './art'
 
 export const PANE = 'fishstack'
 export const PANE_TITLE = 'fishStack'
@@ -42,41 +42,42 @@ export function isTab(value: string): value is Tab {
 // crosses an import, so a tab cannot be drawn from another file); this is
 // the frame they share.
 export function frame(ui: Ui, current: Tab, columns: number, onSelect: (id: Tab) => void, body: RenderElement) {
-  const { Box, Button, Text, Svg, Client } = ui
-  const rich = ui.Svg !== undefined
-  if (Svg !== undefined && Client !== undefined) {
-    // The desktop draws the wordmark and the tabs as one picture; a Client
-    // over it takes the press (pane.tsx's tabs-click hook switches the tab).
-    const art = tabsArt(TABS, current)
+  const { Box, Button, Text, Svg } = ui
+  const rich = Svg !== undefined
+  // The tabs are the surface's own buttons, so a press answers at once (a
+  // drawn tab bar went through a Client and a redrawn picture, and lagged);
+  // they sit in one tray, the current one filled, keys 1 to 3. On the desktop
+  // the mark and the name lead, a still picture.
+  const tabs = (
+    <Box gap={1} backgroundColor={rich ? 'rgba(140,140,150,0.10)' : undefined} paddingX={rich ? 1 : 0}>
+      {TABS.map((one, index) => (
+        <Button
+          key={`tab-${one.id}`}
+          label={one.label}
+          hotkey={String(index + 1)}
+          variant={one.id === current ? 'primary' : undefined}
+          dimColor={one.id !== current}
+          onPress={() => onSelect(one.id)}
+        />
+      ))}
+    </Box>
+  )
+  if (Svg !== undefined) {
+    const mark = wordmarkArt()
     return (
       <Box flexDirection="column" width={columns} gap={1}>
-        <Box key="tabs-art" position="relative" alignSelf="flex-start">
-          <Svg source={art.source} alt={`fishStack tabs: ${TABS.map(one => one.label).join(', ')}; ${current} shown`} width={art.width} height={art.height} />
-          <Box position="absolute" top={0} left={0} right={0} bottom={0}>
-            <Client key="tabs-click" module="./rail-click.tsx" props={{ width: art.width, segments: art.segments }} width="100%" height="100%" />
-          </Box>
+        <Box key="pane-head" gap={2} alignItems="center">
+          <Svg source={mark.source} alt="fishStack" width={mark.width} height={mark.height} />
+          {tabs}
         </Box>
         {body}
       </Box>
     )
   }
-  // The tabs sit in one rounded tray, the current one filled: a segmented
-  // control, as CommissionAI's Stage tabs read.
   return (
     <Box flexDirection="column" width={columns} gap={1}>
       <Box justifyContent="space-between" alignItems="center">
-        <Box gap={1} backgroundColor={rich ? 'rgba(140,140,150,0.10)' : undefined} paddingX={rich ? 1 : 0}>
-          {TABS.map((one, index) => (
-            <Button
-              key={`tab-${one.id}`}
-              label={one.label}
-              hotkey={String(index + 1)}
-              variant={one.id === current ? 'primary' : undefined}
-              dimColor={one.id !== current}
-              onPress={() => onSelect(one.id)}
-            />
-          ))}
-        </Box>
+        {tabs}
         <Text dimColor>fishStack</Text>
       </Box>
       {body}

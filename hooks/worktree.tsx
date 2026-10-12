@@ -39,9 +39,14 @@ const lastReplyAt = atom({ plugin: 'fishstack', key: 'lastReplyAt' } as const, n
 // The rail pill under the pointer, kept to this process: a hover is one
 // window's, not the session's.
 let railHover: string | null = null
+// Bumped by a rail hover and the cache gauge's tick; only the band reads it,
+// so neither redraws the pane.
+const railTick = atom({ plugin: 'fishstack', key: 'railTick' } as const, 0)
 // The rail's figures for one session, kept in the store under one key.
 const RAIL_STORE_KEY = 'rail'
 type RailKept = { sessionId: string; repliedAt: number | null; tokens: { input: number; output: number } | null }
+// What the pool's background warming is doing, for the Perm worktree tab.
+const poolNote = atom({ plugin: 'fishstack', key: 'poolNote' } as const, '')
 const tokenTotals = atom({ plugin: 'fishstack', key: 'tokenTotals' } as const, null)
 
 type $ = EngineInterface
@@ -50,6 +55,12 @@ const LEASE_PREFIX = 'lease:'
 const HEARTBEAT_MS = 60_000
 const LEASE_TTL_MS = 3 * HEARTBEAT_MS
 const SETUP_TIMEOUT_MS = 10 * 60_000
+const LOCK_STALE_MS = 30_000
+// As CommissionAI's: three slots ready, and no warming below 20 GB free.
+export const POOL_SIZE = 3
+const MIN_FREE_KB = 20 * 1024 * 1024
+const SETUP_PREFIX = 'setup:'
+type SetupRun = { command: string; lockHash: string }
 const LOCKFILES = ['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lock', 'bun.lockb']
 
 export const READ_ONLY_DENY =
@@ -144,19 +155,30 @@ async function worktreePaths($: $, main: string): Promise<Map<string, string | n
   return paths
 }
 
+// The numbered slot folders under a repository's slot root, in order.
 async function slotDirs($: $, repoDir: string): Promise<string[]> {
-  if (!(await $.fs.exists(repoDir))) return []
-  const entries = await $.fs.list(repoDir)
-  return entries
-    .filter(entry => entry.kind === 'dir' && /^\d+$/.test(entry.name))
-    .map(entry => entry.name)
-    .sort((a, b) => Number(a) - Number(b))
-    .map(name => `${repoDir}/${name}`)
+  const found = await $.process.run(['find', repoDir, '-mindepth', '1', '-maxdepth', '1', '-type', 'd'])
+  if (found.exitCode !== 0) return []
+  return found.stdout
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => /\/\d+$/.test(line))
+    .sort((a, b) => Number(a.split('/').pop()) - Number(b.split('/').pop()))
 }
 
 async function refreshSlots($: $, options: PluginOptions): Promise<void> {
-  const { main, path: mine } = await read($, worktree)
-  if (main === null) return
+  const main = (await read($, worktree)).main ?? (await repoMain($))
+  if (main !== null) await refreshSlotsFor($, options, main)
+}
+
+// The main checkout of the session's repository, or null outside one.
+async function repoMain($: $): Promise<string | null> {
+  const repo = await $.session.repo()
+  return repo === null ? null : realPath($, repo.root)
+}
+
+async function refreshSlotsFor($: $, options: PluginOptions, main: string): Promise<void> {
+  const { path: mine } = await read($, worktree)
   const repoDir = await slotsRoot($, options, main)
   const listed = await worktreePaths($, main)
   const found: Slot[] = []
@@ -178,60 +200,237 @@ async function releaseSlot($: $, path: string): Promise<void> {
   await $.store.delete(LEASE_PREFIX + path)
 }
 
-async function claimSlot($: $, options: PluginOptions, main: string, base: string, branch: string) {
-  const repoDir = await slotsRoot($, options, main)
-  const listed = await worktreePaths($, main)
-  const sessionId = await $.session.id()
-  const dirs = await slotDirs($, repoDir)
+// A git write: never runs the repository's hooks, as CommissionAI's do not.
+async function gitWrite($: $, args: string[], cwd: string, failure: string): Promise<string> {
+  return gitOut($, ['-c', 'core.hooksPath=/dev/null', ...args], cwd, failure)
+}
 
-  for (const path of dirs) {
-    if (!listed.has(await realPath($, path))) continue
-    const lease = await readLease($, path)
-    if (lease?.sessionId !== sessionId && (await isLeaseLive($, lease))) continue
-    const status = await git($, ['status', '--porcelain'], path)
-    if (status.exitCode !== 0 || status.stdout.trim() !== '') continue
-
-    await writeLease($, path)
-    await setStep($, `Reusing slot ${path.split('/').pop()}`)
-    await gitOut($, ['checkout', '-q', '-B', branch, base], path, 'Could not check out the base branch in the reused slot.')
-    return path
+// One claim at a time per repository, across sessions: an atomic mkdir, and a
+// lock older than LOCK_STALE_MS (a session that died holding it) is broken.
+async function lock($: $, repoDir: string): Promise<void> {
+  await $.process.run(['mkdir', '-p', repoDir])
+  const lockDir = `${repoDir}/.lock`
+  for (let tries = 0; tries < 300; tries++) {
+    if ((await $.process.run(['mkdir', lockDir])).exitCode === 0) return
+    const held = await $.fs.stat(lockDir).catch(() => null)
+    if (held === null || (await $.clock.now()) - held.mtimeMs > LOCK_STALE_MS) {
+      await $.process.run(['rm', '-rf', lockDir])
+      continue
+    }
+    await $.clock.sleep(100)
   }
+  throw new StepError('Another session held the worktree lock for too long.')
+}
 
-  const next = dirs.reduce((most, path) => Math.max(most, Number(path.split('/').pop())), 0) + 1
-  const path = `${repoDir}/${next}`
-  await writeLease($, path)
-  await setStep($, 'Creating a new worktree')
-  await gitOut($, ['worktree', 'add', '-q', '-B', branch, path, base], main, 'Could not create the worktree.')
+async function unlock($: $, repoDir: string): Promise<void> {
+  await $.process.run(['rm', '-rf', `${repoDir}/.lock`])
+}
+
+// A fresh slot as CommissionAI makes one: detached and unchecked-out at the
+// base, then checked out with stat checks kept minimal, then the index warmed
+// so the session's first git status is quick.
+async function createSlot($: $, main: string, path: string, sha: string): Promise<void> {
+  await git($, ['worktree', 'prune'], main)
+  await gitWrite($, ['worktree', 'add', '-q', '--detach', '--no-checkout', path, sha], main, 'Could not create the worktree.')
+  await gitWrite($, ['-c', 'core.checkStat=minimal', 'reset', '--hard', '-q'], path, 'Could not check out the new worktree.')
+  await git($, ['status', '--porcelain=v1', '-z', '--untracked-files=all'], path)
+}
+
+// Readies a used slot for its next session: anything left uncommitted is kept
+// under refs/fish/backup/, then the slot is reset, cleaned (ignored files such
+// as node_modules stay) and detached, which frees its old branch.
+async function scrubSlot($: $, path: string): Promise<void> {
+  const status = await git($, ['status', '--porcelain'], path)
+  if (status.exitCode === 0 && status.stdout.trim() !== '') {
+    await gitWrite($, ['add', '-A'], path, 'Could not save the slot\'s leftover work.')
+    const stash = await git($, ['stash', 'create'], path)
+    const sha = stash.stdout.trim()
+    if (stash.exitCode === 0 && sha !== '') {
+      await gitWrite($, ['update-ref', `refs/fish/backup/${path.split('/').pop()}-${await $.clock.now()}`, sha], path, 'Could not back up the slot\'s leftover work.')
+    }
+  }
+  await gitWrite($, ['reset', '--hard', '-q'], path, 'Could not reset the slot.')
+  await gitWrite($, ['clean', '-fdq'], path, 'Could not clean the slot.')
+  await gitWrite($, ['checkout', '-q', '--detach', 'HEAD'], path, 'Could not detach the slot.')
+}
+
+// Picks a slot under the lock: an idle one (listed, no live lease) or the next
+// number, reserved by its empty folder. Leased before the lock lifts.
+async function pickSlot($: $, options: PluginOptions, main: string): Promise<{ path: string; isNew: boolean }> {
+  const repoDir = await slotsRoot($, options, main)
+  await lock($, repoDir)
+  try {
+    const listed = await worktreePaths($, main)
+    const sessionId = await $.session.id()
+    const dirs = await slotDirs($, repoDir)
+    for (const path of dirs) {
+      if (!listed.has(await realPath($, path))) continue
+      const lease = await readLease($, path)
+      if (lease?.sessionId !== sessionId && (await isLeaseLive($, lease))) continue
+      await writeLease($, path)
+      return { path, isNew: false }
+    }
+    const next = dirs.reduce((most, path) => Math.max(most, Number(path.split('/').pop())), 0) + 1
+    const path = `${repoDir}/${next}`
+    await $.process.run(['mkdir', '-p', path])
+    await writeLease($, path)
+    return { path, isNew: true }
+  } finally {
+    await unlock($, repoDir)
+  }
+}
+
+async function claimSlot($: $, options: PluginOptions, main: string, base: string, baseSha: string, branch: string) {
+  const { path, isNew } = await pickSlot($, options, main)
+  if (isNew) {
+    await setStep($, 'Creating a new worktree')
+    await createSlot($, main, path, baseSha)
+  } else {
+    await setStep($, `Reusing slot ${path.split('/').pop()}`)
+    await scrubSlot($, path)
+  }
+  await gitWrite($, ['checkout', '-q', '-B', branch, base], path, 'Could not check out the base branch in the slot.')
   return path
 }
 
+// What the dependencies are pinned to: the git hashes of the lockfiles there.
+async function lockHash($: $, dir: string): Promise<string> {
+  const parts: string[] = []
+  for (const lockfile of LOCKFILES) {
+    if (!(await $.fs.exists(`${dir}/${lockfile}`))) continue
+    const hashed = await git($, ['hash-object', lockfile], dir)
+    parts.push(`${lockfile}:${hashed.stdout.trim()}`)
+  }
+  return parts.join(',')
+}
+
+// Every node_modules under a folder, six deep at most, skipping dot folders
+// and build output; relative paths.
+async function nodeModulesIn($: $, dir: string): Promise<string[]> {
+  const found = await $.process.run(
+    ['find', dir, '-maxdepth', '6', '(', '-name', '.*', '-o', '-name', 'target', ')', '-prune', '-o', '-type', 'd', '-name', 'node_modules', '-print', '-prune'],
+    { timeoutMs: 60_000 },
+  )
+  if (found.exitCode !== 0) return []
+  return found.stdout
+    .split('\n')
+    .filter(line => line.startsWith(`${dir}/`))
+    .map(line => line.slice(dir.length + 1))
+}
+
+// Seeds a slot's node_modules as CommissionAI does: cloned copy-on-write (APFS
+// clonefile through cp -c, so it costs no disk until a file changes) from an
+// idle sibling slot pinned to the same lockfiles, or else the main checkout,
+// into a staging folder renamed into place. Then the setup command, skipped
+// when it and the lockfiles are what it last ran with in this slot.
 async function seedDependencies($: $, options: PluginOptions, main: string, path: string) {
-  if ((await $.fs.exists(`${main}/node_modules`)) && !(await $.fs.exists(`${path}/node_modules`))) {
-    for (const lockfile of LOCKFILES) {
-      if (!(await $.fs.exists(`${main}/${lockfile}`))) continue
-      const same = await $.process.run(['cmp', '-s', `${main}/${lockfile}`, `${path}/${lockfile}`])
-      if (same.exitCode !== 0) break
-      await setStep($, 'Cloning node_modules from the main checkout')
-      // cp -c asks APFS for a clonefile copy, so a large node_modules costs
-      // no disk until a file in it changes.
-      const copied = await $.process.run(['cp', '-c', '-R', `${main}/node_modules`, `${path}/node_modules`], {
-        timeoutMs: SETUP_TIMEOUT_MS,
-      })
-      if (copied.exitCode !== 0) {
-        $.ui.log(`cp -c failed: ${copied.stderr.trim()}`, { to: 'debug' })
-        await setStep($, 'Could not clone node_modules; the setup command has to install them', true)
+  const hash = await lockHash($, path)
+  if (hash !== '') {
+    let donor: string | null = null
+    const repoDir = await slotsRoot($, options, main)
+    for (const sibling of await slotDirs($, repoDir)) {
+      if (sibling === path || (await isLeaseLive($, await readLease($, sibling)))) continue
+      if ((await $.fs.exists(`${sibling}/node_modules`)) && (await lockHash($, sibling)) === hash) {
+        donor = sibling
+        break
       }
-      break
+    }
+    if (donor === null && (await $.fs.exists(`${main}/node_modules`)) && (await lockHash($, main)) === hash) donor = main
+    if (donor !== null) {
+      const missing: string[] = []
+      for (const relative of await nodeModulesIn($, donor)) {
+        if (!(await $.fs.exists(`${path}/${relative}`))) missing.push(relative)
+      }
+      if (missing.length > 0) {
+        await setStep($, `Cloning ${missing.length === 1 ? 'node_modules' : `${missing.length} node_modules folders`} from ${donor === main ? 'the main checkout' : `slot ${donor.split('/').pop()}`}`)
+        for (const [index, relative] of missing.entries()) {
+          const target = `${path}/${relative}`
+          const staging = `${path}/.fish-seed-${index}`
+          await $.process.run(['mkdir', '-p', target.slice(0, target.lastIndexOf('/'))])
+          const copied = await $.process.run(['cp', '-c', '-p', '-R', `${donor}/${relative}`, staging], { timeoutMs: SETUP_TIMEOUT_MS })
+          if (copied.exitCode !== 0) {
+            $.ui.log(`cp -c failed: ${copied.stderr.trim()}`, { to: 'debug' })
+            await $.process.run(['rm', '-rf', staging])
+            await setStep($, 'Could not clone node_modules; the setup command has to install them', true)
+            break
+          }
+          await $.process.run(['mv', staging, target])
+        }
+      }
     }
   }
 
   const setup = String(options.setupCommand ?? '').trim()
   if (setup === '') return
+  const last = await $.store.get(SETUP_PREFIX + path)
+  if (last !== null && typeof last === 'object' && (last as SetupRun).command === setup && (last as SetupRun).lockHash === hash) {
+    await setStep($, 'Setup already done for these lockfiles')
+    return
+  }
   await setStep($, `Running ${setup}`)
   const ran = await $.process.run(['/bin/bash', '-lc', setup], { cwd: path, timeoutMs: SETUP_TIMEOUT_MS })
   if (ran.exitCode !== 0) {
     $.ui.log(`setup command failed: ${ran.stderr.trim()}`, { to: 'debug' })
     throw new StepError(`The setup command exited with ${ran.exitCode}.`)
+  }
+  await $.store.set(SETUP_PREFIX + path, { command: setup, lockHash: hash })
+}
+
+// Free disk where the slots live, in kilobytes; Infinity when df cannot say.
+async function freeKb($: $, dir: string): Promise<number> {
+  const df = await $.process.run(['df', '-Pk', dir])
+  const columns = df.stdout.trim().split('\n').pop()?.split(/\s+/) ?? []
+  const available = Number(columns[3])
+  return df.exitCode === 0 && Number.isFinite(available) ? available : Infinity
+}
+
+// Keeps the pool warm, as CommissionAI does: at least POOL_SIZE slots, at
+// least one of them idle, each made, seeded and set up ahead of any session,
+// one at a time in the background. Stops below MIN_FREE_KB of free disk.
+let isWarming = false
+async function prewarm($: $, options: PluginOptions, main: string): Promise<void> {
+  if (isWarming) return
+  isWarming = true
+  try {
+    const repoDir = await slotsRoot($, options, main)
+    const branchName = await defaultBranch($, main)
+    const fetched = await git($, ['fetch', '-q', 'origin', branchName], main)
+    const sha = await gitOut($, ['rev-parse', fetched.exitCode === 0 ? `origin/${branchName}` : branchName], main, 'Could not resolve the base.')
+    for (let made = 0; made < POOL_SIZE; made++) {
+      const listed = await worktreePaths($, main)
+      let total = 0
+      let idle = 0
+      for (const path of await slotDirs($, repoDir)) {
+        if (!listed.has(await realPath($, path))) continue
+        total++
+        if (!(await isLeaseLive($, await readLease($, path)))) idle++
+      }
+      if (total >= POOL_SIZE && idle >= 1) break
+      await $.process.run(['mkdir', '-p', repoDir])
+      if ((await freeKb($, repoDir)) < MIN_FREE_KB) {
+        await update($, poolNote, () => 'Paused: less than 20 GB of disk is free.')
+        break
+      }
+      await lock($, repoDir)
+      let path: string
+      try {
+        const dirs = await slotDirs($, repoDir)
+        path = `${repoDir}/${dirs.reduce((most, one) => Math.max(most, Number(one.split('/').pop())), 0) + 1}`
+        await $.process.run(['mkdir', '-p', path])
+      } finally {
+        await unlock($, repoDir)
+      }
+      await update($, poolNote, () => `Warming slot ${path.split('/').pop()} of ${Math.max(POOL_SIZE, total + 1)}…`)
+      await createSlot($, main, path, sha)
+      await seedDependencies($, options, main, path)
+      await refreshSlotsFor($, options, main)
+    }
+    await update($, poolNote, () => '')
+  } catch (error) {
+    $.ui.log(`prewarm stopped: ${String(error)}`, { to: 'debug' })
+    await update($, poolNote, () => (error instanceof StepError ? `Warming stopped: ${error.message}` : 'Warming stopped.'))
+  } finally {
+    isWarming = false
   }
 }
 
@@ -291,11 +490,12 @@ async function prepare($: $, options: PluginOptions): Promise<void> {
     await update($, worktree, current => ({ ...current, base, baseSha, branch }))
 
     await setStep($, 'Claiming a slot')
-    const path = await claimSlot($, options, main, base, branch)
+    const path = await claimSlot($, options, main, base, baseSha, branch)
     await update($, worktree, current => ({ ...current, path }))
     startHeartbeat($, path)
     await seedDependencies($, options, main, path)
     await refreshSlots($, options)
+    $.clock.after(0, () => void prewarm($, options, main))
 
     await enter($, options)
   } catch (error) {
@@ -339,9 +539,12 @@ async function isAutoOn($: $, options: PluginOptions): Promise<boolean> {
   return typeof stored === 'boolean' ? stored : options.autoWorktree === true
 }
 
-async function setAuto($: $, isOn: boolean): Promise<void> {
+async function setAuto($: $, options: PluginOptions, isOn: boolean): Promise<void> {
   await $.store.set(AUTO_WORKTREE_KEY, isOn)
   $.ui.invalidate('ui.render')
+  if (!isOn) return
+  const main = (await read($, worktree)).main ?? (await repoMain($))
+  if (main !== null) $.clock.after(0, () => void prewarm($, options, main))
 }
 
 async function startWorktree($: $, options: PluginOptions, cwd: string, isForced = false): Promise<void> {
@@ -395,10 +598,11 @@ async function claimForCreate($: $, options: PluginOptions, cwd: string, name: s
     const branch = `fish/${name.replace(/[^A-Za-z0-9._-]+/g, '-').slice(0, 40) || (await $.session.id()).slice(0, 6)}`
     hasStarted = true
     await update($, worktree, (): Worktree => ({ ...IDLE_WORKTREE, phase: 'preparing', step: 'Claiming a slot', main, base, baseSha, branch }))
-    const path = await claimSlot($, options, main, base, branch)
+    const path = await claimSlot($, options, main, base, baseSha, branch)
     await update($, worktree, current => ({ ...current, path }))
     startHeartbeat($, path)
     $.clock.after(0, () => void seedThenUnlock($, options, main, path))
+    $.clock.after(0, () => void prewarm($, options, main))
     return path
   } catch (error) {
     $.ui.log(`WorktreeCreate fell back to Claude Code: ${String(error)}`, { to: 'debug' })
@@ -522,6 +726,7 @@ export function registerWorktree(on: On, options: PluginOptions): void {
       // With no worktree news, the band is fishStack's status rail. Reading
       // isTurnRunning redraws it as each turn starts and ends.
       const isWorking = await read($, isTurnRunning)
+      await read($, railTick)
       // State starts over on a reload or a rename; the store keeps this
       // session's last reply and token totals across both.
       const kept = await $.store.get(RAIL_STORE_KEY)
@@ -558,7 +763,7 @@ export function registerWorktree(on: On, options: PluginOptions): void {
           const hovered = isOn ? id : railHover === id ? null : railHover
           if (hovered === railHover) return
           railHover = hovered
-          $.ui.invalidate('ui.render')
+          void update($, railTick, n => n + 1)
         },
         e.props.bodyColumns,
       )
@@ -608,6 +813,8 @@ export function registerWorktree(on: On, options: PluginOptions): void {
     const select = (id: Tab) => void update($, tab, () => id)
 
     const isAuto = await isAutoOn($, options)
+    const note = await read($, poolNote)
+    const idle = list.filter(one => !one.isLeased).length
     const autoCard = card(
       ui,
       'worktree-auto',
@@ -620,10 +827,19 @@ export function registerWorktree(on: On, options: PluginOptions): void {
                 ? "On: new sessions in a main checkout, and Claude's own worktrees, get a lasting slot. Read-only until it is ready, then the lock lifts."
                 : "Off: fishStack leaves worktrees to Claude Code (the desktop's worktree option, claude --worktree, EnterWorktree)."}
             </Text>
+            {isAuto && (
+              <Text key="pool-line">
+                <Text color={idle > 0 ? 'success' : 'warning'}>● </Text>
+                <Text>
+                  Pool: {list.length} {list.length === 1 ? 'slot' : 'slots'}, {idle} ready
+                </Text>
+                {note !== '' && <Text dimColor> · {note}</Text>}
+              </Text>
+            )}
           </Box>
           <Box flexShrink={0}>
-            {drawnButton(ui, 'auto-worktree', switchArt(isAuto ? 'on' : 'off'), isAuto ? 'Perm worktree on' : 'Perm worktree off', 36, 22, () => void setAuto($, !isAuto)) ??
-              segmented(ui, 'auto-worktree', AUTO_CHOICES, isAuto ? 'on' : 'off', choice => void setAuto($, choice === 'on'))}
+            {drawnButton(ui, 'auto-worktree', switchArt(isAuto ? 'on' : 'off'), isAuto ? 'Perm worktree on' : 'Perm worktree off', 36, 22, () => void setAuto($, options, !isAuto)) ??
+              segmented(ui, 'auto-worktree', AUTO_CHOICES, isAuto ? 'on' : 'off', choice => void setAuto($, options, choice === 'on'))}
           </Box>
         </Box>,
       ],
@@ -786,7 +1002,7 @@ const CACHE_TTL_MS = 5 * 60_000
 let cacheTick: Timer | null = null
 
 function tickWhileWarm($: $, isWarm: boolean): void {
-  if (isWarm && cacheTick === null) cacheTick = $.clock.every(5_000, () => $.ui.invalidate('ui.render'))
+  if (isWarm && cacheTick === null) cacheTick = $.clock.every(5_000, () => void update($, railTick, n => n + 1))
   if (!isWarm && cacheTick !== null) {
     cacheTick.cancel()
     cacheTick = null

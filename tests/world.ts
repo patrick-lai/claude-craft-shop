@@ -6,7 +6,18 @@ import type { Engine, MockClock } from 'claude-code/testing'
 
 export const REPO = '/repo'
 
-export type World = { clock: MockClock; toolCalls: string[]; fetched: string[]; dialogs: number; closeDialog: () => void; panes: string[] }
+export type World = {
+  clock: MockClock
+  toolCalls: string[]
+  fetched: string[]
+  dialogs: number
+  closeDialog: () => void
+  panes: string[]
+  // Every command fishStack ran, as `cwd$ argv`.
+  commands: string[]
+  // Slots with uncommitted work, by path.
+  dirty: Set<string>
+}
 
 function ran(stdout = '', exitCode = 0) {
   return { value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
@@ -16,7 +27,25 @@ function ran(stdout = '', exitCode = 0) {
 // on disk by path, which fs.exists, fs.list and fs.read answer from.
 export function world(
   on: On,
-  { isRepo = true, isDialogSlow = false, store = {}, files }: { isRepo?: boolean; isDialogSlow?: boolean; store?: Record<string, unknown>; files?: Record<string, string> } = {},
+  {
+    isRepo = true,
+    isDialogSlow = false,
+    store = {},
+    files,
+    nodeModules = {},
+    slots = [],
+    folders = [],
+  }: {
+    isRepo?: boolean
+    isDialogSlow?: boolean
+    store?: Record<string, unknown>
+    files?: Record<string, string>
+    nodeModules?: Record<string, string[]>
+    // Worktrees already made, by path, detached.
+    slots?: string[]
+    // Folders already on disk, by path.
+    folders?: string[]
+  } = {},
 ): World {
   const clock = mock.clock(on, { now: 1_000_000 })
   mock.store(on, store)
@@ -24,7 +53,9 @@ export function world(
   const toolCalls: string[] = []
   const fetched: string[] = []
   const panes: string[] = []
-  const state: World = { clock, toolCalls, fetched, dialogs: 0, closeDialog: () => undefined, panes }
+  const commands: string[] = []
+  const dirty = new Set<string>()
+  const state: World = { clock, toolCalls, fetched, dialogs: 0, closeDialog: () => undefined, panes, commands, dirty }
 
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
@@ -54,7 +85,7 @@ export function world(
   })
   on('ui.panes', () => ({ value: panes.map(id => ({ id, title: id, isShown: true, isFocused: false, isPlaced: true })) }))
   const dirOf = (path: string) => path.slice(0, path.lastIndexOf('/'))
-  on('fs.exists', ($, e) => ({ value: files !== undefined && Object.keys(files).some(path => path === e.path || dirOf(path) === e.path) }))
+  on('fs.exists', ($, e) => ({ value: files !== undefined && Object.keys(files).some(path => path === e.path || path.startsWith(`${e.path}/`)) }))
   if (files !== undefined) {
     on('fs.list', ($, e) => ({
       value: Object.keys(files)
@@ -68,21 +99,85 @@ export function world(
     fetched.push(e.url)
     return { value: { status: 200, ok: true, headers: { 'content-type': 'application/json' }, text: '[{"id":1}]' } }
   })
+  // The disk and git beneath the slots, as far as fishStack touches them: the
+  // folders made, the worktrees git knows and the branch each has out.
+  const dirs = new Set<string>([REPO])
+  const worktrees = new Map<string, string | null>([[REPO, 'main']])
+  const parentOf = (path: string) => path.slice(0, path.lastIndexOf('/'))
+  const makeDir = (path: string) => {
+    for (let at = path; at.length > 1; at = parentOf(at)) dirs.add(at)
+  }
+  for (const path of [...slots, ...folders]) makeDir(path)
+  for (const path of slots) worktrees.set(path, null)
   on('process.run', ($, e) => {
-    const command = e.argv.join(' ')
+    const argv = e.argv
+    const command = argv.join(' ')
+    const cwd = e.init?.cwd ?? REPO
+    commands.push(`${cwd}$ ${command}`)
     // The macOS file dialog: what picked files come back as.
-    if (e.argv[0] === 'osascript') {
+    if (argv[0] === 'osascript') {
       const picked = ran(command.includes('choose folder') ? `${REPO}/docs/\n` : `${REPO}/docs/api.md\n/Users/me/notes/style.md\n`)
       state.dialogs += 1
       // A slow dialog stays open until the test closes it.
       return isDialogSlow ? new Promise<typeof picked>(resolve => (state.closeDialog = () => resolve(picked))) : picked
     }
-    if (command === 'git rev-parse --show-toplevel') return ran(`${REPO}\n`)
-    if (command === 'git symbolic-ref --short refs/remotes/origin/HEAD') return ran('origin/main\n')
-    if (command === 'git fetch -q origin main') return ran()
-    if (command === 'git rev-parse origin/main') return ran('0123456789abcdef\n')
-    if (command === 'git worktree list --porcelain') return ran(`worktree ${REPO}\nbranch refs/heads/main\n`)
-    if (command.startsWith('git worktree add -q -B fish/')) return ran()
+    if (argv[0] === 'mkdir') {
+      const path = argv[argv.length - 1]!
+      if (argv[1] !== '-p' && dirs.has(path)) return ran('', 1)
+      makeDir(path)
+      return ran()
+    }
+    if (argv[0] === 'rm') {
+      const path = argv[argv.length - 1]!
+      for (const one of [...dirs]) if (one === path || one.startsWith(`${path}/`)) dirs.delete(one)
+      return ran()
+    }
+    if (argv[0] === 'mv') {
+      makeDir(argv[2]!)
+      return ran()
+    }
+    if (argv[0] === 'cp') {
+      makeDir(argv[argv.length - 1]!)
+      return ran()
+    }
+    if (argv[0] === 'df') return ran('Filesystem 1024-blocks Used Available Capacity Mounted\n/dev/disk3 1 1 900000000 1% /\n')
+    if (argv[0] === 'find' && argv.includes('-mindepth')) {
+      const dir = argv[1]!
+      if (!dirs.has(dir)) return ran('', 1)
+      return ran([...dirs].filter(one => parentOf(one) === dir).join('\n'))
+    }
+    if (argv[0] === 'find') return ran((nodeModules[argv[1]!] ?? []).map(one => `${argv[1]}/${one}`).join('\n'))
+    if (argv[0] === '/bin/bash') return ran()
+    if (argv[0] !== 'git') return ran('', 1)
+    // Git, its -c settings set aside.
+    const args = argv.slice(1).filter((one, index, all) => one !== '-c' && all[index - 1] !== '-c')
+    const sub = args.join(' ')
+    if (sub === 'rev-parse --show-toplevel') return ran(`${REPO}\n`)
+    if (sub === 'symbolic-ref --short refs/remotes/origin/HEAD') return ran('origin/main\n')
+    if (sub === 'fetch -q origin main') return ran()
+    if (sub === 'rev-parse origin/main') return ran('0123456789abcdef\n')
+    if (sub === 'worktree list --porcelain') {
+      return ran([...worktrees].map(([path, branch]) => `worktree ${path}\n${branch === null ? 'detached' : `branch refs/heads/${branch}`}`).join('\n\n') + '\n')
+    }
+    if (sub === 'worktree prune') return ran()
+    if (sub.startsWith('worktree add -q --detach --no-checkout ')) {
+      makeDir(args[5]!)
+      worktrees.set(args[5]!, null)
+      return ran()
+    }
+    if (sub.startsWith('checkout -q -B ')) {
+      worktrees.set(cwd, args[3]!)
+      return ran()
+    }
+    if (sub === 'checkout -q --detach HEAD') {
+      worktrees.set(cwd, null)
+      dirty.delete(cwd)
+      return ran()
+    }
+    if (sub.startsWith('status')) return ran(dirty.has(cwd) ? ' M a.ts\n' : '')
+    if (sub === 'stash create') return ran('5ta5h\n')
+    if (sub.startsWith('hash-object ')) return ran('10ck\n')
+    if (['reset --hard -q', 'clean -fdq', 'add -A'].includes(sub) || sub.startsWith('update-ref ')) return ran()
     return ran('', 1)
   })
   on('tool.call', ($, e) => {
@@ -122,23 +217,13 @@ export const COMPOSE: PromptComposeInput = {
 type Drawing = Awaited<ReturnType<typeof mountPane>>
 
 // Presses a control by key as a person would on its surface: its Button, or
-// on the desktop the Client laid over its picture (the tab bar's by segment).
+// on the desktop the Client laid over its picture.
 // What activate needs of a drawing, on whichever surface it was mounted.
 type Pressable = Pick<Drawing, 'find' | 'press' | 'resize' | 'pointer'>
 
 export async function activate(ui: Pressable, key: string): Promise<void> {
   if ((await ui.find({ type: 'Button', key })) !== undefined) {
     await ui.press({ key })
-    return
-  }
-  if (key.startsWith('tab-')) {
-    const bar = (await ui.find({ type: 'Client', key: 'tabs-click' }))!.props as {
-      props: { width: number; segments: { x0: number; x1: number; tab: string }[] }
-    }
-    const segment = bar.props.segments.find(one => one.tab === key.slice('tab-'.length))!
-    await ui.resize({ columns: 60, rows: 2, in: 'tabs-click' })
-    const x = Math.floor(((segment.x0 + segment.x1) / 2 / bar.props.width) * 60)
-    await ui.pointer({ type: 'down', x, y: 0, button: 'left', in: 'tabs-click' })
     return
   }
   await ui.resize({ columns: 4, rows: 1, in: key })

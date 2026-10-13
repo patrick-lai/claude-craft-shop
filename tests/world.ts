@@ -33,6 +33,8 @@ export type World = {
   kept: Record<string, unknown>
   // With isMoveHeld, confirms the held EnterWorktree, as the person would.
   confirmMove: () => void
+  // Every prompt submitted, fishStack's own among them, by text.
+  prompts: string[]
   // With isSetupHeld, lets every held setup command finish.
   finishSetup: () => void
 }
@@ -93,11 +95,14 @@ export function world(
   const commands: string[] = []
   const dirty = new Set<string>()
   const ahead = new Set<string>()
-  const state: World = { clock, toolCalls, fetched, dialogs: 0, closeDialog: () => undefined, panes, commands, dirty, ahead, answer: () => undefined, notified: [], notices: [], saved: {}, written: [], kept, confirmMove: () => undefined, finishSetup: () => heldSetups.splice(0).forEach(finish => finish()) }
+  const state: World = { clock, toolCalls, fetched, dialogs: 0, closeDialog: () => undefined, panes, commands, dirty, ahead, answer: () => undefined, notified: [], notices: [], saved: {}, written: [], kept, confirmMove: () => undefined, prompts: [], finishSetup: () => heldSetups.splice(0).forEach(finish => finish()) }
   const heldSetups: (() => void)[] = []
 
   on('session.start', ($, e) => ({ cwd: e.cwd }))
-  on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
+  on('prompt.submit', ($, e) => {
+    state.prompts.push(e.text)
+    return { text: e.text, context: e.context }
+  })
   on('prompt.compose', () => ({ sections: [{ id: 'intro', text: 'You are Claude Code.', scope: 'shared' }] }))
   on('command.register', ($, e) => ({ value: { command: e.name } }))
   on('tool.register', ($, e) => ({ value: { tool: `mcp__fishstack__${e.name}` } }))

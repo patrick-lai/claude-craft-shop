@@ -29,6 +29,7 @@ export const IDLE_WORKTREE: Worktree = {
 const isBandHidden = atom({ plugin: 'fishstack', key: 'isBandHidden' } as const, false)
 const isHeadStartPrompted = atom({ plugin: 'fishstack', key: 'isHeadStartPrompted' } as const, false)
 const isTurnRunning = atom({ plugin: 'fishstack', key: 'isTurnRunning' } as const, false)
+const owedMoveNote = atom({ plugin: 'fishstack', key: 'owedMoveNote' } as const, null)
 const slots = atom({ plugin: 'fishstack', key: 'slots' } as const, [])
 const tab = atom({ plugin: 'fishstack', key: 'tab' } as const, 'worktree')
 const worktree = atom({ plugin: 'fishstack', key: 'worktree' } as const, IDLE_WORKTREE)
@@ -88,12 +89,22 @@ const IN_REPO_ROOT = '.claude/worktrees/fishstack'
 export const READ_ONLY_DENY =
   'Read-only until the worktree is ready. fishStack is preparing a worktree for this session; read, search and plan for now, and you will be moved there with full access.'
 
-export function headStartNote(main: string): string {
-  return `Read-only head start: your worktree is still being prepared, so for now you run read-only in the main checkout at \`${main}\`. It may sit on another branch or be behind origin, so treat it as a reference. Investigate, read code and plan; do not edit files, commit or run commands that change anything. When your plan is ready, write it in your reply and end your turn. When the worktree is ready, fishStack moves you there with full access and tells you to continue.`
+// What a note told between tool calls says first: it rides beside a tool's
+// result, where a model rightly distrusts instructions.
+export const MID_TURN_FROM = 'fishStack update, from the hook of fishStack, a plugin the user installed, not from the tool you just ran: '
+
+export function headStartNote(main: string, isMidTurn = false): string {
+  return `${isMidTurn ? MID_TURN_FROM : ''}Read-only head start: your worktree is still being prepared, so for now you run read-only in the main checkout at \`${main}\`. It may sit on another branch or be behind origin, so treat it as a reference. Investigate, read code and plan; do not edit files, commit or run commands that change anything. When your plan is ready, write it in your reply and end your turn. When the worktree is ready, fishStack moves you there with full access and tells you to continue.`
 }
 
 function continueNote(path: string, branch: string): string {
   return `Your worktree is ready at \`${path}\` on branch \`${branch}\`, and the read-only head start is over. You now work there with full access. Carry on with the request from where you left off, starting with the plan you made. If you ended your last turn waiting for an answer, end this turn and keep waiting instead.`
+}
+
+// A move the agent was not warned of, as a head start told before it would;
+// whoever delivers it says first where it comes from.
+function movedNote(path: string, branch: string): string {
+  return `this session has moved into its own worktree at \`${path}\` on branch \`${branch}\`, and works there from now on, with full access. Relative paths and commands now run there, not in the main checkout; anything you said about where you work before this is out of date.`
 }
 
 type Lease = { sessionId: string; beatAt: number }
@@ -684,6 +695,11 @@ async function enter($: $, options: PluginOptions): Promise<void> {
   if (await read($, isHeadStartPrompted)) {
     await update($, isHeadStartPrompted, () => false)
     await $.prompt.submit({ text: continueNote(path, branch) })
+  } else if (await read($, isTurnRunning)) {
+    // Moved under a turn that never heard of the head start (it began before
+    // the claim did): told at its next batch or prompt. Before any turn, the
+    // session simply starts where it works.
+    await update($, owedMoveNote, () => movedNote(path, branch))
   }
 }
 

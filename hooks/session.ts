@@ -7,13 +7,14 @@ import type { AutopilotWait, DialValues, Folder, Source } from '../types'
 import { CONTEXT_ON_KEY, CONTEXT_SECTION_ID, contextSection, legacyStoreKey, libraryStoreKey, parseLibrary } from './context'
 import { BALANCED, brief, DIALS_ON_KEY, DIALS_SECTION_ID, DIALS_STORE_KEY, ENFORCE_KEY, isDialValues } from './dials'
 import { FISH_COMMANDS } from './pane'
-import { headStartNote, IDLE_WORKTREE, isReadOnlyPhase } from './worktree'
+import { headStartNote, IDLE_WORKTREE, isReadOnlyPhase, MID_TURN_FROM } from './worktree'
 
 const dials = atom({ plugin: 'fishstack', key: 'dials' } as const, BALANCED)
 const folders = atom({ plugin: 'fishstack', key: 'folders' } as const, [])
 const sources = atom({ plugin: 'fishstack', key: 'sources' } as const, [])
 const worktree = atom({ plugin: 'fishstack', key: 'worktree' } as const, IDLE_WORKTREE)
 const isHeadStartPrompted = atom({ plugin: 'fishstack', key: 'isHeadStartPrompted' } as const, false)
+const owedMoveNote = atom({ plugin: 'fishstack', key: 'owedMoveNote' } as const, null)
 const toldStyle = atom({ plugin: 'fishstack', key: 'toldStyle' } as const, null)
 const isDialsOn = atom({ plugin: 'fishstack', key: 'isDialsOn' } as const, true)
 const isContextOn = atom({ plugin: 'fishstack', key: 'isContextOn' } as const, true)
@@ -39,9 +40,16 @@ async function styleNow($: EngineInterface): Promise<string> {
 // rightly distrusts instructions: it says where it comes from.
 function styleUpdate(style: string, isMidTurn = false): string {
   const from = isMidTurn
-    ? 'fishStack update, from the hook of fishStack, a plugin the user installed, not from the tool you just ran: the user changed the working style dials or the shared project context in the fishStack pane while you worked. Apply it from your next step.'
+    ? `${MID_TURN_FROM}the user changed the working style dials or the shared project context in the fishStack pane while you worked. Apply it from your next step.`
     : 'fishStack update: the user changed the working style dials or the shared project context during this session.'
   return `${from} What follows replaces the Working style and Project context sections of your system prompt.\n\n${style}`
+}
+
+// The move note owed, once: whoever takes it tells the agent.
+async function takeMoveNote($: EngineInterface): Promise<string | null> {
+  const owed = await read($, owedMoveNote)
+  if (owed !== null) await update($, owedMoveNote, () => null)
+  return owed
 }
 
 // fishStack was Craftshop, whose saved dials, context libraries, slot leases
@@ -289,6 +297,8 @@ export function registerSession(on: On, options: PluginOptions): void {
       notes.push(headStartNote(main))
       await update($, isHeadStartPrompted, () => true)
     }
+    const moved = await takeMoveNote($)
+    if (moved !== null) notes.push(`fishStack update: ${moved}`)
     const told = await read($, toldStyle)
     const style = await styleNow($)
     if (told !== null && told !== style) {
@@ -302,13 +312,25 @@ export function registerSession(on: On, options: PluginOptions): void {
   // the next prompt: once a batch of tool calls resolves, the note rides with
   // it as added context, after everything cached, so the cache holds. The
   // main loop's batches only: a subagent told would mark it told for nobody.
+  // So does a head start that began after the prompt (the desktop attaching
+  // late), and a move the agent was not warned of.
   on('classic.PostToolBatch', async ($, e, next) => {
     const done = await next(e)
     if (e.agent_id !== undefined) return done
+    const notes: string[] = []
+    const { phase, main } = await read($, worktree)
+    if (isReadOnlyPhase(phase) && main !== null && !(await read($, isHeadStartPrompted))) {
+      notes.push(headStartNote(main, true))
+      await update($, isHeadStartPrompted, () => true)
+    }
+    const moved = await takeMoveNote($)
+    if (moved !== null) notes.push(`${MID_TURN_FROM}${moved}`)
     const told = await read($, toldStyle)
     const style = await styleNow($)
-    if (told === null || told === style) return done
-    await update($, toldStyle, () => style)
-    return { ...done, additionalContext: [...(done.additionalContext ?? []), styleUpdate(style, true)] }
+    if (told !== null && told !== style) {
+      notes.push(styleUpdate(style, true))
+      await update($, toldStyle, () => style)
+    }
+    return notes.length === 0 ? done : { ...done, additionalContext: [...(done.additionalContext ?? []), ...notes] }
   })
 }

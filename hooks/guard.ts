@@ -3,7 +3,7 @@ import type { EngineInterface, On } from 'claude-code'
 
 import { isReadOnlyShell } from './readonly'
 import { BALANCED } from './dials'
-import { crewRefusal, EDIT_TOOLS, foresightRefusal, isCheckCommand, isShellWrite, noteAgent, noteChange, noteCheck, notePlan, stopReason, SUBAGENT_TOOLS, turnFacts } from './enforce'
+import { crewRefusal, EDIT_TOOLS, foresightRefusal, isCheckCommand, isShellWrite, noteAgent, noteChange, noteCheck, notePlan, noteSaid, stopReason, SUBAGENT_TOOLS } from './enforce'
 import { IDLE_WORKTREE, isReadOnlyPhase, READ_ONLY_DENY } from './worktree'
 
 const dials = atom({ plugin: 'fishstack', key: 'dials' } as const, BALANCED)
@@ -28,19 +28,7 @@ async function refusalOf($: EngineInterface, call: Call): Promise<string | null>
     if (call.agentId !== undefined || !(await isEnforcing($))) return null
     const values = await read($, dials)
     if (SUBAGENT_TOOLS.has(call.tool)) return crewRefusal(values.crew)
-    if (EDIT_TOOLS.has(call.tool) && values.foresight >= 4) {
-      const facts = turnFacts()
-      let texts: string[] | null = null
-      if (facts.start !== null) {
-        const messages = await $.session.messages()
-        // Compacted, or past the 4096 newest, the turn's start is lost: let
-        // the edit through rather than guess.
-        if (Array.isArray(messages) && messages.length >= facts.start && messages.length < 4000) {
-          texts = messages.slice(facts.start).filter(one => one.role === 'assistant').map(one => one.text)
-        }
-      }
-      return foresightRefusal(values.foresight, texts)
-    }
+    if (EDIT_TOOLS.has(call.tool)) return foresightRefusal(values.foresight)
     return null
   } catch {
     return null
@@ -69,6 +57,23 @@ function record(call: Call, isError: boolean): void {
 }
 
 export function registerGuard(on: On): void {
+  // What the main agent writes, noted as it streams and passed on untouched:
+  // Foresight's spec, read before the edit that follows it in one response.
+  on('turn.step', async function* ($, e, next) {
+    const stream = next(e)
+    let block: number | null = null
+    for await (const chunk of stream) {
+      if (e.agentId === undefined && chunk.kind === 'text') {
+        // Blocks and steps apart, so a heading starts its own line.
+        if (chunk.index !== block) noteSaid('\n')
+        block = chunk.index
+        noteSaid(chunk.text)
+      }
+      yield chunk
+    }
+    // Returning nothing lets the result beneath stand.
+  })
+
   on('tool.call', async ($, e, next) => {
     const tool = String(e.tool)
     if (isReadOnlyPhase((await read($, worktree)).phase)) {

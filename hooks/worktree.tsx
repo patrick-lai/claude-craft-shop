@@ -1047,16 +1047,8 @@ export function registerWorktree(on: On, options: PluginOptions): void {
   })
 
   on('turn.start', async ($, e, next) => {
-    // The dials' facts start over with each turn, from where its messages
-    // begin; unreadable, the rules that need them let things through.
-    let start: number | null = null
-    try {
-      const messages = await $.session.messages()
-      start = Array.isArray(messages) && messages.length < 4000 ? messages.length : null
-    } catch {
-      start = null
-    }
-    beginTurn(start)
+    // The dials' facts start over with each turn.
+    beginTurn()
     await update($, isTurnRunning, () => true)
     return next(e)
   })

@@ -15,6 +15,8 @@ export type World = {
   panes: string[]
   // Every command fishStack ran, as `cwd$ argv`.
   commands: string[]
+  // How each of them was run (its timeout and environment), by `cwd$ argv`.
+  inits: Record<string, { timeoutMs?: number; env?: Record<string, string> } | undefined>
   // Slots with uncommitted work, by path.
   dirty: Set<string>
   // Worktrees with a commit no other branch or remote holds, by path.
@@ -37,6 +39,8 @@ export type World = {
   prompts: string[]
   // With isSetupHeld, lets every held setup command finish.
   finishSetup: () => void
+  // With fetch 'held', lets the held fetches of origin finish.
+  finishFetches: () => void
 }
 
 function ran(stdout = '', exitCode = 0, stderr = '') {
@@ -60,6 +64,7 @@ export function world(
     folders = [],
     isMoveHeld = false,
     isSetupHeld = false,
+    fetch = 'quick',
   }: {
     isRepo?: boolean
     isDialogSlow?: boolean
@@ -80,6 +85,9 @@ export function world(
     isMoveHeld?: boolean
     // The setup command runs until state.finishSetup.
     isSetupHeld?: boolean
+    // How fetching origin goes: at once; held until state.finishFetches; or
+    // still running at its timeout, so the call rejects.
+    fetch?: 'quick' | 'held' | 'stuck'
   } = {},
 ): World {
   const clock = mock.clock(on, { now: 1_000_000 })
@@ -104,8 +112,9 @@ export function world(
   const commands: string[] = []
   const dirty = new Set<string>()
   const ahead = new Set<string>()
-  const state: World = { clock, toolCalls, fetched, dialogs: 0, closeDialog: () => undefined, panes, commands, dirty, ahead, answer: () => undefined, notified: [], notices: [], saved: {}, written: [], kept, confirmMove: () => undefined, prompts: [], finishSetup: () => heldSetups.splice(0).forEach(finish => finish()) }
+  const state: World = { clock, toolCalls, fetched, dialogs: 0, closeDialog: () => undefined, panes, commands, inits: {}, dirty, ahead, answer: () => undefined, notified: [], notices: [], saved: {}, written: [], kept, confirmMove: () => undefined, prompts: [], finishSetup: () => heldSetups.splice(0).forEach(finish => finish()), finishFetches: () => heldFetches.splice(0).forEach(finish => finish()) }
   const heldSetups: (() => void)[] = []
+  const heldFetches: (() => void)[] = []
 
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('prompt.submit', ($, e) => {
@@ -173,6 +182,7 @@ export function world(
     const command = argv.join(' ')
     const cwd = e.init?.cwd ?? REPO
     commands.push(`${cwd}$ ${command}`)
+    state.inits[`${cwd}$ ${command}`] = e.init
     // The macOS file dialog: what picked files come back as.
     if (argv[0] === 'osascript') {
       const picked = ran(command.includes('choose folder') ? `${REPO}/docs/\n` : `${REPO}/docs/api.md\n/Users/me/notes/style.md\n`)
@@ -229,8 +239,11 @@ export function world(
     // Nothing in /repo is ignored but what fishStack excluded.
     if (sub.startsWith('check-ignore -q ')) return ran('', excluded.has(`/${args[2]}`) ? 0 : 1)
     if (sub === 'symbolic-ref --short refs/remotes/origin/HEAD') return ran('origin/main\n')
+    if (sub === 'fetch -q origin main' && fetch === 'stuck') return Promise.reject(new Error('git aborted: still running after 120000ms'))
+    if (sub === 'fetch -q origin main' && fetch === 'held') return new Promise<ReturnType<typeof ran>>(resolve => heldFetches.push(() => resolve(ran())))
     if (sub === 'fetch -q origin main') return ran()
     if (sub === 'rev-parse origin/main') return ran('0123456789abcdef\n')
+    if (sub === 'rev-parse main') return ran('fedcba9876543210\n')
     if (sub === 'worktree list --porcelain') {
       return ran([...worktrees].map(([path, branch]) => `worktree ${path}\n${branch === null ? 'detached' : `branch refs/heads/${branch}`}`).join('\n\n') + '\n')
     }

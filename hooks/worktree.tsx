@@ -116,12 +116,18 @@ export function isReadOnlyPhase(phase: Worktree['phase']): boolean {
   return phase === 'preparing' || phase === 'failed'
 }
 
-async function git($: $, args: string[], cwd: string, timeoutMs = 120_000) {
-  return $.process.run(['git', ...args], { cwd, timeoutMs })
+type GitRun = { timeoutMs?: number; env?: Record<string, string> }
+
+async function git($: $, args: string[], cwd: string, { timeoutMs = 120_000, env }: GitRun = {}) {
+  return $.process.run(['git', ...args], env === undefined ? { cwd, timeoutMs } : { cwd, timeoutMs, env })
 }
 
-async function gitOut($: $, args: string[], cwd: string, failure: string, timeoutMs?: number): Promise<string> {
-  const ran = await git($, args, cwd, timeoutMs)
+async function gitOut($: $, args: string[], cwd: string, failure: string, run?: GitRun): Promise<string> {
+  // A git still running at its timeout rejects: that failed too.
+  const ran = await git($, args, cwd, run).catch((error: unknown) => {
+    $.ui.log(`git ${args.join(' ')} did not finish: ${String(error)}`, { to: 'debug' })
+    throw new StepError(`${failure} Git did not finish in time.`)
+  })
   if (ran.exitCode !== 0) {
     $.ui.log(`git ${args.join(' ')} failed: ${ran.stderr.trim()}`, { to: 'debug' })
     // Git's last line says why, which the step alone cannot.
@@ -338,10 +344,15 @@ async function releaseSlot($: $, path: string): Promise<void> {
 
 // A git write: never runs the repository's hooks, as CommissionAI's do not.
 // Writes check out, reset and remove whole trees, which in a big repository
-// take minutes (a blobless clone fetches the blobs as it goes), so they get
-// the setup command's time, not a read's.
+// take minutes, so they get the setup command's time, not a read's. And in
+// a blobless clone a checkout needs blobs it lacks: Claude Code runs git
+// with GIT_NO_LAZY_FETCH=1, under which such a checkout grinds until it is
+// killed, so writes let git fetch them from origin, as the fetch before
+// them does.
+const GIT_WRITE: GitRun = { timeoutMs: SETUP_TIMEOUT_MS, env: { GIT_NO_LAZY_FETCH: '0' } }
+
 async function gitWrite($: $, args: string[], cwd: string, failure: string): Promise<string> {
-  return gitOut($, ['-c', 'core.hooksPath=/dev/null', ...args], cwd, failure, SETUP_TIMEOUT_MS)
+  return gitOut($, ['-c', 'core.hooksPath=/dev/null', ...args], cwd, failure, GIT_WRITE)
 }
 
 // One claim at a time per repository, across sessions: an atomic mkdir, and a
@@ -376,7 +387,7 @@ async function createSlot($: $, main: string, path: string, sha: string): Promis
     await gitWrite($, ['-c', 'core.checkStat=minimal', 'reset', '--hard', '-q'], path, 'Could not check out the new worktree.')
   } catch (error) {
     // A checkout cut short is no slot to scrub and reuse: remove it.
-    await git($, ['worktree', 'remove', '--force', '--force', path], main, SETUP_TIMEOUT_MS)
+    await git($, ['worktree', 'remove', '--force', '--force', path], main, GIT_WRITE)
     throw error
   }
   await git($, ['status', '--porcelain=v1', '-z', '--untracked-files=all'], path)
@@ -645,8 +656,8 @@ async function prewarm($: $, options: PluginOptions, main: string): Promise<void
       }
       if (path !== null) await markWarming($, path, `Fetching origin/${branchName}`)
       if (sha === null) {
-        const fetched = await git($, ['fetch', '-q', 'origin', branchName], main)
-        sha = await gitOut($, ['rev-parse', fetched.exitCode === 0 ? `origin/${branchName}` : branchName], main, 'Could not resolve the base.')
+        const isFetched = await fetchBase($, main, branchName)
+        sha = await gitOut($, ['rev-parse', isFetched ? `origin/${branchName}` : branchName], main, 'Could not resolve the base.')
       }
       if (path === null) {
         path = await reserveSlot($, repoDir)
@@ -684,6 +695,25 @@ async function defaultBranch($: $, main: string): Promise<string> {
   const head = await git($, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], main)
   if (head.exitCode === 0) return head.stdout.trim().replace(/^origin\//, '')
   return gitOut($, ['rev-parse', '--abbrev-ref', 'HEAD'], main, 'Could not read the current branch.')
+}
+
+// Fetches origin's branch, true when it came: one fetch at a time per
+// repository in this process, shared by whoever asks meanwhile. A session's
+// claim and the pool's warming start together, and of two fetches into one
+// repository one loses the ref lock and starts from a stale base. A fetch
+// still running at its timeout (a checkout far behind) did not come either.
+const fetching = new Map<string, Promise<boolean>>()
+
+async function fetchBase($: $, main: string, branchName: string): Promise<boolean> {
+  const key = `${main}\n${branchName}`
+  let run = fetching.get(key)
+  if (run === undefined) {
+    run = git($, ['fetch', '-q', 'origin', branchName], main)
+      .then(ran => ran.exitCode === 0, () => false)
+      .finally(() => fetching.delete(key))
+    fetching.set(key, run)
+  }
+  return run
 }
 
 // Held by the module, not $.state: a reload runs session.start again, which
@@ -745,8 +775,7 @@ async function prepare($: $, options: PluginOptions): Promise<void> {
     const branchName = await defaultBranch($, main)
     await setStep($, `Fetching the latest origin/${branchName}`)
     let base = `origin/${branchName}`
-    const fetched = await git($, ['fetch', '-q', 'origin', branchName], main)
-    if (fetched.exitCode !== 0) {
+    if (!(await fetchBase($, main, branchName))) {
       base = branchName
       await setStep($, `Could not fetch origin; starting from the local ${branchName}`, true)
     }
@@ -1004,8 +1033,7 @@ async function claimForCreate($: $, options: PluginOptions, cwd: string, name: s
     const repo = await $.session.repo()
     const main = await realPath($, repo?.root ?? top)
     const branchName = await defaultBranch($, main)
-    const fetched = await git($, ['fetch', '-q', 'origin', branchName], main)
-    const base = fetched.exitCode === 0 ? `origin/${branchName}` : branchName
+    const base = (await fetchBase($, main, branchName)) ? `origin/${branchName}` : branchName
     const baseSha = await gitOut($, ['rev-parse', base], main, `Could not resolve ${base}.`)
     const wanted = `fish/${name.replace(/[^A-Za-z0-9._-]+/g, '-').slice(0, 40) || (await $.session.id()).slice(0, 6)}`
     hasStarted = true

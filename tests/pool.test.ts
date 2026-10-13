@@ -59,6 +59,47 @@ test('a session claims a slot and the pool tops itself up behind it, one spare k
   expect(created(commands).map(one => one.split(' ').at(-2))).toEqual([`${dir}/1`, `${dir}/2`, `${dir}/3`])
 })
 
+test('a blobless clone can check a slot out: writes may fetch the blobs they lack and get minutes; reads neither', { options: { autoWorktree: true, worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
+  const { clock, inits } = world(on)
+  await startSession($)
+  await clock.advance(1)
+  const dir = await repoDir()
+  for (const write of [
+    `${dir}/1$ git -c core.hooksPath=/dev/null -c core.checkStat=minimal reset --hard -q`,
+    `${dir}/1$ git -c core.hooksPath=/dev/null checkout -q -B fish/abcdef origin/main`,
+  ]) {
+    expect(inits[write]?.timeoutMs).toBe(10 * 60_000)
+    expect(inits[write]?.env).toEqual({ GIT_NO_LAZY_FETCH: '0' })
+  }
+  expect(inits[`${REPO}$ git worktree list --porcelain`]?.timeoutMs).toBe(120_000)
+  expect(inits[`${REPO}$ git worktree list --porcelain`]?.env).toBeUndefined()
+})
+
+test('a claim and the pool starting together share one fetch, both from origin', { options: { autoWorktree: true, worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
+  const { clock, commands, finishFetches, toolCalls } = world(on, { fetch: 'held' })
+  await startSession($)
+  await clock.advance(1)
+  await clock.advance(1)
+  // Both wait on the one fetch, which neither would win against the other.
+  expect(commands.filter(one => one === `${REPO}$ git fetch -q origin main`)).toHaveLength(1)
+  for (let tries = 0; tries < 5; tries++) {
+    finishFetches()
+    await clock.advance(1)
+  }
+  expect(toolCalls).toContain('EnterWorktree')
+  // The claim's slot (whichever the pool was not making) starts from origin.
+  expect(commands.some(one => one.endsWith('$ git -c core.hooksPath=/dev/null checkout -q -B fish/abcdef origin/main'))).toBe(true)
+})
+
+test('a fetch still running at its timeout starts the slot from the local branch', { options: { autoWorktree: true, worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
+  const { clock, commands, toolCalls } = world(on, { fetch: 'stuck' })
+  await startSession($)
+  await clock.advance(1)
+  expect(toolCalls).toContain('EnterWorktree')
+  const dir = await repoDir()
+  expect(commands).toContain(`${dir}/1$ git -c core.hooksPath=/dev/null checkout -q -B fish/abcdef main`)
+})
+
 test("with no worktreeRoot set, slots live under the repository's .claude/worktrees/, kept out of its git status once", { options: { autoWorktree: true, setupCommand: '' } }, async ($, on) => {
   const { clock, commands, toolCalls } = world(on)
   await startSession($)

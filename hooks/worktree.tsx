@@ -104,12 +104,18 @@ export function isReadOnlyPhase(phase: Worktree['phase']): boolean {
   return phase === 'preparing' || phase === 'failed'
 }
 
-async function git($: $, args: string[], cwd: string) {
-  return $.process.run(['git', ...args], { cwd, timeoutMs: 120_000 })
+type GitRun = { timeoutMs?: number; env?: Record<string, string> }
+
+async function git($: $, args: string[], cwd: string, { timeoutMs = 120_000, env }: GitRun = {}) {
+  return $.process.run(['git', ...args], env === undefined ? { cwd, timeoutMs } : { cwd, timeoutMs, env })
 }
 
-async function gitOut($: $, args: string[], cwd: string, failure: string): Promise<string> {
-  const ran = await git($, args, cwd)
+async function gitOut($: $, args: string[], cwd: string, failure: string, run?: GitRun): Promise<string> {
+  // A git still running at its timeout rejects: that failed too.
+  const ran = await git($, args, cwd, run).catch((error: unknown) => {
+    $.ui.log(`git ${args.join(' ')} did not finish: ${String(error)}`, { to: 'debug' })
+    throw new StepError(failure)
+  })
   if (ran.exitCode !== 0) {
     $.ui.log(`git ${args.join(' ')} failed: ${ran.stderr.trim()}`, { to: 'debug' })
     throw new StepError(failure)
@@ -143,16 +149,27 @@ async function slotsRoot($: $, options: PluginOptions, main: string): Promise<st
   return `${root}/${name}-${await hash6(main)}`
 }
 
+// Whether a session's worktree is one of the pool's slots, leased and
+// released, or the desktop app's own, set up where it is (see startWorktree).
+async function isSlot($: $, options: PluginOptions, main: string, path: string): Promise<boolean> {
+  return path.startsWith(`${await slotsRoot($, options, main)}/`)
+}
+
 // A slot root inside the main checkout stays out of its git status: unless the
 // repository ignores it already, it goes in the checkout's own info/exclude.
 async function excludeFromMain($: $, main: string, path: string): Promise<void> {
   if (!path.startsWith(`${main}/`)) return
-  const root = path.slice(main.length + 1, path.lastIndexOf('/'))
-  if ((await git($, ['check-ignore', '-q', `${root}/`], main)).exitCode !== 1) return
+  await keepOutOfGit($, main, `${path.slice(main.length + 1, path.lastIndexOf('/'))}/`)
+}
+
+// A path in the main checkout, relative, added to its own info/exclude
+// unless something ignores it already.
+async function keepOutOfGit($: $, main: string, relative: string): Promise<void> {
+  if ((await git($, ['check-ignore', '-q', relative], main)).exitCode !== 1) return
   const found = await git($, ['rev-parse', '--path-format=absolute', '--git-path', 'info/exclude'], main)
   const exclude = found.stdout.trim()
   if (found.exitCode !== 0 || exclude === '') return
-  await $.process.run(['/bin/bash', '-c', 'mkdir -p "$(dirname "$1")" && printf \'%s\\n\' "$2" >> "$1"', 'bash', exclude, `/${root}/`])
+  await $.process.run(['/bin/bash', '-c', 'mkdir -p "$(dirname "$1")" && printf \'%s\\n\' "$2" >> "$1"', 'bash', exclude, `/${relative}`])
 }
 
 async function readLease($: $, path: string): Promise<Lease | null> {
@@ -167,6 +184,22 @@ async function isLeaseLive($: $, lease: Lease | null): Promise<boolean> {
 async function writeLease($: $, path: string): Promise<void> {
   const lease: Lease = { sessionId: await $.session.id(), beatAt: await $.clock.now() }
   await $.store.set(LEASE_PREFIX + path, lease)
+}
+
+// The desktop app's hold on a slot, from desktop-worktree.sh: a file beside
+// the slot, kept from the session's start until the desktop removes its
+// worktree, so it outlasts the session's process, which a lease does not.
+// A slot is offered to that hook by its .ready file.
+const HELD = '.held'
+const READY = '.ready'
+
+async function isHeld($: $, path: string): Promise<boolean> {
+  return $.fs.exists(path + HELD)
+}
+
+// Held by the desktop, or leased by a live session.
+async function isTaken($: $, path: string): Promise<boolean> {
+  return (await isHeld($, path)) || (await isLeaseLive($, await readLease($, path)))
 }
 
 async function readWarming($: $, path: string): Promise<Warming | null> {
@@ -261,8 +294,9 @@ async function refreshSlotsFor($: $, options: PluginOptions, main: string): Prom
     // A slot being made is listed before git knows it, so it shows at once.
     if (!listed.has(real) && !isWarming) continue
     const lease = await readLease($, path)
-    const isLeased = await isLeaseLive($, lease)
-    if (isLeased && path !== mine) lapsesAt = Math.min(lapsesAt, lease!.beatAt + LEASE_TTL_MS)
+    const isLive = await isLeaseLive($, lease)
+    const isLeased = isLive || (await isHeld($, path))
+    if (isLive && path !== mine) lapsesAt = Math.min(lapsesAt, lease!.beatAt + LEASE_TTL_MS)
     found.push({ path, branch: listed.get(real) ?? null, isLeased, isMine: path === mine, setup: isWarming ? mark!.step : null, isRemoving: removing.has(path) })
   }
   lapseTimer?.cancel()
@@ -323,8 +357,16 @@ async function releaseSlot($: $, path: string): Promise<void> {
 }
 
 // A git write: never runs the repository's hooks, as CommissionAI's do not.
+// Writes check out, reset and remove whole trees, which in a big repository
+// take minutes, so they get the setup command's time, not a read's. And in
+// a blobless clone (jira, AFM) a checkout needs blobs it lacks: Claude Code
+// runs git with GIT_NO_LAZY_FETCH=1, under which such a checkout grinds
+// until it is killed, so writes let git fetch them from origin, as the
+// fetch before them does.
+const GIT_WRITE: GitRun = { timeoutMs: SETUP_TIMEOUT_MS, env: { GIT_NO_LAZY_FETCH: '0' } }
+
 async function gitWrite($: $, args: string[], cwd: string, failure: string): Promise<string> {
-  return gitOut($, ['-c', 'core.hooksPath=/dev/null', ...args], cwd, failure)
+  return gitOut($, ['-c', 'core.hooksPath=/dev/null', ...args], cwd, failure, GIT_WRITE)
 }
 
 // One claim at a time per repository, across sessions: an atomic mkdir, and a
@@ -355,7 +397,13 @@ async function createSlot($: $, main: string, path: string, sha: string): Promis
   await excludeFromMain($, main, path)
   await git($, ['worktree', 'prune'], main)
   await gitWrite($, ['worktree', 'add', '-q', '--detach', '--no-checkout', path, sha], main, 'Could not create the worktree.')
-  await gitWrite($, ['-c', 'core.checkStat=minimal', 'reset', '--hard', '-q'], path, 'Could not check out the new worktree.')
+  try {
+    await gitWrite($, ['-c', 'core.checkStat=minimal', 'reset', '--hard', '-q'], path, 'Could not check out the new worktree.')
+  } catch (error) {
+    // A checkout cut short is no slot to scrub and reuse: remove it.
+    await git($, ['worktree', 'remove', '--force', '--force', path], main, GIT_WRITE)
+    throw error
+  }
   await git($, ['status', '--porcelain=v1', '-z', '--untracked-files=all'], path)
 }
 
@@ -382,8 +430,9 @@ async function scrubSlot($: $, path: string): Promise<void> {
   await gitWrite($, ['checkout', '-q', '--detach', 'HEAD'], path, 'Could not detach the slot.')
 }
 
-// Picks a slot under the lock: an idle one (listed, no live lease) or the next
-// number, reserved by its empty folder. Leased before the lock lifts.
+// Picks a slot under the lock: an idle one (listed, not held, no live lease),
+// one offered to the desktop's hook last, or the next number, reserved by its
+// empty folder. Leased before the lock lifts.
 async function pickSlot($: $, options: PluginOptions, main: string): Promise<{ path: string; isNew: boolean }> {
   const repoDir = await slotsRoot($, options, main)
   await lock($, repoDir)
@@ -391,14 +440,22 @@ async function pickSlot($: $, options: PluginOptions, main: string): Promise<{ p
     const listed = await worktreePaths($, main)
     const sessionId = await $.session.id()
     const dirs = await slotDirs($, repoDir)
+    const free: string[] = []
+    const offered: string[] = []
     for (const path of dirs) {
       if (!listed.has(await realPath($, path))) continue
       if (await isWarmingLive($, await readWarming($, path))) continue
+      if (await isHeld($, path)) continue
       const lease = await readLease($, path)
       if (lease?.sessionId !== sessionId && (await isLeaseLive($, lease))) continue
-      await writeLease($, path)
-      await signalPool($, path)
-      return { path, isNew: false }
+      ;((await $.fs.exists(path + READY)) ? offered : free).push(path)
+    }
+    const idle = free[0] ?? offered[0]
+    if (idle !== undefined) {
+      await $.process.run(['rm', '-f', idle + READY])
+      await writeLease($, idle)
+      await signalPool($, idle)
+      return { path: idle, isNew: false }
     }
     const next = dirs.reduce((most, path) => Math.max(most, Number(path.split('/').pop())), 0) + 1
     const path = `${repoDir}/${next}`
@@ -466,7 +523,7 @@ async function seedDependencies($: $, options: PluginOptions, main: string, path
     let donor: string | null = null
     const repoDir = await slotsRoot($, options, main)
     for (const sibling of await slotDirs($, repoDir)) {
-      if (sibling === path || (await isLeaseLive($, await readLease($, sibling))) || (await isWarmingLive($, await readWarming($, sibling)))) continue
+      if (sibling === path || (await isTaken($, sibling)) || (await isWarmingLive($, await readWarming($, sibling)))) continue
       if ((await $.fs.exists(`${sibling}/node_modules`)) && (await lockHash($, sibling)) === hash) {
         donor = sibling
         break
@@ -536,7 +593,7 @@ async function poolNow($: $, main: string, repoDir: string): Promise<{ total: nu
     if (!isListed && mark?.sessionId === sessionId && mark.step === QUEUED) queued.push(path)
     if (!isListed && !(await isWarmingLive($, mark))) continue
     total++
-    if (!(await isLeaseLive($, await readLease($, path)))) idle++
+    if (!(await isTaken($, path))) idle++
   }
   return { total, idle, queued }
 }
@@ -551,6 +608,110 @@ async function reserveSlot($: $, repoDir: string): Promise<string> {
     await $.process.run(['mkdir', '-p', path])
     await markWarming($, path, QUEUED)
     return path
+  } finally {
+    await unlock($, repoDir)
+  }
+}
+
+// Where desktop-worktree.sh finds the pool, the switch it reads (there while
+// Use worktrees is on) and the script itself, beside the repository's git
+// data: a path that stays put as the plugin updates, which the settings name.
+// Then the settings are wired to it.
+async function installDesktopHook($: $, main: string, repoDir: string): Promise<void> {
+  try {
+    const common = await gitOut($, ['rev-parse', '--path-format=absolute', '--git-common-dir'], main, 'Could not find the git data.')
+    const keep = async (name: string, text: string) => {
+      const path = `${common}/fishstack/${name}`
+      if ((await $.fs.read(path).catch(() => null)) !== text) await $.fs.write(path, text)
+    }
+    await keep('slots-root', `${repoDir}\n`)
+    await keep('on', 'Use worktrees is on\n')
+    await keep('desktop-worktree.sh', String(await $.fs.read(`${$.plugin.root}/hooks/desktop-worktree.sh`)))
+    await wireDesktopHook($, main, true)
+  } catch (error) {
+    $.ui.log(`desktop hook not installed: ${String(error)}`, { to: 'debug' })
+  }
+}
+
+// Use worktrees off: the hook hands out no more slots, and the settings go
+// back to Claude Code's own worktrees.
+async function unwireDesktopHook($: $, main: string): Promise<void> {
+  try {
+    const common = await gitOut($, ['rev-parse', '--path-format=absolute', '--git-common-dir'], main, 'Could not find the git data.')
+    await $.process.run(['rm', '-f', `${common}/fishstack/on`])
+    await wireDesktopHook($, main, false)
+  } catch (error) {
+    $.ui.log(`desktop hook not removed: ${String(error)}`, { to: 'debug' })
+  }
+}
+
+// The settings that send worktree creation to desktop-worktree.sh: the
+// repository's .claude/settings.local.json, the person's own, kept out of
+// git. fishStack's two entries go in while Use worktrees is on and come out
+// when it goes off; the rest stays. A file that does not parse, or a
+// WorktreeCreate hook of the person's own, is left alone. Every client
+// there reads these settings; the script hands out slots only to the
+// desktop app with fishStack on, and makes any other client the worktree
+// Claude Code would.
+const HOOK_SCRIPT = 'fishstack/desktop-worktree.sh'
+const LOCAL_SETTINGS = '.claude/settings.local.json'
+
+function hookCommand(mode: 'create' | 'remove'): string {
+  return `bash "$(git -C "$CLAUDE_PROJECT_DIR" rev-parse --path-format=absolute --git-common-dir)/${HOOK_SCRIPT}" ${mode}`
+}
+
+async function wireDesktopHook($: $, main: string, isOn: boolean): Promise<void> {
+  const path = `${main}/${LOCAL_SETTINGS}`
+  const isThere = await $.fs.exists(path)
+  if (!isThere && !isOn) return
+  let settings: Record<string, unknown> = {}
+  if (isThere) {
+    try {
+      const parsed: unknown = JSON.parse(String(await $.fs.read(path)))
+      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return
+      settings = parsed as Record<string, unknown>
+    } catch {
+      return
+    }
+  }
+  const was = settings.hooks
+  const hooks: Record<string, unknown> = was !== null && typeof was === 'object' && !Array.isArray(was) ? { ...(was as Record<string, unknown>) } : {}
+  const isOurs = (group: unknown) => JSON.stringify(group).includes(HOOK_SCRIPT)
+  const groupsOf = (event: string) => (Array.isArray(hooks[event]) ? (hooks[event] as unknown[]) : [])
+  if (isOn && groupsOf('WorktreeCreate').some(group => !isOurs(group))) return
+  for (const [event, mode] of [['WorktreeCreate', 'create'], ['WorktreeRemove', 'remove']] as const) {
+    const groups = [...groupsOf(event).filter(group => !isOurs(group)), ...(isOn ? [{ hooks: [{ type: 'command', command: hookCommand(mode) }] }] : [])]
+    if (groups.length > 0) hooks[event] = groups
+    else delete hooks[event]
+  }
+  const { hooks: _hooks, ...rest } = settings
+  const next = Object.keys(hooks).length > 0 ? { ...rest, hooks } : rest
+  if (JSON.stringify(next) === JSON.stringify(settings)) return
+  if (isOn) await keepOutOfGit($, main, LOCAL_SETTINGS)
+  await $.fs.write(path, `${JSON.stringify(next, null, 2)}\n`)
+  if (isOn) await $.ui.toast(`fishStack: desktop sessions in ${main.split('/').pop()} now start in a pool slot (${LOCAL_SETTINGS}, kept out of git).`)
+}
+
+// Keeps one slot offered to the desktop's WorktreeCreate hook, marked by its
+// .ready file, so a desktop session starts in it with no checkout. Only a
+// slot no one uses is offered: detached and clean, as a new slot or one a
+// claim scrubbed is. One a session left its branch in stays its own.
+async function offerSlot($: $, main: string, repoDir: string): Promise<void> {
+  await lock($, repoDir)
+  try {
+    const listed = await worktreePaths($, main)
+    let free: string | null = null
+    for (const path of await slotDirs($, repoDir)) {
+      if (await $.fs.exists(path + READY)) return
+      const real = await realPath($, path)
+      if (free !== null || !listed.has(real) || listed.get(real) !== null) continue
+      if ((await isWarmingLive($, await readWarming($, path))) || (await isTaken($, path))) continue
+      const status = await git($, ['status', '--porcelain'], path)
+      if (status.exitCode === 0 && status.stdout.trim() === '') free = path
+    }
+    if (free === null) return
+    await $.fs.write(free + READY, String(await $.clock.now()))
+    await signalPool($, free)
   } finally {
     await unlock($, repoDir)
   }
@@ -599,8 +760,8 @@ async function prewarm($: $, options: PluginOptions, main: string): Promise<void
       }
       if (path !== null) await markWarming($, path, `Fetching origin/${branchName}`)
       if (sha === null) {
-        const fetched = await git($, ['fetch', '-q', 'origin', branchName], main)
-        sha = await gitOut($, ['rev-parse', fetched.exitCode === 0 ? `origin/${branchName}` : branchName], main, 'Could not resolve the base.')
+        const isFetched = await fetchBase($, main, branchName)
+        sha = await gitOut($, ['rev-parse', isFetched ? `origin/${branchName}` : branchName], main, 'Could not resolve the base.')
       }
       if (path === null) {
         path = await reserveSlot($, repoDir)
@@ -615,6 +776,8 @@ async function prewarm($: $, options: PluginOptions, main: string): Promise<void
       path = null
       await refreshSlotsFor($, options, main)
     }
+    await installDesktopHook($, main, repoDir)
+    await offerSlot($, main, repoDir)
     await update($, poolNote, () => note)
   } catch (error) {
     $.ui.log(`prewarm stopped: ${String(error)}`, { to: 'debug' })
@@ -638,6 +801,25 @@ async function defaultBranch($: $, main: string): Promise<string> {
   const head = await git($, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], main)
   if (head.exitCode === 0) return head.stdout.trim().replace(/^origin\//, '')
   return gitOut($, ['rev-parse', '--abbrev-ref', 'HEAD'], main, 'Could not read the current branch.')
+}
+
+// Fetches origin's branch, true when it came: one fetch at a time per
+// repository in this process, shared by whoever asks meanwhile. A session's
+// claim and the pool's warming start together, and of two fetches into one
+// repository one loses the ref lock and starts from a stale base. A fetch
+// still running at its timeout (a checkout far behind) did not come either.
+const fetching = new Map<string, Promise<boolean>>()
+
+async function fetchBase($: $, main: string, branchName: string): Promise<boolean> {
+  const key = `${main}\n${branchName}`
+  let run = fetching.get(key)
+  if (run === undefined) {
+    run = git($, ['fetch', '-q', 'origin', branchName], main)
+      .then(ran => ran.exitCode === 0, () => false)
+      .finally(() => fetching.delete(key))
+    fetching.set(key, run)
+  }
+  return run
 }
 
 // Held by the module, not $.state: a reload runs session.start again, which
@@ -679,23 +861,35 @@ async function enter($: $, options: PluginOptions): Promise<void> {
     await fail($, new StepError('Claude Code would not move the session into the worktree.'))
     return
   }
+  await settle($, options, path, branch)
+}
+
+// Ready: the lock lifts, and a prompt that came in during the head start is
+// told to carry on.
+async function settle($: $, options: PluginOptions, path: string, branch: string | null): Promise<void> {
   await markReady($)
   await refreshSlots($, options)
   if (await read($, isHeadStartPrompted)) {
     await update($, isHeadStartPrompted, () => false)
-    await $.prompt.submit({ text: continueNote(path, branch) })
+    await $.prompt.submit({ text: continueNote(path, branch ?? 'HEAD') })
   }
 }
 
 async function prepare($: $, options: PluginOptions): Promise<void> {
-  const { main } = await read($, worktree)
+  const { main, path: given } = await read($, worktree)
   if (main === null) return
   try {
+    // The desktop's own worktree: seeded and set up where it is, no move.
+    if (given !== null && !(await isSlot($, options, main, given))) {
+      await setStep($, 'Setting up this worktree in place')
+      await seedDependencies($, options, main, given, (label, isWarning) => setStep($, label, isWarning))
+      await settle($, options, given, (await read($, worktree)).branch)
+      return
+    }
     const branchName = await defaultBranch($, main)
     await setStep($, `Fetching the latest origin/${branchName}`)
     let base = `origin/${branchName}`
-    const fetched = await git($, ['fetch', '-q', 'origin', branchName], main)
-    if (fetched.exitCode !== 0) {
+    if (!(await fetchBase($, main, branchName))) {
       base = branchName
       await setStep($, `Could not fetch origin; starting from the local ${branchName}`, true)
     }
@@ -743,14 +937,14 @@ let carried: { worktree: Worktree; elsewhere: string | null; isBandHidden: boole
 
 // After a /clear: the session that follows works where the last one did,
 // in the same slot, its lease kept alive from here.
-async function carryOverClear($: $): Promise<void> {
+async function carryOverClear($: $, options: PluginOptions): Promise<void> {
   if (carried === null) return
   const { worktree: was, elsewhere: where, isBandHidden: wasHidden } = carried
   carried = null
   await update($, worktree, () => was)
   await update($, elsewhere, () => where)
   await update($, isBandHidden, () => wasHidden)
-  if (was.phase === 'ready' && was.path !== null) startHeartbeat($, was.path)
+  if (was.phase === 'ready' && was.path !== null && was.main !== null && (await isSlot($, options, was.main, was.path))) startHeartbeat($, was.path)
 }
 
 export const AUTO_WORKTREE_KEY = 'autoWorktree'
@@ -793,7 +987,7 @@ async function removeSlot($: $, options: PluginOptions, path: string): Promise<v
     try {
       isFree =
         path !== (await read($, worktree)).path &&
-        !(await isLeaseLive($, await readLease($, path))) &&
+        !(await isTaken($, path)) &&
         !(await isWarmingLive($, await readWarming($, path)))
       if (isFree) await writeLease($, path)
     } finally {
@@ -808,6 +1002,7 @@ async function removeSlot($: $, options: PluginOptions, path: string): Promise<v
     const moved = await $.process.run(['mv', path, gone])
     if (moved.exitCode !== 0) throw new StepError(`Could not move slot ${number} out of the pool.`)
     for (const prefix of [LEASE_PREFIX, SETUP_PREFIX, WARMING_PREFIX]) await $.store.delete(prefix + path)
+    await $.process.run(['rm', '-f', path + READY])
     await $.process.run(['rm', '-rf', gone], { timeoutMs: SETUP_TIMEOUT_MS })
     await git($, ['worktree', 'prune'], main)
     await signalPool($, path)
@@ -833,9 +1028,10 @@ async function isAutoOn($: $, options: PluginOptions): Promise<boolean> {
 async function setAuto($: $, options: PluginOptions, isOn: boolean): Promise<void> {
   await $.store.set(AUTO_WORKTREE_KEY, isOn)
   $.ui.invalidate('ui.render')
-  if (!isOn) return
   const main = (await read($, worktree)).main ?? (await repoMain($))
-  if (main !== null) $.clock.after(0, () => void prewarm($, options, main))
+  if (main === null) return
+  if (isOn) $.clock.after(0, () => void prewarm($, options, main))
+  else await unwireDesktopHook($, main)
 }
 
 async function startWorktree($: $, options: PluginOptions, cwd: string, { isForced = false, isDesktop = false } = {}): Promise<void> {
@@ -849,7 +1045,7 @@ async function startWorktree($: $, options: PluginOptions, cwd: string, { isForc
     if (poolMain !== null) $.clock.after(0, () => void prewarm($, options, poolMain))
   }
   if (current.phase === 'ready' && current.path !== null) {
-    startHeartbeat($, current.path)
+    if (current.main !== null && (await isSlot($, options, current.main, current.path))) startHeartbeat($, current.path)
     return
   }
   if (current.phase === 'preparing') {
@@ -896,15 +1092,24 @@ async function startWorktree($: $, options: PluginOptions, cwd: string, { isForc
   if (here !== main) {
     // A worktree Claude Code made itself (claude --worktree, the desktop's
     // worktree option): those are made before any mod loads, so its
-    // WorktreeCreate never reaches fishStack. Adopt it: a slot on its name,
-    // read-only until the slot is ready, then the session moves in. Any
-    // other worktree (a slot of ours among them) is left as it is.
-    // Work already begun there (a reload mid-session runs this again) stays
-    // with it: a slot starts from origin, and moving would leave it behind.
+    // WorktreeCreate never reaches fishStack. Any other worktree (a slot of
+    // ours among them) is left as it is. Work already begun there (a reload
+    // mid-session runs this again) stays with it.
     if (!here.startsWith(`${main}/.claude/worktrees/`) || !(await isUntouched($, here))) {
       await update($, elsewhere, () => here)
       return
     }
+    // The desktop app's: set up where it is, read-only until then. The app's
+    // diff, PR and archive follow the worktree it made, and it reuses its
+    // worktrees as sessions end, so a slot would only duplicate it.
+    if (isDesktop) {
+      const branch = (await git($, ['rev-parse', '--abbrev-ref', 'HEAD'], here)).stdout.trim() || null
+      await update($, worktree, (): Worktree => ({ ...IDLE_WORKTREE, main, path: here, branch }))
+      await beginWorktree($, options)
+      return
+    }
+    // From the terminal: adopted into a slot on its name, read-only until
+    // the slot is ready, then the session moves in. A slot starts from origin.
     adoptedName = here.split('/').pop()!.replace(/[^A-Za-z0-9._-]+/g, '-').slice(0, 40)
   } else if (main !== (await realPath($, repo.root))) {
     return
@@ -953,8 +1158,7 @@ async function claimForCreate($: $, options: PluginOptions, cwd: string, name: s
     const repo = await $.session.repo()
     const main = await realPath($, repo?.root ?? top)
     const branchName = await defaultBranch($, main)
-    const fetched = await git($, ['fetch', '-q', 'origin', branchName], main)
-    const base = fetched.exitCode === 0 ? `origin/${branchName}` : branchName
+    const base = (await fetchBase($, main, branchName)) ? `origin/${branchName}` : branchName
     const baseSha = await gitOut($, ['rev-parse', base], main, `Could not resolve ${base}.`)
     const branch = `fish/${name.replace(/[^A-Za-z0-9._-]+/g, '-').slice(0, 40) || (await $.session.id()).slice(0, 6)}`
     hasStarted = true
@@ -1021,14 +1225,14 @@ export function registerWorktree(on: On, options: PluginOptions): void {
       return next(e)
     }
     heartbeat?.cancel()
-    const { path } = await read($, worktree)
-    if (path !== null) await releaseSlot($, path)
+    const { main, path } = await read($, worktree)
+    if (main !== null && path !== null && (await isSlot($, options, main, path))) await releaseSlot($, path)
     return next(e)
   })
 
   on('classic.SessionStart', { source: 'clear' }, async ($, e, next) => {
     const done = await next(e)
-    await carryOverClear($)
+    await carryOverClear($, options)
     return done
   })
 
@@ -1227,6 +1431,7 @@ export function registerWorktree(on: On, options: PluginOptions): void {
     const select = (id: Tab) => void update($, tab, () => id)
 
     const isAuto = await isAutoOn($, options)
+    const isInSlot = state.main !== null && state.path !== null && (await isSlot($, options, state.main, state.path))
     const note = await read($, poolNote)
     const settingUp = list.filter(one => one.setup !== null).length
     const idle = list.filter(one => !one.isLeased && one.setup === null).length
@@ -1236,7 +1441,7 @@ export function registerWorktree(on: On, options: PluginOptions): void {
             <Text bold>Where the agent works</Text>
             <Text dimColor>
               {isAuto
-                ? "On: new sessions in a main checkout, and Claude's own worktrees, get a lasting slot. Read-only until it is ready, then the lock lifts. In the desktop app, its worktree option decides."
+                ? "On: new sessions in a main checkout, and Claude's own worktrees, get a lasting slot. Read-only until it is ready, then the lock lifts. In the desktop app, its worktree option decides, and its worktree is set up where it is."
                 : "Off: fishStack leaves worktrees to Claude Code (the desktop's worktree option, claude --worktree, EnterWorktree)."}
             </Text>
             {isAuto && (
@@ -1447,9 +1652,9 @@ export function registerWorktree(on: On, options: PluginOptions): void {
             state.path !== null && (
               <Box flexDirection="column" marginTop={1}>
                 {detail('Main', shortPath(state.main ?? ''))}
-                {detail('Slot', shortPath(state.path))}
+                {detail(isInSlot ? 'Slot' : 'Worktree', shortPath(state.path))}
                 {detail('Branch', state.branch ?? '')}
-                {detail('Base', `${state.base ?? ''}${state.baseSha === null ? '' : ` @ ${state.baseSha.slice(0, 7)}`}`)}
+                {state.base !== null && detail('Base', `${state.base}${state.baseSha === null ? '' : ` @ ${state.baseSha.slice(0, 7)}`}`)}
               </Box>
             ),
           ],
@@ -1496,7 +1701,7 @@ const STAGES = ['Fetch', 'Claim a slot', 'Seed', 'Move in']
 // Which of the four stages the steps so far have reached.
 function stageOf(state: Worktree): number {
   if (state.phase === 'ready') return STAGES.length
-  const patterns = [/^Fetching|^Could not fetch/, /^Claiming|^Reusing slot|^Creating a new worktree/, /^Cloning|^Could not clone|^Running|^Setup already done/, /^Moving the session in/]
+  const patterns = [/^Fetching|^Could not fetch/, /^Claiming|^Reusing slot|^Creating a new worktree|^Setting up this worktree in place/, /^Cloning|^Could not clone|^Running|^Setup already done/, /^Moving the session in/]
   let reached = 0
   for (const step of state.steps) {
     patterns.forEach((pattern, index) => {
@@ -1526,7 +1731,11 @@ function stepper(stage: number, phase: WorktreePhase, width: number): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="58" viewBox="0 0 ${width} 58">${parts}</svg>`
 }
 
+// The Release button: also lets go of a desktop hold left behind (a session
+// deleted without its worktree removed, or a subagent's, which the desktop
+// never removes).
 async function releaseAndRefresh($: $, path: string, options: PluginOptions): Promise<void> {
+  await $.process.run(['rm', '-f', path + HELD])
   await releaseSlot($, path)
   await refreshSlots($, options)
 }

@@ -135,6 +135,7 @@ export function world(
   }
   on('fs.write', ($, e) => {
     state.written.push(e.path)
+    if (files !== undefined) files[e.path] = e.text
     return { value: undefined }
   })
   on('fs.stat', ($, e) => ({ value: { kind: /\.\w+$/.test(e.path) ? 'file' : 'dir', size: 0, mtimeMs: 0, isLink: false, realPath: e.path } }))

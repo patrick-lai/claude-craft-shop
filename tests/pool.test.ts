@@ -403,3 +403,67 @@ test('a claim and a release write the pool signal other sessions watch', { optio
   await $.session.end({ reason: 'prompt_input_exit', sessionId: 's1', resume: { id: 's1' } } as never)
   expect(state.written).toEqual([`${dir}/.changed`])
 })
+
+// The desktop app's WorktreeCreate hook (desktop-worktree.sh) takes the slot
+// offered to it and holds it with a file beside it until the desktop removes
+// its worktree: no session claims a held slot, whatever its lease says.
+test('a slot the desktop holds is never claimed, and Release lets go of the hold', { options: { autoWorktree: true, worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
+  const dir = await repoDir()
+  const { clock, commands } = world(on, { slots: [1, 2].map(n => `${dir}/${n}`), files: { [`${dir}/1.held`]: 'desktop-session\n' } })
+  await startSession($)
+  await clock.advance(1)
+  // Slot 2 is offered to the desktop meanwhile, so the session takes the one
+  // warmed after it, never the held one.
+  expect(commands).toContain(`${dir}/3$ git -c core.hooksPath=/dev/null checkout -q -B fish/abcdef origin/main`)
+  expect(commands.some(one => one.startsWith(`${dir}/1$ git -c core.hooksPath=/dev/null checkout -q -B`))).toBe(false)
+
+  const ui = await mountPane($, 'desktop')
+  await activate(ui, 'tab-worktree')
+  await activate(ui, `slot-release-${dir}/1`)
+  expect(commands).toContain(`${REPO}$ rm -f ${dir}/1.held`)
+})
+
+test("the pool offers one clean, detached slot to the desktop's hook, and installs the hook where the repository's settings find it", { options: { autoWorktree: true, worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
+  const dir = await repoDir()
+  const { clock, written } = world(on, { slots: [1, 2, 3].map(n => `${dir}/${n}`) })
+  on('fs.read', ($, e) => (e.path.endsWith('/hooks/desktop-worktree.sh') ? { value: '#!/bin/bash\n' } : Promise.reject(new Error('ENOENT'))))
+  await $.session.start({ cwd: '/other/wt', surface: 'terminal', isInteractive: true })
+  await clock.advance(1)
+  expect(written.filter(path => path.endsWith('.ready'))).toEqual([`${dir}/1.ready`])
+  expect(written).toContain(`${REPO}/.git/fishstack/slots-root`)
+  expect(written).toContain(`${REPO}/.git/fishstack/desktop-worktree.sh`)
+})
+
+// The hook reaches the desktop only through settings: fishStack wires the
+// repository's own .claude/settings.local.json while Use worktrees is on,
+// keeps it out of git, and takes its entries out again when it goes off.
+const LOCAL = `${REPO}/.claude/settings.local.json`
+
+test('Use worktrees wires the local settings to the hook, the rest kept and out of git, and unwires them when off', { options: { autoWorktree: true, worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
+  const files: Record<string, string> = { [LOCAL]: '{"disabledMcpjsonServers":["x"],"hooks":{"Stop":[{"hooks":[{"type":"command","command":"true"}]}]}}' }
+  const { clock, commands } = world(on, { files })
+  await $.session.start({ cwd: '/other/wt', surface: 'terminal', isInteractive: true })
+  await clock.advance(1)
+  const wired = JSON.parse(files[LOCAL]!)
+  expect(wired.disabledMcpjsonServers).toEqual(['x'])
+  expect(wired.hooks.Stop).toHaveLength(1)
+  expect(wired.hooks.WorktreeCreate[0].hooks[0].command).toContain('/fishstack/desktop-worktree.sh" create')
+  expect(wired.hooks.WorktreeRemove[0].hooks[0].command).toContain('/fishstack/desktop-worktree.sh" remove')
+  expect(commands).toContain(`${REPO}$ git check-ignore -q .claude/settings.local.json`)
+  expect(files[`${REPO}/.git/fishstack/on`]).toBeDefined()
+
+  const ui = await mountPane($, 'desktop')
+  await activate(ui, 'tab-worktree')
+  await activate(ui, 'auto-worktree')
+  expect(JSON.parse(files[LOCAL]!)).toEqual({ disabledMcpjsonServers: ['x'], hooks: { Stop: [{ hooks: [{ type: 'command', command: 'true' }] }] } })
+  expect(commands).toContain(`${REPO}$ rm -f ${REPO}/.git/fishstack/on`)
+})
+
+test("a WorktreeCreate hook of the person's own is left alone", { options: { autoWorktree: true, worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
+  const theirs = '{"hooks":{"WorktreeCreate":[{"hooks":[{"type":"command","command":"my-worktree"}]}]}}'
+  const files: Record<string, string> = { [LOCAL]: theirs }
+  const { clock } = world(on, { files })
+  await $.session.start({ cwd: '/other/wt', surface: 'terminal', isInteractive: true })
+  await clock.advance(1)
+  expect(files[LOCAL]).toBe(theirs)
+})

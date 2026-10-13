@@ -79,7 +79,7 @@ test('a VS Code session, headless at start, claims its worktree when the editor 
 
 // The desktop's composer has its own worktree switch: unticked, the session
 // starts in the main checkout and stays there; ticked, the desktop makes a
-// worktree under .claude/worktrees/, which is adopted.
+// worktree under .claude/worktrees/, which is set up where it is.
 test("a desktop session in the main checkout stays there: the desktop's worktree option was off", { options: { autoWorktree: true } }, async ($, on) => {
   const { clock, toolCalls } = world(on)
   on('session.surfaces', () => ({ value: [] }))
@@ -98,14 +98,26 @@ test("a desktop session in the main checkout stays there: the desktop's worktree
   expect(toolCalls).toContain('EnterWorktree')
 })
 
-test("a desktop session in the worktree its option made is adopted into a slot", { options: { autoWorktree: true, setupCommand: '' } }, async ($, on) => {
-  const { clock, toolCalls } = world(on)
+// The desktop's diff, PR and archive follow the worktree it made, so the
+// session stays in it: set up there, with no slot and no move.
+test("a desktop session in the worktree its option made is set up there and stays", { options: { autoWorktree: true, setupCommand: 'pnpm install' } }, async ($, on) => {
+  const { clock, commands, toolCalls, saved, written } = world(on)
   const made = '/repo/.claude/worktrees/feat-x'
   on('session.surfaces', () => ({ value: ['desktop'] }))
+  on('session.end', ($, e) => ({ sessionId: e.sessionId }))
   await $.session.start({ cwd: made, surface: null, isInteractive: false })
   expect((await $.tool.call(EDIT)).deny).toContain('Read-only until the worktree is ready')
   await clock.advance(1)
-  expect(toolCalls).toContain('EnterWorktree')
+  expect(commands).toContain(`${made}$ /bin/bash -lc pnpm install`)
+  expect(commands.some(one => one.includes('checkout -q -B'))).toBe(false)
+  expect(toolCalls).not.toContain('EnterWorktree')
+  expect((await $.tool.call(EDIT)).deny).toBeUndefined()
+
+  // Not a slot: no lease, and nothing given back to the pool as it ends.
+  await clock.advance(120_000)
+  await $.session.end({ reason: 'prompt_input_exit', sessionId: 's1', resume: { id: 's1' } } as never)
+  expect(saved[`lease:${made}`]).toBeUndefined()
+  expect(written).not.toContain('/repo/.claude/worktrees/.changed')
 })
 
 test('Perm worktree is off by default: no slot and no read-only guard', async ($, on) => {

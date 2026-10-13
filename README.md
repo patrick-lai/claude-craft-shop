@@ -68,7 +68,24 @@ It's fast because the work happens before you need it:
 - **No copying.** `node_modules` is cloned copy-on-write (APFS), so a slot costs almost no disk until something changes.
 - **Nothing lost.** A slot is reused once its session ends. Anything left uncommitted is saved under `refs/fish/backup/` first.
 
-It works with Claude Code's own worktrees too. `claude --worktree feat-x` and the desktop app's worktree option land in a slot on `fish/feat-x`. In the desktop app, that option decides: with **worktree** unticked in the composer, the session stays in the main checkout (**Create worktree now** still makes one).
+It works with Claude Code's own worktrees too. `claude --worktree feat-x` lands in a slot on `fish/feat-x`. In the desktop app, its worktree option decides. Ticked, the session stays in the worktree the app made, which fishStack sets up in place (dependencies cloned, `setupCommand` run, read-only until then), so the app's diff, PR and archive keep following it. Unticked, the session stays in the main checkout (**Create worktree now** still claims a slot).
+
+### The desktop app, with no checkout
+
+In a big repository the desktop's own worktree is the slow part: a full checkout for every session, and it refuses to make one at all with less free disk than 2.5 times the repository's git pack. Give the desktop the pool's slots instead. Its `WorktreeCreate` hook then takes the slot fishStack keeps offered (clean, detached, dependencies in place), holds it for the session, checks out the session's branch from origin and hands it over. The desktop tracks that slot as the session's worktree, so its diff, PR and archive follow it. When the desktop removes the worktree, the hold goes and the slot returns to the pool. With no slot offered, the hook makes a new one, as slow as the desktop's own.
+
+It sets itself up. The first session in a repository with **Use worktrees** on keeps the hook beside the repository's git data (`.git/fishstack/`) and wires it into the repository's `.claude/settings.local.json`, your own settings for it, kept out of git (added to the repository's local `info/exclude` if nothing ignores it). Everything else in that file stays, a toast says it happened, and turning **Use worktrees** off takes fishStack's entries out again. A file that doesn't parse, or a `WorktreeCreate` hook of your own there, is left alone.
+
+Every Claude Code client in the repository reads those settings, so the hook decides at each call who it is for:
+
+| Caller | Gets |
+| - | - |
+| The desktop app, fishStack enabled, **Use worktrees** on | A slot from the pool |
+| The CLI with fishStack | A slot, as before: fishStack answers its worktree creation itself, before the hook |
+| Anything else: ACP, the SDK, the CLI without fishStack | The worktree Claude Code makes itself, `.claude/worktrees/<name>` on `worktree-<name>` from origin's default branch |
+| Any client once fishStack is disabled or **Use worktrees** is off | Claude Code's own worktree, and the hook takes its entries out of the settings |
+
+The desktop runs the hook only for a session a person starts, so a fork or a session Claude starts in that repository gets no worktree. A hook replaces `.worktreeinclude`, so those files aren't copied. `e2e/desktop-hook.sh` checks the hook against a throwaway repository.
 
 <p align="center">
   <img src="docs/media/worktree-desktop.png" width="760" alt="The Worktrees tab in the desktop app: Use worktrees on, the pool's status, this session's slot and branch, and the slots list">

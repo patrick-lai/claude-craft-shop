@@ -17,7 +17,9 @@
 set -euo pipefail
 
 hook="$(cd "$(dirname "$0")/.." && pwd)/hooks/desktop-worktree.sh"
-work=$(mktemp -d)
+# Its real path: git prints paths with symlinks resolved (/var is
+# /private/var on macOS).
+work=$(cd "$(mktemp -d)" && pwd -P)
 trap 'rm -rf "$work"' EXIT
 repo="$work/repo"
 pool="$work/pool"

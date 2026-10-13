@@ -71,6 +71,7 @@ const DEFAULT_MIN_FREE_GB = 20
 const SETUP_PREFIX = 'setup:'
 type SetupRun = { command: string; lockHash: string }
 const LOCKFILES = ['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lock', 'bun.lockb']
+const IN_REPO_ROOT = '.claude/worktrees/fishstack'
 
 export const READ_ONLY_DENY =
   'Read-only until the worktree is ready. fishStack is preparing a worktree for this session; read, search and plan for now, and you will be moved there with full access.'
@@ -120,10 +121,26 @@ async function expandHome($: $, path: string): Promise<string> {
   return `${home}${path.slice(1)}`
 }
 
+// Where a repository's slots live: by default inside its main checkout, under
+// .claude/worktrees/ where Claude Code keeps its own, so EnterWorktree moves in
+// without asking; with a worktreeRoot set, under <root>/<repo>-<hash>.
 async function slotsRoot($: $, options: PluginOptions, main: string): Promise<string> {
-  const root = await expandHome($, String(options.worktreeRoot || '~/.fishstack/worktrees'))
+  if (!options.worktreeRoot) return `${main}/${IN_REPO_ROOT}`
+  const root = await expandHome($, String(options.worktreeRoot))
   const name = main.split('/').pop() ?? 'repo'
   return `${root}/${name}-${await hash6(main)}`
+}
+
+// A slot root inside the main checkout stays out of its git status: unless the
+// repository ignores it already, it goes in the checkout's own info/exclude.
+async function excludeFromMain($: $, main: string, path: string): Promise<void> {
+  if (!path.startsWith(`${main}/`)) return
+  const root = path.slice(main.length + 1, path.lastIndexOf('/'))
+  if ((await git($, ['check-ignore', '-q', `${root}/`], main)).exitCode !== 1) return
+  const found = await git($, ['rev-parse', '--path-format=absolute', '--git-path', 'info/exclude'], main)
+  const exclude = found.stdout.trim()
+  if (found.exitCode !== 0 || exclude === '') return
+  await $.process.run(['/bin/bash', '-c', 'mkdir -p "$(dirname "$1")" && printf \'%s\\n\' "$2" >> "$1"', 'bash', exclude, `/${root}/`])
 }
 
 async function readLease($: $, path: string): Promise<Lease | null> {
@@ -295,6 +312,7 @@ async function unlock($: $, repoDir: string): Promise<void> {
 // base, then checked out with stat checks kept minimal, then the index warmed
 // so the session's first git status is quick.
 async function createSlot($: $, main: string, path: string, sha: string): Promise<void> {
+  await excludeFromMain($, main, path)
   await git($, ['worktree', 'prune'], main)
   await gitWrite($, ['worktree', 'add', '-q', '--detach', '--no-checkout', path, sha], main, 'Could not create the worktree.')
   await gitWrite($, ['-c', 'core.checkStat=minimal', 'reset', '--hard', '-q'], path, 'Could not check out the new worktree.')

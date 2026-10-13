@@ -80,7 +80,7 @@ It works with Claude Code's own worktrees too. `claude --worktree feat-x` and th
 1. **Fetch.** `git fetch origin <default>`. If that fails, it starts from the local branch and says so.
 2. **Claim.** Under a per-repository lock (an atomic `mkdir`, broken after 30 s if its holder died), it takes an idle slot or makes the next one. A new slot is `git worktree add --detach --no-checkout`, then `reset --hard` with `core.checkStat=minimal`, then an index warm-up. A used slot is scrubbed: uncommitted work goes to `refs/fish/backup/<slot>-<time>`, then `reset --hard`, `clean -fd` (ignored files such as `node_modules` stay) and `checkout -B fish/<name>`. Git hooks never run on these writes.
 3. **Seed.** Each missing `node_modules` (up to six folders deep) is cloned with `cp -c` into a staging folder, then renamed into place. The source is an idle sibling slot with the same lockfiles, or else the main checkout. Then `setupCommand` runs, unless this slot already ran it with these lockfiles.
-4. **Move in.** The session enters the slot (`EnterWorktree`) as soon as it is ready, even mid-turn. Claude Code asks you once to confirm, because the slot sits outside `.claude/worktrees/`.
+4. **Move in.** The session enters the slot (`EnterWorktree`) as soon as it is ready, even mid-turn. Slots live under the repository's `.claude/worktrees/`, where Claude Code keeps its own, so the move needs no confirming. Set `worktreeRoot` elsewhere and Claude Code asks you to confirm each move.
 
 The pool stops warming when free disk drops under `minFreeGb` (20 GB), and the tab says why. During the head start, the guard refuses Edit, Write, MultiEdit, NotebookEdit and ExitPlanMode. It also refuses any shell command that is not a known read (`ls`, `cat`, `rg`, read-only `git`, `sed -n` and the like). A redirect anywhere but `/dev/null` counts as a write.
 </details>
@@ -175,7 +175,7 @@ Set them in `/config`. They're stored under `pluginConfigs["fishstack"].options`
 | Option | Default | What it does |
 | - | - | - |
 | `autoWorktree` | `false` | Use worktrees' starting value. Once you flip the switch, your choice sticks. |
-| `worktreeRoot` | `~/.fishstack/worktrees` | Where slots live: `<root>/<repo>-<hash>/<n>`. |
+| `worktreeRoot` | empty | Where slots live. Empty: `<repo>/.claude/worktrees/fishstack/<n>`, added to the repository's local `info/exclude` if nothing ignores it yet. Set: `<root>/<repo>-<hash>/<n>`, and Claude Code asks before each move in. |
 | `setupCommand` | empty | Runs in a new slot before the session moves in, `pnpm install` say. Times out after 10 minutes. |
 | `minFreeGb` | `20` | The pool stops warming below this much free disk. |
 | `autoAnswerMinutes` | `15` | How long Autopilot waits before answering for you. |

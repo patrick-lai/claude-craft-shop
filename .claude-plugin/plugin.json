@@ -1,6 +1,6 @@
 {
   "name": "fishstack",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "description": "A fishStack pane for Claude Code: a perm worktree with a read-only head start, crew dials and a context library.",
   "author": {
     "name": "Patrick Lai"
@@ -19,8 +19,8 @@
     "worktreeRoot": {
       "type": "string",
       "title": "Worktree root",
-      "description": "Where worktree slots are kept.",
-      "default": "~/.fishstack/worktrees"
+      "description": "Where worktree slots are kept. Empty keeps them in the repository's .claude/worktrees/fishstack/, where Claude Code enters them without asking.",
+      "default": ""
     },
     "setupCommand": {
       "type": "string",

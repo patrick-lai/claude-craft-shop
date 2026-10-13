@@ -143,6 +143,7 @@ export function world(
   }
   for (const path of [...slots, ...folders]) makeDir(path)
   for (const path of slots) worktrees.set(path, null)
+  const excluded = new Set<string>()
   on('process.run', ($, e) => {
     const argv = e.argv
     const command = argv.join(' ')
@@ -181,6 +182,8 @@ export function world(
       return ran([...dirs].filter(one => parentOf(one) === dir).join('\n'))
     }
     if (argv[0] === 'find') return ran((nodeModules[argv[1]!] ?? []).map(one => `${argv[1]}/${one}`).join('\n'))
+    // A line appended to the main checkout's info/exclude.
+    if (argv[0] === '/bin/bash' && argv[1] === '-c' && argv[4] === `${REPO}/.git/info/exclude`) excluded.add(argv[5]!)
     if (argv[0] === '/bin/bash') return ran()
     if (argv[0] !== 'git') return ran('', 1)
     // Git, its -c settings set aside.
@@ -189,6 +192,9 @@ export function world(
     // A worktree's top level is its own folder; every one shares /repo/.git.
     if (sub === 'rev-parse --show-toplevel') return ran(`${cwd.startsWith(`${REPO}/.claude/worktrees/`) || cwd.startsWith('/slots/') || cwd.startsWith('/other/') ? cwd : REPO}\n`)
     if (sub === 'rev-parse --path-format=absolute --git-common-dir') return ran(`${REPO}/.git\n`)
+    if (sub === 'rev-parse --path-format=absolute --git-path info/exclude') return ran(`${REPO}/.git/info/exclude\n`)
+    // Nothing in /repo is ignored but what fishStack excluded.
+    if (sub.startsWith('check-ignore -q ')) return ran('', excluded.has(`/${args[2]}`) ? 0 : 1)
     if (sub === 'symbolic-ref --short refs/remotes/origin/HEAD') return ran('origin/main\n')
     if (sub === 'fetch -q origin main') return ran()
     if (sub === 'rev-parse origin/main') return ran('0123456789abcdef\n')

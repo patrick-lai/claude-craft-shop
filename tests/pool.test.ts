@@ -46,6 +46,27 @@ test('a session claims a slot and the pool tops itself up behind it, one spare k
   expect(created(commands).map(one => one.split(' ').at(-2))).toEqual([`${dir}/1`, `${dir}/2`, `${dir}/3`])
 })
 
+test("with no worktreeRoot set, slots live under the repository's .claude/worktrees/, kept out of its git status once", { options: { autoWorktree: true, setupCommand: '' } }, async ($, on) => {
+  const { clock, commands, toolCalls } = world(on)
+  await startSession($)
+  await clock.advance(1)
+  const dir = `${REPO}/.claude/worktrees/fishstack`
+  expect(toolCalls).toContain('EnterWorktree')
+  expect(created(commands).map(one => one.split(' ').at(-2))).toEqual([`${dir}/1`, `${dir}/2`, `${dir}/3`])
+  expect(commands.filter(one => one.includes('info/exclude') && one.includes('/bin/bash'))).toEqual([
+    `${REPO}$ /bin/bash -c mkdir -p "$(dirname "$1")" && printf '%s\\n' "$2" >> "$1" bash ${REPO}/.git/info/exclude /.claude/worktrees/fishstack/`,
+  ])
+})
+
+test('a session that starts in a slot under .claude/worktrees/ is that slot\'s, not adopted as a Claude Code worktree', { options: { setupCommand: '' } }, async ($, on) => {
+  const dir = `${REPO}/.claude/worktrees/fishstack`
+  const { commands, toolCalls } = world(on, { slots: [`${dir}/2`] })
+  await $.session.start({ cwd: `${dir}/2`, surface: 'terminal', isInteractive: true })
+  expect(toolCalls).not.toContain('EnterWorktree')
+  expect(created(commands)).toEqual([])
+  expect((await $.tool.call({ tool: 'Edit', file_path: `${dir}/2/a.ts`, old_string: 'a', new_string: 'b' })).deny).toBeUndefined()
+})
+
 test('a slot left dirty is backed up, cleaned and detached before reuse; one another session holds is skipped', { options: { autoWorktree: true, worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
   const dir = await repoDir()
   // Slot 1 is another session's, alive; slot 2 was left dirty by a crash.

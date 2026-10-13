@@ -39,8 +39,10 @@ export function registerPane(on: On): void {
   // render) stays drawn as the desktop's placeholder unless the redraw the
   // engine makes leaves it out: every drawn control falls back to its Button
   // until a load (session.ts clears it at session.start) tries them again.
+  // The transcript says so: the whole session draws plainer from here, and
+  // the debug log, the only other place the fault is named, is rarely on.
   on('ui.fault', async ($, e, next) => {
-    $.ui.log(`Client ${e.element} (${e.module}) failed at ${e.phase}: ${e.reason}`, { to: 'debug' })
+    $.ui.log(`fishStack: drawn control ${e.element} (${e.module}) failed at ${e.phase} on ${e.surface}: ${e.reason}. Buttons stand in until the next session.`)
     await update($, isClientDown, () => true)
     return next(e)
   })

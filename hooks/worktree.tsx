@@ -116,12 +116,12 @@ export function isReadOnlyPhase(phase: Worktree['phase']): boolean {
   return phase === 'preparing' || phase === 'failed'
 }
 
-async function git($: $, args: string[], cwd: string) {
-  return $.process.run(['git', ...args], { cwd, timeoutMs: 120_000 })
+async function git($: $, args: string[], cwd: string, timeoutMs = 120_000) {
+  return $.process.run(['git', ...args], { cwd, timeoutMs })
 }
 
-async function gitOut($: $, args: string[], cwd: string, failure: string): Promise<string> {
-  const ran = await git($, args, cwd)
+async function gitOut($: $, args: string[], cwd: string, failure: string, timeoutMs?: number): Promise<string> {
+  const ran = await git($, args, cwd, timeoutMs)
   if (ran.exitCode !== 0) {
     $.ui.log(`git ${args.join(' ')} failed: ${ran.stderr.trim()}`, { to: 'debug' })
     // Git's last line says why, which the step alone cannot.
@@ -337,8 +337,11 @@ async function releaseSlot($: $, path: string): Promise<void> {
 }
 
 // A git write: never runs the repository's hooks, as CommissionAI's do not.
+// Writes check out, reset and remove whole trees, which in a big repository
+// take minutes (a blobless clone fetches the blobs as it goes), so they get
+// the setup command's time, not a read's.
 async function gitWrite($: $, args: string[], cwd: string, failure: string): Promise<string> {
-  return gitOut($, ['-c', 'core.hooksPath=/dev/null', ...args], cwd, failure)
+  return gitOut($, ['-c', 'core.hooksPath=/dev/null', ...args], cwd, failure, SETUP_TIMEOUT_MS)
 }
 
 // One claim at a time per repository, across sessions: an atomic mkdir, and a
@@ -369,7 +372,13 @@ async function createSlot($: $, main: string, path: string, sha: string): Promis
   await excludeFromMain($, main, path)
   await git($, ['worktree', 'prune'], main)
   await gitWrite($, ['worktree', 'add', '-q', '--detach', '--no-checkout', path, sha], main, 'Could not create the worktree.')
-  await gitWrite($, ['-c', 'core.checkStat=minimal', 'reset', '--hard', '-q'], path, 'Could not check out the new worktree.')
+  try {
+    await gitWrite($, ['-c', 'core.checkStat=minimal', 'reset', '--hard', '-q'], path, 'Could not check out the new worktree.')
+  } catch (error) {
+    // A checkout cut short is no slot to scrub and reuse: remove it.
+    await git($, ['worktree', 'remove', '--force', '--force', path], main, SETUP_TIMEOUT_MS)
+    throw error
+  }
   await git($, ['status', '--porcelain=v1', '-z', '--untracked-files=all'], path)
 }
 

@@ -56,6 +56,7 @@ export function world(
     slots = [],
     onBranch = {},
     branches = [],
+    isCheckoutCut = false,
     folders = [],
     isMoveHeld = false,
     isSetupHeld = false,
@@ -71,6 +72,8 @@ export function world(
     onBranch?: Record<string, string>
     // Branches that exist with no worktree on them.
     branches?: string[]
+    // A new worktree's checkout is cut short, as a timeout cuts it.
+    isCheckoutCut?: boolean
     // Folders already on disk, by path.
     folders?: string[]
     // EnterWorktree waits for state.confirmMove, as Claude Code's dialog does.
@@ -241,6 +244,13 @@ export function world(
       worktrees.set(args[5]!, null)
       return ran()
     }
+    if (sub.startsWith('worktree remove --force --force ')) {
+      const path = args[4]!
+      worktrees.delete(path)
+      for (const one of [...dirs]) if (one === path || one.startsWith(`${path}/`)) dirs.delete(one)
+      return ran()
+    }
+    if (sub === 'reset --hard -q' && isCheckoutCut) return ran('', 1, 'error: the checkout was cut short\n')
     // As git 2.43 on: -B refuses a branch another worktree has out.
     if (sub.startsWith('checkout -q -B ')) {
       const branch = args[3]!

@@ -35,6 +35,19 @@ test('turning Perm worktree on warms a pool of three slots, made as CommissionAI
   expect(created(commands)).toHaveLength(3)
 })
 
+test('a new slot whose checkout is cut short is removed, not left to be reused, and the tab says why', { options: { worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
+  const { clock, commands } = world(on, { isCheckoutCut: true })
+  await startSession($)
+  const ui = await mountPane($, 'desktop')
+  await activate(ui, 'tab-worktree')
+  await activate(ui, 'auto-worktree')
+  await clock.advance(1)
+  const dir = await repoDir()
+  expect(commands).toContain(`${REPO}$ git worktree remove --force --force ${dir}/1`)
+  await ui.redraw()
+  expect(await ui.find({ text: /Warming stopped: Could not check out the new worktree\. error: the checkout was cut short/ })).toBeDefined()
+})
+
 test('a session claims a slot and the pool tops itself up behind it, one spare kept', { options: { autoWorktree: true, worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
   const { clock, commands, toolCalls } = world(on)
   await startSession($)

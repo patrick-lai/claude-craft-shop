@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { activate, PANE_PROPS, startSession, world } from './world'
+import { activate, mountBand, PANE_PROPS, startSession, world } from './world'
 
 const EDIT = { tool: 'Edit', file_path: '/repo/a.ts', old_string: 'a', new_string: 'b' } as const
 
@@ -19,6 +19,20 @@ test('the head start is read-only until the worktree is ready, then the session 
   await clock.advance(1)
   expect(toolCalls).toContain('EnterWorktree')
   expect((await $.tool.call(EDIT)).deny).toBeUndefined()
+})
+
+test('the ready band hides itself a moment later, giving way to the rail', { options: { autoWorktree: true } }, async ($, on) => {
+  const { clock } = world(on)
+  await startSession($)
+  await clock.advance(1)
+  const band = await mountBand($, 'terminal')
+  expect(JSON.stringify(await band.drawn())).toContain('Worktree ready')
+  expect(await band.find({ key: 'rail-worktree' })).toBeUndefined()
+
+  await clock.advance(4_000)
+  await band.redraw()
+  expect(JSON.stringify(await band.drawn())).not.toContain('Worktree ready')
+  expect(await band.find({ key: 'rail-worktree' })).toBeDefined()
 })
 
 test('read-only shell commands pass and anything that writes is refused', { options: { autoWorktree: true } }, async ($, on) => {

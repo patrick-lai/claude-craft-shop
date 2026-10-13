@@ -63,6 +63,7 @@ const HEARTBEAT_MS = 60_000
 const LEASE_TTL_MS = 3 * HEARTBEAT_MS
 const SETUP_TIMEOUT_MS = 10 * 60_000
 const LOCK_STALE_MS = 30_000
+const READY_BAND_MS = 4_000
 // As CommissionAI's: three slots ready, and no warming below 20 GB free
 // (the minFreeGb option).
 export const POOL_SIZE = 3
@@ -494,6 +495,18 @@ async function fail($: $, error: unknown): Promise<void> {
   await update($, worktree, (current): Worktree => ({ ...current, phase: 'failed', step: message, error: message }))
 }
 
+// The ready band is news, not a fixture: it gives way to the rail on its own.
+// A retry may have started over by then, so only a band still ready hides.
+async function markReady($: $): Promise<void> {
+  await setStep($, 'Worktree ready')
+  await update($, worktree, (current): Worktree => ({ ...current, phase: 'ready', error: null }))
+  $.clock.after(READY_BAND_MS, () => void hideIfReady($))
+}
+
+async function hideIfReady($: $): Promise<void> {
+  if ((await read($, worktree)).phase === 'ready') await update($, isBandHidden, () => true)
+}
+
 async function enter($: $, options: PluginOptions): Promise<void> {
   const { path, branch } = await read($, worktree)
   if (path === null || branch === null) return
@@ -506,8 +519,7 @@ async function enter($: $, options: PluginOptions): Promise<void> {
     await fail($, new StepError('Claude Code would not move the session into the worktree.'))
     return
   }
-  await setStep($, 'Worktree ready')
-  await update($, worktree, (current): Worktree => ({ ...current, phase: 'ready', error: null }))
+  await markReady($)
   await refreshSlots($, options)
   if (await read($, isHeadStartPrompted)) {
     await update($, isHeadStartPrompted, () => false)
@@ -725,8 +737,7 @@ async function claimForCreate($: $, options: PluginOptions, cwd: string, name: s
 async function seedThenUnlock($: $, options: PluginOptions, main: string, path: string): Promise<void> {
   try {
     await seedDependencies($, options, main, path, (label, isWarning) => setStep($, label, isWarning))
-    await setStep($, 'Worktree ready')
-    await update($, worktree, (current): Worktree => ({ ...current, phase: 'ready', error: null }))
+    await markReady($)
     await refreshSlots($, options)
   } catch (error) {
     await fail($, error)

@@ -29,8 +29,10 @@ export const IDLE_WORKTREE: Worktree = {
 const isBandHidden = atom({ plugin: 'fishstack', key: 'isBandHidden' } as const, false)
 const isHeadStartPrompted = atom({ plugin: 'fishstack', key: 'isHeadStartPrompted' } as const, false)
 const isTurnRunning = atom({ plugin: 'fishstack', key: 'isTurnRunning' } as const, false)
+const owedMoveNote = atom({ plugin: 'fishstack', key: 'owedMoveNote' } as const, null)
 const slots = atom({ plugin: 'fishstack', key: 'slots' } as const, [])
 const tab = atom({ plugin: 'fishstack', key: 'tab' } as const, 'worktree')
+const isClientDown = atom({ plugin: 'fishstack', key: 'isClientDown' } as const, false)
 const worktree = atom({ plugin: 'fishstack', key: 'worktree' } as const, IDLE_WORKTREE)
 const isStepsShown = atom({ plugin: 'fishstack', key: 'isStepsShown' } as const, false)
 const dials = atom({ plugin: 'fishstack', key: 'dials' } as const, BALANCED)
@@ -88,12 +90,22 @@ const IN_REPO_ROOT = '.claude/worktrees/fishstack'
 export const READ_ONLY_DENY =
   'Read-only until the worktree is ready. fishStack is preparing a worktree for this session; read, search and plan for now, and you will be moved there with full access.'
 
-export function headStartNote(main: string): string {
-  return `Read-only head start: your worktree is still being prepared, so for now you run read-only in the main checkout at \`${main}\`. It may sit on another branch or be behind origin, so treat it as a reference. Investigate, read code and plan; do not edit files, commit or run commands that change anything. When your plan is ready, write it in your reply and end your turn. When the worktree is ready, fishStack moves you there with full access and tells you to continue.`
+// What a note told between tool calls says first: it rides beside a tool's
+// result, where a model rightly distrusts instructions.
+export const MID_TURN_FROM = 'fishStack update, from the hook of fishStack, a plugin the user installed, not from the tool you just ran: '
+
+export function headStartNote(main: string, isMidTurn = false): string {
+  return `${isMidTurn ? MID_TURN_FROM : ''}Read-only head start: your worktree is still being prepared, so for now you run read-only in the main checkout at \`${main}\`. It may sit on another branch or be behind origin, so treat it as a reference. Investigate, read code and plan; do not edit files, commit or run commands that change anything. When your plan is ready, write it in your reply and end your turn. When the worktree is ready, fishStack moves you there with full access and tells you to continue.`
 }
 
 function continueNote(path: string, branch: string): string {
   return `Your worktree is ready at \`${path}\` on branch \`${branch}\`, and the read-only head start is over. You now work there with full access. Carry on with the request from where you left off, starting with the plan you made. If you ended your last turn waiting for an answer, end this turn and keep waiting instead.`
+}
+
+// A move the agent was not warned of, as a head start told before it would;
+// whoever delivers it says first where it comes from.
+function movedNote(path: string, branch: string): string {
+  return `this session has moved into its own worktree at \`${path}\` on branch \`${branch}\`, and works there from now on, with full access. Relative paths and commands now run there, not in the main checkout; anything you said about where you work before this is out of date.`
 }
 
 type Lease = { sessionId: string; beatAt: number }
@@ -114,11 +126,13 @@ async function gitOut($: $, args: string[], cwd: string, failure: string, run?: 
   // A git still running at its timeout rejects: that failed too.
   const ran = await git($, args, cwd, run).catch((error: unknown) => {
     $.ui.log(`git ${args.join(' ')} did not finish: ${String(error)}`, { to: 'debug' })
-    throw new StepError(failure)
+    throw new StepError(`${failure} Git did not finish in time.`)
   })
   if (ran.exitCode !== 0) {
     $.ui.log(`git ${args.join(' ')} failed: ${ran.stderr.trim()}`, { to: 'debug' })
-    throw new StepError(failure)
+    // Git's last line says why, which the step alone cannot.
+    const why = ran.stderr.trim().split('\n').pop()?.trim() ?? ''
+    throw new StepError(why === '' ? failure : `${failure} ${why.slice(0, 160)}`)
   }
   return ran.stdout.trim()
 }
@@ -359,10 +373,10 @@ async function releaseSlot($: $, path: string): Promise<void> {
 // A git write: never runs the repository's hooks, as CommissionAI's do not.
 // Writes check out, reset and remove whole trees, which in a big repository
 // take minutes, so they get the setup command's time, not a read's. And in
-// a blobless clone (jira, AFM) a checkout needs blobs it lacks: Claude Code
-// runs git with GIT_NO_LAZY_FETCH=1, under which such a checkout grinds
-// until it is killed, so writes let git fetch them from origin, as the
-// fetch before them does.
+// a blobless clone a checkout needs blobs it lacks: Claude Code runs git
+// with GIT_NO_LAZY_FETCH=1, under which such a checkout grinds until it is
+// killed, so writes let git fetch them from origin, as the fetch before
+// them does.
 const GIT_WRITE: GitRun = { timeoutMs: SETUP_TIMEOUT_MS, env: { GIT_NO_LAZY_FETCH: '0' } }
 
 async function gitWrite($: $, args: string[], cwd: string, failure: string): Promise<string> {
@@ -430,46 +444,64 @@ async function scrubSlot($: $, path: string): Promise<void> {
   await gitWrite($, ['checkout', '-q', '--detach', 'HEAD'], path, 'Could not detach the slot.')
 }
 
-// Picks a slot under the lock: an idle one (listed, not held, no live lease),
-// one offered to the desktop's hook last, or the next number, reserved by its
+// Picks a slot under the lock: the one this session already leases (a retry
+// comes back to it), else an idle one (listed, not held, no live lease), one
+// offered to the desktop's hook last, else the next number, reserved by its
 // empty folder. Leased before the lock lifts.
-async function pickSlot($: $, options: PluginOptions, main: string): Promise<{ path: string; isNew: boolean }> {
+async function pickSlot($: $, options: PluginOptions, main: string): Promise<{ path: string; isNew: boolean; isMine: boolean }> {
   const repoDir = await slotsRoot($, options, main)
   await lock($, repoDir)
   try {
     const listed = await worktreePaths($, main)
     const sessionId = await $.session.id()
     const dirs = await slotDirs($, repoDir)
-    const free: string[] = []
-    const offered: string[] = []
+    const free: { path: string; isMine: boolean }[] = []
+    const offered: { path: string; isMine: boolean }[] = []
     for (const path of dirs) {
       if (!listed.has(await realPath($, path))) continue
       if (await isWarmingLive($, await readWarming($, path))) continue
       if (await isHeld($, path)) continue
       const lease = await readLease($, path)
-      if (lease?.sessionId !== sessionId && (await isLeaseLive($, lease))) continue
-      ;((await $.fs.exists(path + READY)) ? offered : free).push(path)
+      const isMine = lease?.sessionId === sessionId
+      if (!isMine && (await isLeaseLive($, lease))) continue
+      ;((await $.fs.exists(path + READY)) ? offered : free).push({ path, isMine })
     }
-    const idle = free[0] ?? offered[0]
-    if (idle !== undefined) {
-      await $.process.run(['rm', '-f', idle + READY])
-      await writeLease($, idle)
-      await signalPool($, idle)
-      return { path: idle, isNew: false }
+    const picked = [...free, ...offered].find(one => one.isMine) ?? free[0] ?? offered[0]
+    if (picked !== undefined) {
+      await $.process.run(['rm', '-f', picked.path + READY])
+      await writeLease($, picked.path)
+      await signalPool($, picked.path)
+      return { ...picked, isNew: false }
     }
     const next = dirs.reduce((most, path) => Math.max(most, Number(path.split('/').pop())), 0) + 1
     const path = `${repoDir}/${next}`
     await $.process.run(['mkdir', '-p', path])
     await writeLease($, path)
     await signalPool($, path)
-    return { path, isNew: true }
+    return { path, isNew: true, isMine: false }
   } finally {
     await unlock($, repoDir)
   }
 }
 
-async function claimSlot($: $, options: PluginOptions, main: string, base: string, baseSha: string, branch: string) {
-  const { path, isNew } = await pickSlot($, options, main)
+// The slot's branch, this session's alone: the name asked for while no branch
+// has it, or while this session's own slot is on it (a retry); else that name
+// with the session's id. Claude Code reuses a worktree folder for a new
+// session, so a name taken from the folder does not say whose a branch is,
+// and checkout -B over another session's branch would reset its commits away.
+async function freeBranch($: $, main: string, path: string, isMine: boolean, wanted: string): Promise<string> {
+  const own = isMine ? ((await worktreePaths($, main)).get(await realPath($, path)) ?? null) : null
+  const id = (await $.session.id()).slice(0, 6)
+  for (const name of [wanted, `${wanted}-${id}`]) {
+    if (name === own) return name
+    if ((await git($, ['rev-parse', '--verify', '--quiet', `refs/heads/${name}`], main)).exitCode !== 0) return name
+  }
+  return `${wanted}-${id}-${(await $.clock.now()).toString(36)}`
+}
+
+async function claimSlot($: $, options: PluginOptions, main: string, base: string, baseSha: string, wanted: string) {
+  const { path, isNew, isMine } = await pickSlot($, options, main)
+  const branch = await freeBranch($, main, path, isMine, wanted)
   if (isNew) {
     await setStep($, 'Creating a new worktree')
     await createSlot($, main, path, baseSha)
@@ -479,7 +511,7 @@ async function claimSlot($: $, options: PluginOptions, main: string, base: strin
   }
   await gitWrite($, ['checkout', '-q', '-B', branch, base], path, 'Could not check out the base branch in the slot.')
   await signalPool($, path)
-  return path
+  return { path, branch }
 }
 
 // What the dependencies are pinned to: the git hashes of the lockfiles there.
@@ -872,6 +904,11 @@ async function settle($: $, options: PluginOptions, path: string, branch: string
   if (await read($, isHeadStartPrompted)) {
     await update($, isHeadStartPrompted, () => false)
     await $.prompt.submit({ text: continueNote(path, branch ?? 'HEAD') })
+  } else if (await read($, isTurnRunning)) {
+    // Moved under a turn that never heard of the head start (it began before
+    // the claim did): told at its next batch or prompt. Before any turn, the
+    // session simply starts where it works.
+    await update($, owedMoveNote, () => movedNote(path, branch ?? 'HEAD'))
   }
 }
 
@@ -894,12 +931,12 @@ async function prepare($: $, options: PluginOptions): Promise<void> {
       await setStep($, `Could not fetch origin; starting from the local ${branchName}`, true)
     }
     const baseSha = await gitOut($, ['rev-parse', base], main, `Could not resolve ${base}.`)
-    const branch = `fish/${adoptedName ?? (await $.session.id()).slice(0, 6)}`
-    await update($, worktree, current => ({ ...current, base, baseSha, branch }))
+    const wanted = `fish/${adoptedName ?? (await $.session.id()).slice(0, 6)}`
+    await update($, worktree, current => ({ ...current, base, baseSha }))
 
     await setStep($, 'Claiming a slot')
-    const path = await claimSlot($, options, main, base, baseSha, branch)
-    await update($, worktree, current => ({ ...current, path }))
+    const { path, branch } = await claimSlot($, options, main, base, baseSha, wanted)
+    await update($, worktree, current => ({ ...current, path, branch }))
     startHeartbeat($, path)
     await seedDependencies($, options, main, path, (label, isWarning) => setStep($, label, isWarning))
     await refreshSlots($, options)
@@ -1160,11 +1197,11 @@ async function claimForCreate($: $, options: PluginOptions, cwd: string, name: s
     const branchName = await defaultBranch($, main)
     const base = (await fetchBase($, main, branchName)) ? `origin/${branchName}` : branchName
     const baseSha = await gitOut($, ['rev-parse', base], main, `Could not resolve ${base}.`)
-    const branch = `fish/${name.replace(/[^A-Za-z0-9._-]+/g, '-').slice(0, 40) || (await $.session.id()).slice(0, 6)}`
+    const wanted = `fish/${name.replace(/[^A-Za-z0-9._-]+/g, '-').slice(0, 40) || (await $.session.id()).slice(0, 6)}`
     hasStarted = true
-    await update($, worktree, (): Worktree => ({ ...IDLE_WORKTREE, phase: 'preparing', step: 'Claiming a slot', main, base, baseSha, branch }))
-    const path = await claimSlot($, options, main, base, baseSha, branch)
-    await update($, worktree, current => ({ ...current, path }))
+    await update($, worktree, (): Worktree => ({ ...IDLE_WORKTREE, phase: 'preparing', step: 'Claiming a slot', main, base, baseSha }))
+    const { path, branch } = await claimSlot($, options, main, base, baseSha, wanted)
+    await update($, worktree, current => ({ ...current, path, branch }))
     startHeartbeat($, path)
     $.clock.after(0, () => void seedThenUnlock($, options, main, path))
     $.clock.after(0, () => void prewarm($, options, main))
@@ -1251,16 +1288,8 @@ export function registerWorktree(on: On, options: PluginOptions): void {
   })
 
   on('turn.start', async ($, e, next) => {
-    // The dials' facts start over with each turn, from where its messages
-    // begin; unreadable, the rules that need them let things through.
-    let start: number | null = null
-    try {
-      const messages = await $.session.messages()
-      start = Array.isArray(messages) && messages.length < 4000 ? messages.length : null
-    } catch {
-      start = null
-    }
-    beginTurn(start)
+    // The dials' facts start over with each turn.
+    beginTurn()
     await update($, isTurnRunning, () => true)
     return next(e)
   })
@@ -1351,7 +1380,7 @@ export function registerWorktree(on: On, options: PluginOptions): void {
       // nothing is answered.
       const isDials = await read($, isDialsOn)
       const auto = isDials && values.autonomy === 5 ? await read($, autopilot) : null
-      const ui: Ui = resolveUi($.ui.resolve(e), e.surface)
+      const ui: Ui = resolveUi($.ui.resolve(e), e.surface, await read($, isClientDown))
       return drawRail(
         ui,
         {
@@ -1422,7 +1451,7 @@ export function registerWorktree(on: On, options: PluginOptions): void {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
     if ((await read($, tab)) !== 'worktree') return next(e)
-    const ui: Ui = resolveUi($.ui.resolve(e), e.surface)
+    const ui: Ui = resolveUi($.ui.resolve(e), e.surface, await read($, isClientDown))
     const { Box, Text, Button } = ui
     const state = await read($, worktree)
     const list = await read($, slots)

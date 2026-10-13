@@ -1,5 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
+import { resolveUi } from '../hooks/ui'
+import type { Ui } from '../hooks/ui'
 import { activate, keysOf, mountBand, mountPane, startSession, world } from './world'
 
 test('the tabs switch on press and each draws its empty state', async ($, on) => {
@@ -298,3 +300,14 @@ function byKey(node: unknown, key: string): unknown {
   }
   return undefined
 }
+
+// A Client whose module never answered is a dead placeholder on the desktop:
+// once one is heard failing (ui.fault), the table leaves Clients out, so every
+// drawn control falls back to its Button. The kit cannot raise a fault, so
+// the table is checked directly.
+test('with a Client down the desktop table leaves Clients out', async () => {
+  const table = { Client: () => null, Svg: () => null } as unknown as Ui
+  expect(resolveUi(table, 'desktop', false).Client).toBeDefined()
+  expect(resolveUi(table, 'desktop', true).Client).toBeUndefined()
+  expect(resolveUi(table, 'desktop', true).Svg).toBeDefined()
+})

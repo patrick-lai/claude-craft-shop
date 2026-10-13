@@ -4,13 +4,15 @@
 // refused twice at most, and the end of a turn is held back once at most.
 //
 // The facts are kept as the turn happens (turn.start resets them; guard.ts
-// records each tool call), never parsed back from the transcript.
+// records each tool call and the text the agent streams), never parsed back
+// from the transcript.
 import type { DialKey, DialValues } from '../types'
 
 export type TurnFacts = {
-  // How many messages the transcript held as the turn began: the turn's own
-  // messages are those after it.
-  start: number | null
+  // What the main agent has written this turn, as it streamed: a spec
+  // written in the same response as the edit counts before that edit runs,
+  // which the transcript, written once the response ends, cannot show.
+  said: string
   // Files or the working tree changed: Edit, Write and the like, a shell
   // command that is not a known read, by the agent or a subagent.
   changes: number
@@ -29,15 +31,15 @@ export type TurnFacts = {
   foresightRefusals: number
 }
 
-export function freshTurn(start: number | null): TurnFacts {
-  return { start, changes: 0, codeChanges: 0, seq: 0, lastChange: 0, lastCheck: 0, agents: 0, isPlanned: false, foresightRefusals: 0 }
+export function freshTurn(): TurnFacts {
+  return { said: '', changes: 0, codeChanges: 0, seq: 0, lastChange: 0, lastCheck: 0, agents: 0, isPlanned: false, foresightRefusals: 0 }
 }
 
 // The turn under way in this process; null outside one.
-let facts: TurnFacts = freshTurn(null)
+let facts: TurnFacts = freshTurn()
 
-export function beginTurn(start: number | null): void {
-  facts = freshTurn(start)
+export function beginTurn(): void {
+  facts = freshTurn()
 }
 
 export function turnFacts(): TurnFacts {
@@ -94,6 +96,11 @@ export function notePlan(): void {
   facts.isPlanned = true
 }
 
+// A piece of the main agent's visible text, as guard.ts sees it stream.
+export function noteSaid(text: string): void {
+  facts.said += text
+}
+
 // What Foresight's spec levels look for in what the agent wrote this turn.
 export function hasSpec(level: number, texts: string[]): boolean {
   const said = texts.join('\n')
@@ -105,11 +112,10 @@ export function hasSpec(level: number, texts: string[]): boolean {
 // Foresight 4 and 5: the turn's first edit waits for a spec, once or twice.
 // Levels 1 to 3 are left to the prompt: a plan of steps is too loose a thing
 // to hold an edit back for.
-export function foresightRefusal(level: number, texts: string[] | null): string | null {
+export function foresightRefusal(level: number): string | null {
   if (level < 4 || facts.isPlanned || facts.changes > 0) return null
   if (facts.foresightRefusals >= MAX_FORESIGHT_REFUSALS) return null
-  // The turn's messages could not be read (compacted, say): let it through.
-  if (texts === null || hasSpec(level, texts)) return null
+  if (hasSpec(level, [facts.said])) return null
   facts.foresightRefusals++
   return level === 5
     ? 'fishStack dials, Foresight is Deep spec: before the first edit, post the spec as a message with the headings Problem, Constraints, Approach, Alternatives considered, Edge cases, Risks, Files, Acceptance criteria. Then edit.'

@@ -77,6 +77,68 @@ test('a VS Code session, headless at start, claims its worktree when the editor 
   expect(toolCalls).toContain('EnterWorktree')
 })
 
+// An editor can attach after the first prompt went out, so the claim starts
+// mid-turn: the agent learns of the head start at its next batch, once, and
+// is told to continue once it has moved.
+test('a head start that begins after the prompt reaches the agent at its next batch', { options: { autoWorktree: true } }, async ($, on) => {
+  const { clock, toolCalls, prompts } = world(on)
+  on('classic.PostToolBatch', () => ({}))
+  on('session.surfaces', () => ({ value: [] }))
+  on('session.attach', ($, e) => ({ clientId: e.clientId }))
+  const batch = async (agentId?: string) =>
+    ((await $.classic.PostToolBatch({ tool_calls: [], ...(agentId === undefined ? {} : { agent_id: agentId }) } as never)).additionalContext ?? []).join('\n')
+  await $.session.start({ cwd: '/repo', surface: null, isInteractive: false })
+
+  const submitted = await $.prompt.submit({ text: 'how long is the readme', wait: false, origin: { kind: 'composer' } })
+  expect(submitted.context?.join('\n') ?? '').not.toContain('Read-only head start')
+  await $.session.attach({ surface: 'vscode', clientId: 'vscode:default', viewport: { columns: 120, rows: 40, isFullscreen: false } })
+  // A subagent's batch does not take it.
+  expect(await batch('sub-1')).toBe('')
+  const told = await batch()
+  expect(told).toContain('not from the tool you just ran')
+  expect(told).toContain('Read-only head start')
+  expect(await batch()).toBe('')
+
+  await clock.advance(1)
+  expect(toolCalls).toContain('EnterWorktree')
+  expect(prompts.at(-1)).toContain('Your worktree is ready')
+  expect(await batch()).toBe('')
+})
+
+test('a move that lands mid-turn with no head start told is told once, at the next batch', { options: { autoWorktree: true } }, async ($, on) => {
+  const { clock } = world(on)
+  on('classic.PostToolBatch', () => ({}))
+  on('turn.start', ($, e) => ({ turnId: e.turnId }))
+  const batch = async () => ((await $.classic.PostToolBatch({ tool_calls: [] } as never)).additionalContext ?? []).join('\n')
+  await startSession($)
+  await $.turn.start({ text: 'go', turnId: 't1' } as never)
+
+  await clock.advance(1)
+  const told = await batch()
+  expect(told).toContain('moved into its own worktree')
+  expect(told).toMatch(/on branch `fish\//)
+  expect(await batch()).toBe('')
+  expect((await $.prompt.submit({ text: 'go on', wait: false, origin: { kind: 'composer' } })).context?.join('\n') ?? '').not.toContain('moved')
+})
+
+test('a move that lands at the end of a turn is told with the next prompt', { options: { autoWorktree: true } }, async ($, on) => {
+  const { clock } = world(on)
+  on('turn.start', ($, e) => ({ turnId: e.turnId }))
+  await startSession($)
+  await $.turn.start({ text: 'go', turnId: 't1' } as never)
+  await clock.advance(1)
+  const told = (await $.prompt.submit({ text: 'go on', wait: false, origin: { kind: 'composer' } })).context?.join('\n') ?? ''
+  expect(told).toContain('fishStack update: this session has moved into its own worktree')
+  expect(told).not.toContain('not from the tool you just ran')
+})
+
+test('a move that lands before the first turn adds no note: the session starts where it works', { options: { autoWorktree: true } }, async ($, on) => {
+  const { clock } = world(on)
+  await startSession($)
+  await clock.advance(1)
+  expect((await $.prompt.submit({ text: 'go', wait: false, origin: { kind: 'composer' } })).context?.join('\n') ?? '').toBe('')
+})
+
 // The desktop's composer has its own worktree switch: unticked, the session
 // starts in the main checkout and stays there; ticked, the desktop makes a
 // worktree under .claude/worktrees/, which is set up where it is.

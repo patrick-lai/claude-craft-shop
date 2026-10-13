@@ -9,25 +9,40 @@ import { activate, mountPane, startSession, world } from './world'
 
 const AUTOPILOT = { foresight: 4, crew: 3, tenacity: 5, autonomy: 5, proof: 4, voice: 2 }
 
-type Message = { role: 'user' | 'assistant'; text: string; toolUses: unknown[] }
-
-// The transcript as $.session.messages() reads it, which a test writes to.
-function transcript(on: On, { isBroken = false } = {}) {
-  const messages: Message[] = [{ role: 'user', text: 'earlier work', toolUses: [] }]
-  on('session.messages', () => {
-    if (isBroken) throw new Error('no transcript')
-    return { value: messages as never }
+// The agent's turns: what it says arrives through turn.step, streamed in
+// pieces as the engine streams a response.
+function transcript(on: On) {
+  let pieces: string[] = []
+  on('turn.step', async function* ($, e) {
+    for (const text of pieces) yield { kind: 'text', index: 0, text } as const
+    return { turnId: e.turnId, index: e.index, answer: pieces.join(''), toolUses: [], stopReason: 'tool_use', usage: null } as never
   })
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
   on('classic.Stop', () => ({}))
+  let step = 0
   return {
-    say: (text: string) => messages.push({ role: 'assistant', text, toolUses: [] }),
-    ask: (text: string) => messages.push({ role: 'user', text, toolUses: [] }),
+    // Streams the text, as the tool calls of a response run after the text
+    // before them; in two pieces, so a spec split mid-word still counts.
+    say: async ($: Engine, text: string, agentId?: string) => {
+      const half = Math.ceil(text.length / 2)
+      pieces = [text.slice(0, half), text.slice(half)]
+      const stream = $.turn.step({ turnId: 't', index: step++, model: 'claude', messageCount: 1, ...(agentId === undefined ? {} : { agentId }) })
+      const seen: string[] = []
+      for (;;) {
+        const step = await stream.next()
+        if (step.done) {
+          // Passed on untouched, chunks and result.
+          expect(seen.join('')).toBe(text)
+          expect(step.value.answer).toBe(text)
+          return
+        }
+        if (step.value.kind === 'text') seen.push(step.value.text)
+      }
+    },
   }
 }
 
-async function turn($: Engine, chat: ReturnType<typeof transcript>, text: string) {
-  chat.ask(text)
+async function turn($: Engine, text: string) {
   await $.turn.start({ text, turnId: `t-${text}` } as never)
 }
 
@@ -41,57 +56,73 @@ test('Foresight at Write a spec: the first edit waits for a spec, twice at most,
   world(on, { isRepo: false, store: { dials: AUTOPILOT } })
   const chat = transcript(on)
   await startSession($)
-  await turn($, chat, 'add a field')
-  chat.say('I will add it.')
+  await turn($, 'add a field')
+  await chat.say($, 'I will add it.')
+  // A subagent's words are not the spec.
+  await chat.say($, 'Acceptance criteria: mine.', 'agent-1')
   expect((await edit($)).deny).toContain('Foresight is Write a spec')
+  await chat.say($, 'Spec: add createdAt.\n\nAcceptance criteria\n1. the field is saved')
+  expect((await edit($)).deny).toBeUndefined()
   // A subagent's edit is its own business.
   expect((await edit($, '/repo/src/a.ts', 'agent-1')).deny).toBeUndefined()
-  chat.say('Spec: add createdAt.\n\nAcceptance criteria\n1. the field is saved')
-  expect((await edit($)).deny).toBeUndefined()
 
   // A next request asks again; an agent that ignores it is refused twice,
   // then let through.
-  await turn($, chat, 'and another')
+  await turn($, 'and another')
   expect((await edit($)).deny).toBeDefined()
   expect((await edit($)).deny).toBeDefined()
   expect((await edit($)).deny).toBeUndefined()
 })
 
-test('an unreadable transcript lets the edit through', async ($, on) => {
+// The spec and the edit in one response: the edit runs while the response is
+// still being written, so the transcript does not hold the spec yet.
+test('a spec streamed in the same response as the edit lets it through, whatever the transcript holds', async ($, on) => {
   world(on, { isRepo: false, store: { dials: AUTOPILOT } })
-  const chat = transcript(on, { isBroken: true })
+  on('session.messages', () => ({ value: [] }))
+  const chat = transcript(on)
   await startSession($)
-  await turn($, chat, 'go')
-  // The transcript cannot be read: no refusal on a guess.
+  await turn($, 'add a field')
+  await chat.say($, 'Spec: add createdAt.\n\nAcceptance criteria\n1. the field is saved')
+  expect((await edit($)).deny).toBeUndefined()
+})
+
+test('Foresight at Deep spec wants its headings, each starting a line, across responses', async ($, on) => {
+  world(on, { isRepo: false, store: { dials: { ...AUTOPILOT, foresight: 5 } } })
+  const chat = transcript(on)
+  await startSession($)
+  await turn($, 'go')
+  await chat.say($, 'Problem: slow.\nApproach: cache.')
+  expect((await edit($)).deny).toContain('Deep spec')
+  await chat.say($, 'Alternatives considered: none.\nAcceptance criteria: fast.')
   expect((await edit($)).deny).toBeUndefined()
 })
 
 test('TodoWrite as the plan', async ($, on) => {
   world(on, { isRepo: false, store: { dials: AUTOPILOT } })
-  const chat = transcript(on)
+  transcript(on)
   await startSession($)
-  await turn($, chat, 'go')
+  await turn($, 'go')
   await $.tool.call({ tool: 'TodoWrite', todos: [] } as never)
   expect((await edit($)).deny).toBeUndefined()
 })
 
 test('Crew: Solo refuses subagents, Scouts allows one per request', async ($, on) => {
   world(on, { isRepo: false, store: { dials: { ...AUTOPILOT, crew: 2 } } })
-  const chat = transcript(on)
+  transcript(on)
   await startSession($)
-  await turn($, chat, 'look')
+  await turn($, 'look')
   const agent = () => $.tool.call({ tool: 'Agent', prompt: 'find it' } as never) as Promise<{ deny?: string }>
   expect((await agent()).deny).toBeUndefined()
   expect((await agent()).deny).toContain('Crew is Scouts')
-  await turn($, chat, 'look again')
+  await turn($, 'look again')
   expect((await agent()).deny).toBeUndefined()
 })
 
 test('the end of a request that changed code is held back once for its checks and its criteria, never twice', async ($, on) => {
   world(on, { isRepo: false, store: { dials: { ...AUTOPILOT, foresight: 1 } } })
-  const chat = transcript(on)
+  transcript(on)
   await startSession($)
-  await turn($, chat, 'fix it')
+  await turn($, 'fix it')
   // A question answered, nothing changed: nothing is asked for.
   expect((await stop($, 'It is in a.ts.')).block).toBeUndefined()
   await edit($)
@@ -110,9 +141,9 @@ test('the end of a request that changed code is held back once for its checks an
 
 test('commands that only look things up are not changes: no hold-back for them', async ($, on) => {
   world(on, { isRepo: false, store: { dials: { ...AUTOPILOT, foresight: 1 } } })
-  const chat = transcript(on)
+  transcript(on)
   await startSession($)
-  await turn($, chat, 'is it pushed?')
+  await turn($, 'is it pushed?')
   // The very commands that once held a request back that changed nothing.
   for (const command of ['git status --short | head; git log --oneline -1; git ls-remote github refs/heads/main', 'npm view claude-fish-stack-mod version 2>&1 | tail -1', 'gh release view v0.5.1 --json url', 'ls -la docs/media 2>/dev/null']) {
     await bash($, command)
@@ -120,7 +151,7 @@ test('commands that only look things up are not changes: no hold-back for them',
   expect((await stop($, 'Yes, all pushed.')).block).toBeUndefined()
   // A command that plainly writes a file still counts.
   for (const command of ["echo 'x' > src/a.ts", "sed -i '' s/a/b/ src/a.ts", 'cp a.ts b.ts']) {
-    await turn($, chat, command)
+    await turn($, command)
     await bash($, command)
     expect((await stop($, 'Done.')).block, command).toContain('run the tests')
   }
@@ -128,30 +159,30 @@ test('commands that only look things up are not changes: no hold-back for them',
 
 test('docs alone are not held back for tests', async ($, on) => {
   world(on, { isRepo: false, store: { dials: { ...AUTOPILOT, foresight: 1, tenacity: 3 } } })
-  const chat = transcript(on)
+  transcript(on)
   await startSession($)
-  await turn($, chat, 'docs')
+  await turn($, 'docs')
   await edit($, '/repo/README.md')
   expect((await stop($, 'Updated the README.')).block).toBeUndefined()
 })
 
 test('with Enforce off, or the dials off, nothing is refused or held back', async ($, on) => {
   world(on, { isRepo: false, store: { dials: { ...AUTOPILOT, crew: 1 } } })
-  const chat = transcript(on)
+  transcript(on)
   await startSession($)
   const ui = await mountPane($, 'terminal')
   await activate(ui, 'tab-dials')
   expect(await ui.find({ text: /Enforced: The first edit of a request waits for a spec/ })).toBeDefined()
   await activate(ui, 'dials-enforce-off')
   expect(await ui.find({ text: /Enforced:/ })).toBeUndefined()
-  await turn($, chat, 'go')
+  await turn($, 'go')
   expect((await edit($)).deny).toBeUndefined()
   expect((await $.tool.call({ tool: 'Agent', prompt: 'x' } as never) as { deny?: string }).deny).toBeUndefined()
   expect((await stop($, 'Done.')).block).toBeUndefined()
 
   await activate(ui, 'dials-enforce-on')
   await activate(ui, 'dials-on-off')
-  await turn($, chat, 'again')
+  await turn($, 'again')
   expect((await edit($)).deny).toBeUndefined()
   expect((await stop($, 'Done.')).block).toBeUndefined()
 })

@@ -35,6 +35,19 @@ test('turning Perm worktree on warms a pool of three slots, made as CommissionAI
   expect(created(commands)).toHaveLength(3)
 })
 
+test('a new slot whose checkout is cut short is removed, not left to be reused, and the tab says why', { options: { worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
+  const { clock, commands } = world(on, { isCheckoutCut: true })
+  await startSession($)
+  const ui = await mountPane($, 'desktop')
+  await activate(ui, 'tab-worktree')
+  await activate(ui, 'auto-worktree')
+  await clock.advance(1)
+  const dir = await repoDir()
+  expect(commands).toContain(`${REPO}$ git worktree remove --force --force ${dir}/1`)
+  await ui.redraw()
+  expect(await ui.find({ text: /Warming stopped: Could not check out the new worktree\. error: the checkout was cut short/ })).toBeDefined()
+})
+
 test('a session claims a slot and the pool tops itself up behind it, one spare kept', { options: { autoWorktree: true, worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
   const { clock, commands, toolCalls } = world(on)
   await startSession($)
@@ -44,6 +57,47 @@ test('a session claims a slot and the pool tops itself up behind it, one spare k
   expect(commands).toContain(`${dir}/1$ git -c core.hooksPath=/dev/null checkout -q -B fish/abcdef origin/main`)
   // Slot 1 is this session's; 2 and 3 wait for the next ones.
   expect(created(commands).map(one => one.split(' ').at(-2))).toEqual([`${dir}/1`, `${dir}/2`, `${dir}/3`])
+})
+
+test('a blobless clone can check a slot out: writes may fetch the blobs they lack and get minutes; reads neither', { options: { autoWorktree: true, worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
+  const { clock, inits } = world(on)
+  await startSession($)
+  await clock.advance(1)
+  const dir = await repoDir()
+  for (const write of [
+    `${dir}/1$ git -c core.hooksPath=/dev/null -c core.checkStat=minimal reset --hard -q`,
+    `${dir}/1$ git -c core.hooksPath=/dev/null checkout -q -B fish/abcdef origin/main`,
+  ]) {
+    expect(inits[write]?.timeoutMs).toBe(10 * 60_000)
+    expect(inits[write]?.env).toEqual({ GIT_NO_LAZY_FETCH: '0' })
+  }
+  expect(inits[`${REPO}$ git worktree list --porcelain`]?.timeoutMs).toBe(120_000)
+  expect(inits[`${REPO}$ git worktree list --porcelain`]?.env).toBeUndefined()
+})
+
+test('a claim and the pool starting together share one fetch, both from origin', { options: { autoWorktree: true, worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
+  const { clock, commands, finishFetches, toolCalls } = world(on, { fetch: 'held' })
+  await startSession($)
+  await clock.advance(1)
+  await clock.advance(1)
+  // Both wait on the one fetch, which neither would win against the other.
+  expect(commands.filter(one => one === `${REPO}$ git fetch -q origin main`)).toHaveLength(1)
+  for (let tries = 0; tries < 5; tries++) {
+    finishFetches()
+    await clock.advance(1)
+  }
+  expect(toolCalls).toContain('EnterWorktree')
+  // The claim's slot (whichever the pool was not making) starts from origin.
+  expect(commands.some(one => one.endsWith('$ git -c core.hooksPath=/dev/null checkout -q -B fish/abcdef origin/main'))).toBe(true)
+})
+
+test('a fetch still running at its timeout starts the slot from the local branch', { options: { autoWorktree: true, worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
+  const { clock, commands, toolCalls } = world(on, { fetch: 'stuck' })
+  await startSession($)
+  await clock.advance(1)
+  expect(toolCalls).toContain('EnterWorktree')
+  const dir = await repoDir()
+  expect(commands).toContain(`${dir}/1$ git -c core.hooksPath=/dev/null checkout -q -B fish/abcdef main`)
 })
 
 test("with no worktreeRoot set, slots live under the repository's .claude/worktrees/, kept out of its git status once", { options: { autoWorktree: true, setupCommand: '' } }, async ($, on) => {
@@ -203,6 +257,31 @@ test("a session started in a worktree Claude Code made (claude --worktree, the d
   const dir = await repoDir()
   expect(commands).toContain(`${dir}/1$ git -c core.hooksPath=/dev/null checkout -q -B fish/feat-x origin/main`)
   expect(toolCalls).toContain('EnterWorktree')
+})
+
+// Claude Code reuses a worktree folder for a new session: the branch named
+// for it may be out in another slot still, or left behind by a session that
+// ended. Either way it is not this session's, so it gets one of its own.
+for (const [what, held] of [['still out in another slot', true], ['left with no worktree on it', false]] as const) {
+  test(`a Claude Code worktree reused by a new session, its old branch ${what}, gets a branch of its own and leaves the old one be`, { options: { autoWorktree: true, worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
+    const dir = await repoDir()
+    const { clock, commands, toolCalls } = world(on, held ? { slots: [`${dir}/1`, `${dir}/2`], onBranch: { [`${dir}/2`]: 'fish/feat-x' } } : { slots: [`${dir}/1`], branches: ['fish/feat-x'] })
+    await $.session.start({ cwd: `${REPO}/.claude/worktrees/feat-x`, surface: 'terminal', isInteractive: true })
+    await clock.advance(1)
+    expect(commands).toContain(`${dir}/1$ git -c core.hooksPath=/dev/null checkout -q -B fish/feat-x-abcdef origin/main`)
+    expect(commands.filter(one => one.endsWith('checkout -q -B fish/feat-x origin/main'))).toEqual([])
+    expect(toolCalls).toContain('EnterWorktree')
+  })
+}
+
+test('a retry comes back to the slot this session already leases, ahead of an idle one before it', { options: { autoWorktree: true, worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
+  const dir = await repoDir()
+  const { clock, commands } = world(on, { slots: [`${dir}/1`, `${dir}/2`], store: { [`lease:${dir}/2`]: { sessionId: 'abcdef123456', beatAt: 1_000_000 } } })
+  await startSession($)
+  await clock.advance(1)
+  expect(commands).toContain(`${dir}/2$ git -c core.hooksPath=/dev/null checkout -q -B fish/abcdef origin/main`)
+  // Slot 1 is only looked at, as the slot to offer the desktop's hook.
+  expect(commands.filter(one => one.startsWith(`${dir}/1$`) && one !== `${dir}/1$ git status --porcelain`)).toEqual([])
 })
 
 for (const [what, mark] of [['uncommitted', 'dirty'], ['committed', 'ahead']] as const) {

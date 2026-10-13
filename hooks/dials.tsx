@@ -4,7 +4,7 @@
 // levels borrow practices from pStack (Lauren Tan, MIT): verdicts, a failing
 // test before a fix, done-predicates for subagents, testing a shared premise.
 import { atom, read, update } from 'claude-code'
-import type { ClientProps, ElementConstructor, EngineInterface, On } from 'claude-code'
+import type { EngineInterface, On } from 'claude-code'
 
 import type { DialKey, DialValues, Tab } from '../types'
 import { presetArt } from './art'
@@ -19,6 +19,7 @@ const dials = atom({ plugin: 'fishstack', key: 'dials' } as const, BALANCED)
 const isBriefShown = atom({ plugin: 'fishstack', key: 'isBriefShown' } as const, false)
 const selectedDial = atom({ plugin: 'fishstack', key: 'selectedDial' } as const, null)
 const tab = atom({ plugin: 'fishstack', key: 'tab' } as const, 'worktree')
+const isClientDown = atom({ plugin: 'fishstack', key: 'isClientDown' } as const, false)
 const isDialsOn = atom({ plugin: 'fishstack', key: 'isDialsOn' } as const, true)
 
 // The Use dials switch, kept across sessions. Off, the agent gets no working
@@ -285,9 +286,9 @@ export function registerDials(on: On): void {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
     if ((await read($, tab)) !== 'dials') return next(e)
-    const ui: Ui = resolveUi($.ui.resolve(e), e.surface)
+    const ui: Ui = resolveUi($.ui.resolve(e), e.surface, await read($, isClientDown))
     const { Box, Text, Button, Markdown } = ui
-    const { Client } = $.ui.resolve(e) as { Client?: ElementConstructor<ClientProps> }
+    const { Client } = ui
     const rich = isRich(ui)
     const values = await read($, dials)
     const selected = await read($, selectedDial)

@@ -15,6 +15,8 @@ export type World = {
   panes: string[]
   // Every command fishStack ran, as `cwd$ argv`.
   commands: string[]
+  // How each of them was run (its timeout and environment), by `cwd$ argv`.
+  inits: Record<string, { timeoutMs?: number; env?: Record<string, string> } | undefined>
   // Slots with uncommitted work, by path.
   dirty: Set<string>
   // Worktrees with a commit no other branch or remote holds, by path.
@@ -33,12 +35,16 @@ export type World = {
   kept: Record<string, unknown>
   // With isMoveHeld, confirms the held EnterWorktree, as the person would.
   confirmMove: () => void
+  // Every prompt submitted, fishStack's own among them, by text.
+  prompts: string[]
   // With isSetupHeld, lets every held setup command finish.
   finishSetup: () => void
+  // With fetch 'held', lets the held fetches of origin finish.
+  finishFetches: () => void
 }
 
-function ran(stdout = '', exitCode = 0) {
-  return { value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+function ran(stdout = '', exitCode = 0, stderr = '') {
+  return { value: { exitCode, stdout, stderr, isStdoutTruncated: false, isStderrTruncated: false } }
 }
 
 // `store` is what the plugin's store holds at the start; `files`, text files
@@ -52,9 +58,13 @@ export function world(
     files,
     nodeModules = {},
     slots = [],
+    onBranch = {},
+    branches = [],
+    isCheckoutCut = false,
     folders = [],
     isMoveHeld = false,
     isSetupHeld = false,
+    fetch = 'quick',
   }: {
     isRepo?: boolean
     isDialogSlow?: boolean
@@ -63,12 +73,21 @@ export function world(
     nodeModules?: Record<string, string[]>
     // Worktrees already made, by path, detached.
     slots?: string[]
+    // Of those, the ones a branch is out in: path to branch.
+    onBranch?: Record<string, string>
+    // Branches that exist with no worktree on them.
+    branches?: string[]
+    // A new worktree's checkout is cut short, as a timeout cuts it.
+    isCheckoutCut?: boolean
     // Folders already on disk, by path.
     folders?: string[]
     // EnterWorktree waits for state.confirmMove, as Claude Code's dialog does.
     isMoveHeld?: boolean
     // The setup command runs until state.finishSetup.
     isSetupHeld?: boolean
+    // How fetching origin goes: at once; held until state.finishFetches; or
+    // still running at its timeout, so the call rejects.
+    fetch?: 'quick' | 'held' | 'stuck'
   } = {},
 ): World {
   const clock = mock.clock(on, { now: 1_000_000 })
@@ -93,11 +112,15 @@ export function world(
   const commands: string[] = []
   const dirty = new Set<string>()
   const ahead = new Set<string>()
-  const state: World = { clock, toolCalls, fetched, dialogs: 0, closeDialog: () => undefined, panes, commands, dirty, ahead, answer: () => undefined, notified: [], notices: [], saved: {}, written: [], kept, confirmMove: () => undefined, finishSetup: () => heldSetups.splice(0).forEach(finish => finish()) }
+  const state: World = { clock, toolCalls, fetched, dialogs: 0, closeDialog: () => undefined, panes, commands, inits: {}, dirty, ahead, answer: () => undefined, notified: [], notices: [], saved: {}, written: [], kept, confirmMove: () => undefined, prompts: [], finishSetup: () => heldSetups.splice(0).forEach(finish => finish()), finishFetches: () => heldFetches.splice(0).forEach(finish => finish()) }
   const heldSetups: (() => void)[] = []
+  const heldFetches: (() => void)[] = []
 
   on('session.start', ($, e) => ({ cwd: e.cwd }))
-  on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
+  on('prompt.submit', ($, e) => {
+    state.prompts.push(e.text)
+    return { text: e.text, context: e.context }
+  })
   on('prompt.compose', () => ({ sections: [{ id: 'intro', text: 'You are Claude Code.', scope: 'shared' }] }))
   on('command.register', ($, e) => ({ value: { command: e.name } }))
   on('tool.register', ($, e) => ({ value: { tool: `mcp__fishstack__${e.name}` } }))
@@ -152,13 +175,15 @@ export function world(
     for (let at = path; at.length > 1; at = parentOf(at)) dirs.add(at)
   }
   for (const path of [...slots, ...folders]) makeDir(path)
-  for (const path of slots) worktrees.set(path, null)
+  for (const path of slots) worktrees.set(path, onBranch[path] ?? null)
+  const refs = new Set<string>(['main', ...branches, ...Object.values(onBranch)])
   const excluded = new Set<string>()
   on('process.run', ($, e) => {
     const argv = e.argv
     const command = argv.join(' ')
     const cwd = e.init?.cwd ?? REPO
     commands.push(`${cwd}$ ${command}`)
+    state.inits[`${cwd}$ ${command}`] = e.init
     // The macOS file dialog: what picked files come back as.
     if (argv[0] === 'osascript') {
       const picked = ran(command.includes('choose folder') ? `${REPO}/docs/\n` : `${REPO}/docs/api.md\n/Users/me/notes/style.md\n`)
@@ -215,8 +240,11 @@ export function world(
     // Nothing in /repo is ignored but what fishStack excluded.
     if (sub.startsWith('check-ignore -q ')) return ran('', excluded.has(`/${args[2]}`) ? 0 : 1)
     if (sub === 'symbolic-ref --short refs/remotes/origin/HEAD') return ran('origin/main\n')
+    if (sub === 'fetch -q origin main' && fetch === 'stuck') return Promise.reject(new Error('git aborted: still running after 120000ms'))
+    if (sub === 'fetch -q origin main' && fetch === 'held') return new Promise<ReturnType<typeof ran>>(resolve => heldFetches.push(() => resolve(ran())))
     if (sub === 'fetch -q origin main') return ran()
     if (sub === 'rev-parse origin/main') return ran('0123456789abcdef\n')
+    if (sub === 'rev-parse main') return ran('fedcba9876543210\n')
     if (sub === 'worktree list --porcelain') {
       return ran([...worktrees].map(([path, branch]) => `worktree ${path}\n${branch === null ? 'detached' : `branch refs/heads/${branch}`}`).join('\n\n') + '\n')
     }
@@ -230,10 +258,23 @@ export function world(
       worktrees.set(args[5]!, null)
       return ran()
     }
-    if (sub.startsWith('checkout -q -B ')) {
-      worktrees.set(cwd, args[3]!)
+    if (sub.startsWith('worktree remove --force --force ')) {
+      const path = args[4]!
+      worktrees.delete(path)
+      for (const one of [...dirs]) if (one === path || one.startsWith(`${path}/`)) dirs.delete(one)
       return ran()
     }
+    if (sub === 'reset --hard -q' && isCheckoutCut) return ran('', 1, 'error: the checkout was cut short\n')
+    // As git 2.43 on: -B refuses a branch another worktree has out.
+    if (sub.startsWith('checkout -q -B ')) {
+      const branch = args[3]!
+      const holder = [...worktrees].find(([path, one]) => one === branch && path !== cwd)?.[0]
+      if (holder !== undefined) return ran('', 128, `fatal: '${branch}' is already used by worktree at '${holder}'\n`)
+      worktrees.set(cwd, branch)
+      refs.add(branch)
+      return ran()
+    }
+    if (sub.startsWith('rev-parse --verify --quiet refs/heads/')) return ran('', refs.has(args[3]!.slice('refs/heads/'.length)) ? 0 : 1)
     if (sub === 'checkout -q --detach HEAD') {
       worktrees.set(cwd, null)
       dirty.delete(cwd)

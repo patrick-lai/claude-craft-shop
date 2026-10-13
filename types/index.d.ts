@@ -88,6 +88,9 @@ declare module 'claude-code' {
       isBandHidden: boolean
       isStepsShown: boolean
       isHeadStartPrompted: boolean
+      // Where the session moved mid-turn with no head start told: the note the
+      // agent is owed at its next batch or prompt.
+      owedMoveNote: string | null
       toldStyle: string | null
       dials: DialValues
       selectedDial: DialKey | null
@@ -98,6 +101,9 @@ declare module 'claude-code' {
       contextDraft: ContextDraft
       contextStatus: string
       isWindowShown: boolean
+      // A Client failed on a surface (ui.fault): drawn controls fall back to
+      // Buttons until the next load.
+      isClientDown: boolean
     }
   }
 }

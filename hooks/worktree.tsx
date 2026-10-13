@@ -50,6 +50,7 @@ type RailKept = { sessionId: string; repliedAt: number | null; tokens: { input: 
 const elsewhere = atom({ plugin: 'fishstack', key: 'elsewhere' } as const, null)
 // What the pool's background warming is doing, for the Worktrees tab.
 const poolNote = atom({ plugin: 'fishstack', key: 'poolNote' } as const, '')
+const slotAsk = atom({ plugin: 'fishstack', key: 'slotAsk' } as const, null)
 const tokenTotals = atom({ plugin: 'fishstack', key: 'tokenTotals' } as const, null)
 // Autopilot answering for a person who is away (session.ts sets it).
 const autopilot = atom({ plugin: 'fishstack', key: 'autopilot' } as const, null)
@@ -70,6 +71,17 @@ export const POOL_SIZE = 3
 const DEFAULT_MIN_FREE_GB = 20
 const SETUP_PREFIX = 'setup:'
 type SetupRun = { command: string; lockHash: string }
+// A slot the pool is making, by path: who reserved it and what it is doing,
+// so every session lists it as setting up and none claims it half made.
+// Queued is reserved, not yet started. A run that died leaves its mark,
+// which lapses after the longest a step may take.
+const WARMING_PREFIX = 'warming:'
+const QUEUED = 'Queued'
+const WARMING_TTL_MS = SETUP_TIMEOUT_MS + LEASE_TTL_MS
+type Warming = { sessionId: string; step: string; at: number }
+// How many slots the pool keeps, by slot root: + Add slot raises it and
+// Remove lowers it; POOL_SIZE until either is pressed.
+const POOL_SIZE_PREFIX = 'poolSize:'
 const LOCKFILES = ['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lock', 'bun.lockb']
 const IN_REPO_ROOT = '.claude/worktrees/fishstack'
 
@@ -157,6 +169,28 @@ async function writeLease($: $, path: string): Promise<void> {
   await $.store.set(LEASE_PREFIX + path, lease)
 }
 
+async function readWarming($: $, path: string): Promise<Warming | null> {
+  const mark = await $.store.get(WARMING_PREFIX + path)
+  return mark !== null && typeof mark === 'object' ? (mark as Warming) : null
+}
+
+async function isWarmingLive($: $, mark: Warming | null): Promise<boolean> {
+  return mark !== null && (await $.clock.now()) - mark.at < WARMING_TTL_MS
+}
+
+// Marks a slot setting up at this step, in the store and the pool's signal
+// for every session, and in this one's list at once.
+async function markWarming($: $, path: string, step: string): Promise<void> {
+  await $.store.set(WARMING_PREFIX + path, { sessionId: await $.session.id(), step, at: await $.clock.now() })
+  await signalPool($, path)
+  await update($, slots, list => list.map(one => (one.path === path ? { ...one, setup: step } : one)))
+}
+
+async function poolSize($: $, repoDir: string): Promise<number> {
+  const kept = await $.store.get(POOL_SIZE_PREFIX + repoDir)
+  return typeof kept === 'number' ? kept : POOL_SIZE
+}
+
 async function setStep($: $, label: string, isWarning = false): Promise<void> {
   const at = await $.clock.now()
   await update($, worktree, current => ({
@@ -222,11 +256,14 @@ async function refreshSlotsFor($: $, options: PluginOptions, main: string): Prom
   let lapsesAt = Infinity
   for (const path of await slotDirs($, repoDir)) {
     const real = await realPath($, path)
-    if (!listed.has(real)) continue
+    const mark = await readWarming($, path)
+    const isWarming = await isWarmingLive($, mark)
+    // A slot being made is listed before git knows it, so it shows at once.
+    if (!listed.has(real) && !isWarming) continue
     const lease = await readLease($, path)
     const isLeased = await isLeaseLive($, lease)
     if (isLeased && path !== mine) lapsesAt = Math.min(lapsesAt, lease!.beatAt + LEASE_TTL_MS)
-    found.push({ path, branch: listed.get(real) ?? null, isLeased, isMine: path === mine })
+    found.push({ path, branch: listed.get(real) ?? null, isLeased, isMine: path === mine, setup: isWarming ? mark!.step : null, isRemoving: removing.has(path) })
   }
   lapseTimer?.cancel()
   lapseTimer = Number.isFinite(lapsesAt) ? $.clock.after(Math.max(1_000, lapsesAt - now), () => void refreshSlotsFor($, options, main)) : null
@@ -277,6 +314,9 @@ function queueRefresh($: $, options: PluginOptions): void {
   })
 }
 
+// Slots this process is removing, so a redraw meanwhile still says so.
+const removing = new Set<string>()
+
 async function releaseSlot($: $, path: string): Promise<void> {
   await $.store.delete(LEASE_PREFIX + path)
   await signalPool($, path)
@@ -319,10 +359,8 @@ async function createSlot($: $, main: string, path: string, sha: string): Promis
   await git($, ['status', '--porcelain=v1', '-z', '--untracked-files=all'], path)
 }
 
-// Readies a used slot for its next session: anything left uncommitted is kept
-// under refs/fish/backup/, then the slot is reset, cleaned (ignored files such
-// as node_modules stay) and detached, which frees its old branch.
-async function scrubSlot($: $, path: string): Promise<void> {
+// Anything left uncommitted in a slot, kept under refs/fish/backup/.
+async function backUpLeftovers($: $, path: string): Promise<void> {
   const status = await git($, ['status', '--porcelain'], path)
   if (status.exitCode === 0 && status.stdout.trim() !== '') {
     await gitWrite($, ['add', '-A'], path, 'Could not save the slot\'s leftover work.')
@@ -332,6 +370,13 @@ async function scrubSlot($: $, path: string): Promise<void> {
       await gitWrite($, ['update-ref', `refs/fish/backup/${path.split('/').pop()}-${await $.clock.now()}`, sha], path, 'Could not back up the slot\'s leftover work.')
     }
   }
+}
+
+// Readies a used slot for its next session: its leftovers backed up, then
+// the slot is reset, cleaned (ignored files such as node_modules stay) and
+// detached, which frees its old branch.
+async function scrubSlot($: $, path: string): Promise<void> {
+  await backUpLeftovers($, path)
   await gitWrite($, ['reset', '--hard', '-q'], path, 'Could not reset the slot.')
   await gitWrite($, ['clean', '-fdq'], path, 'Could not clean the slot.')
   await gitWrite($, ['checkout', '-q', '--detach', 'HEAD'], path, 'Could not detach the slot.')
@@ -348,6 +393,7 @@ async function pickSlot($: $, options: PluginOptions, main: string): Promise<{ p
     const dirs = await slotDirs($, repoDir)
     for (const path of dirs) {
       if (!listed.has(await realPath($, path))) continue
+      if (await isWarmingLive($, await readWarming($, path))) continue
       const lease = await readLease($, path)
       if (lease?.sessionId !== sessionId && (await isLeaseLive($, lease))) continue
       await writeLease($, path)
@@ -410,10 +456,9 @@ async function nodeModulesIn($: $, dir: string): Promise<string[]> {
 // into a staging folder renamed into place. Then the setup command, skipped
 // when it and the lockfiles are what it last ran with in this slot.
 // What seeding says as it goes: a session's claim logs each step for its
-// band and stepper; the pool's warming says nothing there, as no session
-// waits on it.
+// band and stepper; the pool's warming shows it on the slot's row instead,
+// as no session waits on it.
 type Report = (label: string, isWarning?: boolean) => Promise<void>
-const SILENT: Report = async () => undefined
 
 async function seedDependencies($: $, options: PluginOptions, main: string, path: string, report: Report) {
   const hash = await lockHash($, path)
@@ -421,7 +466,7 @@ async function seedDependencies($: $, options: PluginOptions, main: string, path
     let donor: string | null = null
     const repoDir = await slotsRoot($, options, main)
     for (const sibling of await slotDirs($, repoDir)) {
-      if (sibling === path || (await isLeaseLive($, await readLease($, sibling)))) continue
+      if (sibling === path || (await isLeaseLive($, await readLease($, sibling))) || (await isWarmingLive($, await readWarming($, sibling)))) continue
       if ((await $.fs.exists(`${sibling}/node_modules`)) && (await lockHash($, sibling)) === hash) {
         donor = sibling
         break
@@ -476,67 +521,109 @@ async function freeKb($: $, dir: string): Promise<number> {
   return df.exitCode === 0 && Number.isFinite(available) ? available : Infinity
 }
 
-// Keeps the pool warm, as CommissionAI does: at least POOL_SIZE slots, at
-// least one of them idle, each made, seeded and set up ahead of any session,
-// one at a time in the background. Pauses below minFreeGb of free disk, and
-// says so in the tab.
+// What the pool holds now: its slots, made or being made by a live run, how
+// many of those no session holds, and the slots this session reserved that
+// wait to be made.
+async function poolNow($: $, main: string, repoDir: string): Promise<{ total: number; idle: number; queued: string[] }> {
+  const listed = await worktreePaths($, main)
+  const sessionId = await $.session.id()
+  let total = 0
+  let idle = 0
+  const queued: string[] = []
+  for (const path of await slotDirs($, repoDir)) {
+    const mark = await readWarming($, path)
+    const isListed = listed.has(await realPath($, path))
+    if (!isListed && mark?.sessionId === sessionId && mark.step === QUEUED) queued.push(path)
+    if (!isListed && !(await isWarmingLive($, mark))) continue
+    total++
+    if (!(await isLeaseLive($, await readLease($, path)))) idle++
+  }
+  return { total, idle, queued }
+}
+
+// The next slot number, reserved under the lock by its empty folder and
+// marked Queued, so every session lists it before anything is made there.
+async function reserveSlot($: $, repoDir: string): Promise<string> {
+  await lock($, repoDir)
+  try {
+    const dirs = await slotDirs($, repoDir)
+    const path = `${repoDir}/${dirs.reduce((most, one) => Math.max(most, Number(one.split('/').pop())), 0) + 1}`
+    await $.process.run(['mkdir', '-p', path])
+    await markWarming($, path, QUEUED)
+    return path
+  } finally {
+    await unlock($, repoDir)
+  }
+}
+
+// Keeps the pool warm, as CommissionAI does: at least its size in slots
+// (POOL_SIZE, or what + Add slot and Remove made it), at least one of them
+// idle, each made, seeded and set up ahead of any session, one at a time in
+// the background. Each slot is listed as setting up from the moment it is
+// reserved. Pauses below minFreeGb of free disk, and says so in the tab.
 let isWarming = false
 // A top-up asked for while one runs: run once more when it ends, as a claim
 // made meanwhile may have taken the spare it was counting on.
 let isWarmAgain = false
-// Slots asked for beyond the pool's size by Warm one more, in this process:
-// the warming makes at least this many, then forgets it.
-let warmTo = 0
 async function prewarm($: $, options: PluginOptions, main: string): Promise<void> {
   if (isWarming) {
     isWarmAgain = true
     return
   }
   isWarming = true
+  let path: string | null = null
   try {
     const repoDir = await slotsRoot($, options, main)
+    const sessionId = await $.session.id()
+    // Marks this session left mid-step belong to a run that is gone (none
+    // runs here now); Queued ones still wait to be made.
+    for (const one of await slotDirs($, repoDir)) {
+      const mark = await readWarming($, one)
+      if (mark?.sessionId === sessionId && mark.step !== QUEUED) await $.store.delete(WARMING_PREFIX + one)
+    }
+    await update($, poolNote, () => '')
     const branchName = await defaultBranch($, main)
-    const fetched = await git($, ['fetch', '-q', 'origin', branchName], main)
-    const sha = await gitOut($, ['rev-parse', fetched.exitCode === 0 ? `origin/${branchName}` : branchName], main, 'Could not resolve the base.')
     const minFreeGb = Number(options.minFreeGb ?? DEFAULT_MIN_FREE_GB)
+    let sha: string | null = null
     let note = ''
-    for (let made = 0; made < Math.max(POOL_SIZE, warmTo); made++) {
-      const listed = await worktreePaths($, main)
-      let total = 0
-      let idle = 0
-      for (const path of await slotDirs($, repoDir)) {
-        if (!listed.has(await realPath($, path))) continue
-        total++
-        if (!(await isLeaseLive($, await readLease($, path)))) idle++
-      }
-      if (total >= Math.max(POOL_SIZE, warmTo) && idle >= 1) {
-        warmTo = 0
-        break
-      }
+    for (let made = 0; made < Math.max(await poolSize($, repoDir), 1); made++) {
+      const pool = await poolNow($, main, repoDir)
+      path = pool.queued[0] ?? null
+      if (path === null && pool.total >= (await poolSize($, repoDir)) && pool.idle >= 1) break
       await $.process.run(['mkdir', '-p', repoDir])
       const free = await freeKb($, repoDir)
       if (free < minFreeGb * 1024 * 1024) {
         note = `Paused: ${(free / 1024 / 1024).toFixed(1)} GB of disk free, under the ${minFreeGb} GB it keeps.`
+        path = null
         break
       }
-      await lock($, repoDir)
-      let path: string
-      try {
-        const dirs = await slotDirs($, repoDir)
-        path = `${repoDir}/${dirs.reduce((most, one) => Math.max(most, Number(one.split('/').pop())), 0) + 1}`
-        await $.process.run(['mkdir', '-p', path])
-      } finally {
-        await unlock($, repoDir)
+      if (path !== null) await markWarming($, path, `Fetching origin/${branchName}`)
+      if (sha === null) {
+        const fetched = await git($, ['fetch', '-q', 'origin', branchName], main)
+        sha = await gitOut($, ['rev-parse', fetched.exitCode === 0 ? `origin/${branchName}` : branchName], main, 'Could not resolve the base.')
       }
-      await update($, poolNote, () => `Warming slot ${path.split('/').pop()} of ${Math.max(POOL_SIZE, warmTo, total + 1)}…`)
-      await createSlot($, main, path, sha)
-      await seedDependencies($, options, main, path, SILENT)
-      await signalPool($, path)
+      if (path === null) {
+        path = await reserveSlot($, repoDir)
+        await refreshSlotsFor($, options, main)
+      }
+      const at = path
+      await markWarming($, at, 'Checking out')
+      await createSlot($, main, at, sha)
+      await seedDependencies($, options, main, at, label => markWarming($, at, label))
+      await $.store.delete(WARMING_PREFIX + at)
+      await signalPool($, at)
+      path = null
       await refreshSlotsFor($, options, main)
     }
     await update($, poolNote, () => note)
   } catch (error) {
     $.ui.log(`prewarm stopped: ${String(error)}`, { to: 'debug' })
+    // The slot it was making is no longer listed as setting up.
+    if (path !== null) {
+      await $.store.delete(WARMING_PREFIX + path)
+      await signalPool($, path)
+    }
+    await refreshSlotsFor($, options, main).catch(() => undefined)
     await update($, poolNote, () => (error instanceof StepError ? `Warming stopped: ${error.message}` : 'Warming stopped.'))
   } finally {
     isWarming = false
@@ -668,17 +755,76 @@ async function carryOverClear($: $): Promise<void> {
 
 export const AUTO_WORKTREE_KEY = 'autoWorktree'
 
-// The Worktrees tab's toggle, kept across sessions; until it is pressed,
-// the autoWorktree option decides, off unless set.
-// Warm one more: one slot past what the pool holds now, made in the
-// background like the rest, behind the same disk guard.
-async function warmOneMore($: $, options: PluginOptions, count: number): Promise<void> {
+// + Add slot: the next slot reserved and listed at once, setting up, then
+// made in the background like the rest, behind the same disk guard. The
+// pool keeps one more from then on.
+async function addSlot($: $, options: PluginOptions): Promise<void> {
   const main = (await read($, worktree)).main ?? (await repoMain($))
   if (main === null) return
-  warmTo = Math.max(warmTo, count + 1)
+  try {
+    const repoDir = await slotsRoot($, options, main)
+    await reserveSlot($, repoDir)
+    const { total } = await poolNow($, main, repoDir)
+    await $.store.set(POOL_SIZE_PREFIX + repoDir, Math.max(await poolSize($, repoDir), total))
+    await refreshSlotsFor($, options, main)
+  } catch (error) {
+    $.ui.log(`add slot failed: ${String(error)}`, { to: 'debug' })
+    await update($, poolNote, () => (error instanceof StepError ? `Could not add a slot: ${error.message}` : 'Could not add a slot.'))
+    return
+  }
   await prewarm($, options, main)
 }
 
+// Remove: a free slot leaves the pool, and the pool keeps one fewer from
+// then on. It is leased under the lock so no session claims it meanwhile,
+// its leftovers are backed up, then it is moved out of the numbered slots
+// at once and deleted. Its branch stays.
+async function removeSlot($: $, options: PluginOptions, path: string): Promise<void> {
+  await update($, slotAsk, () => null)
+  const main = (await read($, worktree)).main ?? (await repoMain($))
+  if (main === null) return
+  const number = path.split('/').pop()
+  removing.add(path)
+  await update($, slots, list => list.map(one => (one.path === path ? { ...one, isRemoving: true } : one)))
+  try {
+    const repoDir = await slotsRoot($, options, main)
+    await lock($, repoDir)
+    let isFree = false
+    try {
+      isFree =
+        path !== (await read($, worktree)).path &&
+        !(await isLeaseLive($, await readLease($, path))) &&
+        !(await isWarmingLive($, await readWarming($, path)))
+      if (isFree) await writeLease($, path)
+    } finally {
+      await unlock($, repoDir)
+    }
+    if (!isFree) {
+      await $.ui.toast(`Slot ${number} is in use now, so it stays.`)
+      return
+    }
+    if ((await worktreePaths($, main)).has(await realPath($, path))) await backUpLeftovers($, path)
+    const gone = `${repoDir}/.removing-${number}-${await $.clock.now()}`
+    const moved = await $.process.run(['mv', path, gone])
+    if (moved.exitCode !== 0) throw new StepError(`Could not move slot ${number} out of the pool.`)
+    for (const prefix of [LEASE_PREFIX, SETUP_PREFIX, WARMING_PREFIX]) await $.store.delete(prefix + path)
+    await $.process.run(['rm', '-rf', gone], { timeoutMs: SETUP_TIMEOUT_MS })
+    await git($, ['worktree', 'prune'], main)
+    await signalPool($, path)
+    const { total } = await poolNow($, main, repoDir)
+    await $.store.set(POOL_SIZE_PREFIX + repoDir, Math.min(await poolSize($, repoDir), total))
+  } catch (error) {
+    $.ui.log(`remove slot failed: ${String(error)}`, { to: 'debug' })
+    await releaseSlot($, path)
+    await $.ui.toast(error instanceof StepError ? error.message : `Could not remove slot ${number}.`)
+  } finally {
+    removing.delete(path)
+    await refreshSlotsFor($, options, main)
+  }
+}
+
+// The Worktrees tab's toggle, kept across sessions; until it is pressed,
+// the autoWorktree option decides, off unless set.
 async function isAutoOn($: $, options: PluginOptions): Promise<boolean> {
   const stored = await $.store.get(AUTO_WORKTREE_KEY)
   return typeof stored === 'boolean' ? stored : options.autoWorktree === true
@@ -1076,7 +1222,8 @@ export function registerWorktree(on: On, options: PluginOptions): void {
 
     const isAuto = await isAutoOn($, options)
     const note = await read($, poolNote)
-    const idle = list.filter(one => !one.isLeased).length
+    const settingUp = list.filter(one => one.setup !== null).length
+    const idle = list.filter(one => !one.isLeased && one.setup === null).length
     const autoCard = (
         <Box key="worktree-head" justifyContent="space-between" alignItems="flex-start" gap={1}>
           <Box flexDirection="column" flexShrink={1}>
@@ -1091,11 +1238,10 @@ export function registerWorktree(on: On, options: PluginOptions): void {
                 <Text>
                   <Text color={idle > 0 ? 'success' : 'warning'}>● </Text>
                   <Text>
-                    Pool: {list.length} {list.length === 1 ? 'slot' : 'slots'}, {idle} ready
+                    Pool: {list.length} {list.length === 1 ? 'slot' : 'slots'}, {idle} ready{settingUp > 0 ? `, ${settingUp} setting up` : ''}
                   </Text>
                   {note !== '' && <Text dimColor> · {note}</Text>}
                 </Text>
-                <Button key="pool-more" label="Warm one more" dimColor onPress={() => void warmOneMore($, options, list.length)} />
               </Box>
             )}
           </Box>
@@ -1103,33 +1249,70 @@ export function registerWorktree(on: On, options: PluginOptions): void {
         </Box>
     )
 
-    // Every slot of this repository's pool, whatever this session is doing.
+    // Every slot of this repository's pool, whatever this session is doing,
+    // with + Add slot at its head; a slot being made is listed from the
+    // moment it is reserved, and a free one can be removed.
     const rich = ui.Svg !== undefined
+    const ask = await read($, slotAsk)
+    const slotRow = (slot: Slot) => {
+      const number = slot.path.split('/').pop()
+      const isSettingUp = slot.setup !== null
+      const isRemovable = !slot.isMine && !slot.isLeased && !isSettingUp && !slot.isRemoving
+      const isAsked = ask === slot.path && isRemovable
+      const status = slot.isRemoving
+        ? { text: '◌ removing…', color: 'inactive' }
+        : isSettingUp
+          ? { text: '◐ setting up', color: 'warning' }
+          : slot.isMine
+            ? { text: '● this session', color: 'success' }
+            : slot.isLeased
+              ? { text: '● leased', color: 'warning' }
+              : { text: '○ free', color: 'inactive' }
+      return card(
+        ui,
+        `slot-${slot.path}`,
+        [
+          <Box justifyContent="space-between" alignItems="center" gap={1}>
+            <Text wrap="truncate-end">
+              <Text bold>#{number}</Text> {isSettingUp ? '' : `${slot.branch ?? 'detached'} `}
+              <Text color={status.color}>{status.text}</Text>
+              {isSettingUp && <Text dimColor> · {slot.setup}</Text>}
+            </Text>
+            {!isSettingUp && !slot.isRemoving && (
+              <Box gap={1} flexShrink={0}>
+                <Button key={`slot-copy-${slot.path}`} label="Copy path" dimColor onPress={press => void $.ui.copy({ text: slot.path, surface: press.surface })} />
+                {slot.isLeased && !slot.isMine && (
+                  <Button key={`slot-release-${slot.path}`} label="Release" dimColor onPress={() => void releaseAndRefresh($, slot.path, options)} />
+                )}
+                {isRemovable && !isAsked && (
+                  <Button key={`slot-remove-${slot.path}`} label="Remove" dimColor onPress={() => void update($, slotAsk, () => slot.path)} />
+                )}
+              </Box>
+            )}
+          </Box>,
+          isAsked && (
+            <Box flexDirection="column" marginTop={1} gap={1}>
+              <Text>
+                Remove slot <Text bold>#{number}</Text>? <Text dimColor>Its folder and node_modules go. Its branch stays, and anything uncommitted is saved under refs/fish/backup/ first.</Text>
+              </Text>
+              <Box gap={1} justifyContent="flex-end" flexWrap="wrap">
+                <Button key="slot-remove-cancel" label="Cancel" dimColor onPress={() => void update($, slotAsk, () => null)} />
+                <Button key="slot-remove-confirm" label="Remove" variant="primary" onPress={() => void removeSlot($, options, slot.path)} />
+              </Box>
+            </Box>
+          ),
+        ],
+        { tone: isAsked ? 'danger' : slot.isMine ? 'selected' : isSettingUp ? 'warning' : slot.isRemoving ? 'muted' : 'plain' },
+      )
+    }
     const slotList =
-      list.length === 0 ? null : (
+      list.length === 0 && !isAuto ? null : (
         <Box key="slot-list" flexDirection="column" gap={rich ? 1 : 0}>
-          {label(ui, `Slots · ${list.length}`)}
-          {list.map(slot =>
-            card(
-              ui,
-              `slot-${slot.path}`,
-              [
-                <Box justifyContent="space-between" alignItems="center" gap={1}>
-                  <Text wrap="truncate-end">
-                    <Text bold>#{slot.path.split('/').pop()}</Text> {slot.branch ?? 'detached'}{' '}
-                    <Text color={slot.isMine ? 'success' : slot.isLeased ? 'warning' : 'inactive'}>{slot.isMine ? '● this session' : slot.isLeased ? '● leased' : '○ free'}</Text>
-                  </Text>
-                  <Box gap={1}>
-                    <Button key={`slot-copy-${slot.path}`} label="Copy path" dimColor onPress={press => void $.ui.copy({ text: slot.path, surface: press.surface })} />
-                    {slot.isLeased && !slot.isMine && (
-                      <Button key={`slot-release-${slot.path}`} label="Release" dimColor onPress={() => void releaseAndRefresh($, slot.path, options)} />
-                    )}
-                  </Box>
-                </Box>,
-              ],
-              { tone: slot.isMine ? 'selected' : 'plain' },
-            ),
-          )}
+          <Box key="slot-head" justifyContent="space-between" alignItems="center" gap={1}>
+            {label(ui, `Slots · ${list.length}`)}
+            <Button key="pool-add" label="+ Add slot" dimColor onPress={() => void addSlot($, options)} />
+          </Box>
+          {list.map(slotRow)}
         </Box>
       )
 

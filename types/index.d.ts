@@ -22,7 +22,15 @@ export type AutopilotWait =
   | { kind: 'waiting'; since: number; deadline: number; picked: string; count: number }
   | { kind: 'answered'; at: number; picked: string; waitedMs: number }
 
-export type Slot = { path: string; branch: string | null; isLeased: boolean; isMine: boolean }
+export type Slot = {
+  path: string
+  branch: string | null
+  isLeased: boolean
+  isMine: boolean
+  // While the pool makes it: what it is doing now; null once it is ready.
+  setup: string | null
+  isRemoving: boolean
+}
 
 export type DialKey = 'foresight' | 'crew' | 'tenacity' | 'autonomy' | 'proof' | 'voice'
 
@@ -66,6 +74,8 @@ declare module 'claude-code' {
       worktree: Worktree
       slots: Slot[]
       poolNote: string
+      // The slot whose Remove waits for a second press, by path.
+      slotAsk: string | null
       elsewhere: string | null
       railTick: number
       autopilot: AutopilotWait | null

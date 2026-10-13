@@ -63,7 +63,7 @@ Turn on **Use worktrees** and each new session gets a worktree of its own, on it
 
 It's fast because the work happens before you need it:
 
-- **A warm pool.** fishStack keeps a pool of slots in the background (three to start, with one always free), each checked out, with dependencies in place and your setup command already run. A new session takes one and moves in. In the run above that took about three seconds from launch. **Warm one more** adds a slot whenever you want a bigger pool, and the tab lists every slot.
+- **A warm pool.** fishStack keeps a pool of slots in the background (three to start, with one always free), each checked out, with dependencies in place and your setup command already run. A new session takes one and moves in. In the run above that took about three seconds from launch. The tab lists every slot: **+ Add slot** grows the pool, and a new slot shows up straight away as *setting up* with the step it is on, until it's ready. **Remove** (a second press confirms) takes a free slot out, and the pool stays that size from then on (it still keeps one free for the next session).
 - **A head start.** While the slot is prepared, the agent can already read, search and plan. Anything that writes waits until it has moved in.
 - **No copying.** `node_modules` is cloned copy-on-write (APFS), so a slot costs almost no disk until something changes.
 - **Nothing lost.** A slot is reused once its session ends. Anything left uncommitted is saved under `refs/fish/backup/` first.
@@ -71,7 +71,7 @@ It's fast because the work happens before you need it:
 It works with Claude Code's own worktrees too. `claude --worktree feat-x` and the desktop app's worktree option land in a slot on `fish/feat-x`.
 
 <p align="center">
-  <img src="docs/media/worktree-desktop.png" width="760" alt="The Worktrees tab in the desktop app: Use worktrees on, the pool's status with Warm one more, this session's slot and branch, and the slots list">
+  <img src="docs/media/worktree-desktop.png" width="760" alt="The Worktrees tab in the desktop app: Use worktrees on, the pool's status, this session's slot and branch, and the slots list">
 </p>
 
 <details>
@@ -82,7 +82,7 @@ It works with Claude Code's own worktrees too. `claude --worktree feat-x` and th
 3. **Seed.** Each missing `node_modules` (up to six folders deep) is cloned with `cp -c` into a staging folder, then renamed into place. The source is an idle sibling slot with the same lockfiles, or else the main checkout. Then `setupCommand` runs, unless this slot already ran it with these lockfiles.
 4. **Move in.** The session enters the slot (`EnterWorktree`) as soon as it is ready, even mid-turn. Slots live under the repository's `.claude/worktrees/`, where Claude Code keeps its own, so the move needs no confirming. Set `worktreeRoot` elsewhere and Claude Code asks you to confirm each move.
 
-The pool stops warming when free disk drops under `minFreeGb` (20 GB), and the tab says why. During the head start, the guard refuses Edit, Write, MultiEdit, NotebookEdit and ExitPlanMode. It also refuses any shell command that is not a known read (`ls`, `cat`, `rg`, read-only `git`, `sed -n` and the like). A redirect anywhere but `/dev/null` counts as a write.
+A slot being made is marked in the store, so every session lists it as setting up and none claims it half made. Removing a slot leases it first, saves anything uncommitted under `refs/fish/backup/`, then moves it out of the pool and deletes it; its branch stays. The pool stops warming when free disk drops under `minFreeGb` (20 GB), and the tab says why. During the head start, the guard refuses Edit, Write, MultiEdit, NotebookEdit and ExitPlanMode. It also refuses any shell command that is not a known read (`ls`, `cat`, `rg`, read-only `git`, `sed -n` and the like). A redirect anywhere but `/dev/null` counts as a write.
 </details>
 
 ## Dials

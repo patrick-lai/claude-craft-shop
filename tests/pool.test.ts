@@ -246,7 +246,7 @@ test('a session in a worktree fishStack does not manage is told where it is, and
   expect(await ui.find({ type: 'Button', key: 'worktree-create' })).toBeUndefined()
 })
 
-test('the pool is listed whatever the session does, and Warm one more adds a slot to it', { options: { autoWorktree: true, worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
+test('the pool is listed whatever the session does, and + Add slot adds a slot to it', { options: { autoWorktree: true, worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
   const dir = await repoDir()
   const { clock, commands } = world(on, { slots: [1, 2, 3].map(n => `${dir}/${n}`) })
   // This session works in a worktree of its own, not one of the pool's.
@@ -258,17 +258,81 @@ test('the pool is listed whatever the session does, and Warm one more adds a slo
   expect(await ui.find({ text: /This session already works in a worktree/ })).toBeDefined()
   expect(await ui.find({ text: /Slots · 3/ })).toBeDefined()
   expect(await ui.find({ text: /#3 detached ○ free/ })).toBeDefined()
-  await activate(ui, 'pool-more')
+  await activate(ui, 'pool-add')
   await clock.advance(1)
   expect(created(commands)).toEqual([`${REPO}$ git -c core.hooksPath=/dev/null worktree add -q --detach --no-checkout ${dir}/4 0123456789abcdef`])
   await ui.redraw()
   expect(await ui.find({ text: /Pool: 4 slots, 4 ready/ })).toBeDefined()
   expect(await ui.find({ text: /Slots · 4/ })).toBeDefined()
-  // The pool's size is back to three for the next top-up: nothing more is made.
+  // The pool keeps four from now on: a top-up makes nothing more.
   await activate(ui, 'auto-worktree-off')
   await activate(ui, 'auto-worktree-on')
   await clock.advance(1)
   expect(created(commands).length).toBe(1)
+})
+
+test('an added slot is listed at once as setting up, step by step, and no session claims it until it is ready', { options: { worktreeRoot: '/slots', setupCommand: 'pnpm install' } }, async ($, on) => {
+  const dir = await repoDir()
+  const state = world(on, { slots: [1, 2].map(n => `${dir}/${n}`), store: Object.fromEntries([1, 2].map(n => [`lease:${dir}/${n}`, { sessionId: 'someone-else', beatAt: 1_000_000 }])), isSetupHeld: true })
+  const { clock } = state
+  on('classic.WorktreeCreate', () => ({}))
+  await $.session.start({ cwd: '/other/wt', surface: 'terminal', isInteractive: true })
+  const ui = await mountPane($, 'terminal')
+  await activate(ui, 'tab-worktree')
+  await activate(ui, 'pool-add')
+  await ui.redraw()
+  expect(await ui.find({ text: /Slots · 3/ })).toBeDefined()
+  expect(await ui.find({ text: /#3 ◐ setting up/ })).toBeDefined()
+  await clock.advance(1)
+  await ui.redraw()
+  // Made and seeding: its row says what it is doing, and it cannot be removed.
+  expect(await ui.find({ text: /#3 ◐ setting up · Running pnpm install/ })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: `slot-remove-${dir}/3` })).toBeUndefined()
+  await activate(ui, 'auto-worktree-on')
+  await ui.redraw()
+  expect(await ui.find({ text: /Pool: 3 slots, 0 ready, 1 setting up/ })).toBeDefined()
+  // Every other slot is held, and a claim passes the one setting up by.
+  const claimed = await $.classic.WorktreeCreate({ name: 'feat-y' })
+  expect(claimed.worktreePath).toBe(`${dir}/4`)
+  state.finishSetup()
+  await clock.advance(1)
+  await ui.redraw()
+  expect(await ui.find({ text: /#3 detached ○ free/ })).toBeDefined()
+})
+
+test('a free slot is removed after a second press: its leftovers backed up, the pool one smaller for good', { options: { autoWorktree: true, worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
+  const dir = await repoDir()
+  const { clock, commands, dirty, saved } = world(on, {
+    slots: [1, 2, 3].map(n => `${dir}/${n}`),
+    store: { [`lease:${dir}/1`]: { sessionId: 'someone-else', beatAt: 1_000_000 }, [`setup:${dir}/3`]: { command: 'x', lockHash: '' } },
+  })
+  dirty.add(`${dir}/3`)
+  await $.session.start({ cwd: '/other/wt', surface: 'terminal', isInteractive: true })
+  await clock.advance(1)
+  const ui = await mountPane($, 'terminal')
+  await activate(ui, 'tab-worktree')
+  // A slot another session holds offers Release, not Remove.
+  expect(await ui.find({ type: 'Button', key: `slot-remove-${dir}/1` })).toBeUndefined()
+  await activate(ui, `slot-remove-${dir}/3`)
+  expect(await ui.find({ text: /Remove slot #3\?/ })).toBeDefined()
+  await activate(ui, 'slot-remove-cancel')
+  expect(await ui.find({ text: /Remove slot #3\?/ })).toBeUndefined()
+  await activate(ui, `slot-remove-${dir}/3`)
+  await activate(ui, 'slot-remove-confirm')
+  await clock.advance(1)
+  expect(commands).toContainEqual(expect.stringMatching(new RegExp(`^${dir}/3\\$ git -c core.hooksPath=/dev/null update-ref refs/fish/backup/3-\\d+ 5ta5h$`)))
+  expect(commands).toContainEqual(expect.stringMatching(new RegExp(`mv ${dir}/3 ${dir}/\\.removing-3-\\d+$`)))
+  expect(commands).toContain(`${REPO}$ git worktree prune`)
+  expect(saved[`setup:${dir}/3`]).toBeUndefined()
+  expect(saved[`poolSize:${dir}`]).toBe(2)
+  await ui.redraw()
+  expect(await ui.find({ text: /Slots · 2/ })).toBeDefined()
+  expect(await ui.find({ text: /#3/ })).toBeUndefined()
+  // The pool keeps two from now on: a top-up does not make it back.
+  await activate(ui, 'auto-worktree-off')
+  await activate(ui, 'auto-worktree-on')
+  await clock.advance(1)
+  expect(created(commands)).toEqual([])
 })
 
 test('after /clear the session keeps its slot, its lease and its dials', { options: { worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {

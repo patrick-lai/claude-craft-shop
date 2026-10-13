@@ -33,6 +33,8 @@ export type World = {
   kept: Record<string, unknown>
   // With isMoveHeld, confirms the held EnterWorktree, as the person would.
   confirmMove: () => void
+  // With isSetupHeld, lets every held setup command finish.
+  finishSetup: () => void
 }
 
 function ran(stdout = '', exitCode = 0) {
@@ -52,6 +54,7 @@ export function world(
     slots = [],
     folders = [],
     isMoveHeld = false,
+    isSetupHeld = false,
   }: {
     isRepo?: boolean
     isDialogSlow?: boolean
@@ -64,6 +67,8 @@ export function world(
     folders?: string[]
     // EnterWorktree waits for state.confirmMove, as Claude Code's dialog does.
     isMoveHeld?: boolean
+    // The setup command runs until state.finishSetup.
+    isSetupHeld?: boolean
   } = {},
 ): World {
   const clock = mock.clock(on, { now: 1_000_000 })
@@ -88,7 +93,8 @@ export function world(
   const commands: string[] = []
   const dirty = new Set<string>()
   const ahead = new Set<string>()
-  const state: World = { clock, toolCalls, fetched, dialogs: 0, closeDialog: () => undefined, panes, commands, dirty, ahead, answer: () => undefined, notified: [], notices: [], saved: {}, written: [], kept, confirmMove: () => undefined }
+  const state: World = { clock, toolCalls, fetched, dialogs: 0, closeDialog: () => undefined, panes, commands, dirty, ahead, answer: () => undefined, notified: [], notices: [], saved: {}, written: [], kept, confirmMove: () => undefined, finishSetup: () => heldSetups.splice(0).forEach(finish => finish()) }
+  const heldSetups: (() => void)[] = []
 
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
@@ -171,7 +177,13 @@ export function world(
       return ran()
     }
     if (argv[0] === 'mv') {
-      makeDir(argv[2]!)
+      const [from, to] = [argv[1]!, argv[2]!]
+      for (const one of [...dirs]) {
+        if (one !== from && !one.startsWith(`${from}/`)) continue
+        dirs.delete(one)
+        dirs.add(to + one.slice(from.length))
+      }
+      makeDir(to)
       return ran()
     }
     if (argv[0] === 'cp') {
@@ -187,7 +199,10 @@ export function world(
     if (argv[0] === 'find') return ran((nodeModules[argv[1]!] ?? []).map(one => `${argv[1]}/${one}`).join('\n'))
     // A line appended to the main checkout's info/exclude.
     if (argv[0] === '/bin/bash' && argv[1] === '-c' && argv[4] === `${REPO}/.git/info/exclude`) excluded.add(argv[5]!)
-    if (argv[0] === '/bin/bash') return ran()
+    if (argv[0] === '/bin/bash') {
+      if (!isSetupHeld || argv[1] !== '-lc') return ran()
+      return new Promise<ReturnType<typeof ran>>(resolve => heldSetups.push(() => resolve(ran())))
+    }
     if (argv[0] !== 'git') return ran('', 1)
     // Git, its -c settings set aside.
     const args = argv.slice(1).filter((one, index, all) => one !== '-c' && all[index - 1] !== '-c')
@@ -204,7 +219,11 @@ export function world(
     if (sub === 'worktree list --porcelain') {
       return ran([...worktrees].map(([path, branch]) => `worktree ${path}\n${branch === null ? 'detached' : `branch refs/heads/${branch}`}`).join('\n\n') + '\n')
     }
-    if (sub === 'worktree prune') return ran()
+    // Prune forgets the worktrees whose folders are gone.
+    if (sub === 'worktree prune') {
+      for (const path of [...worktrees.keys()]) if (!dirs.has(path)) worktrees.delete(path)
+      return ran()
+    }
     if (sub.startsWith('worktree add -q --detach --no-checkout ')) {
       makeDir(args[5]!)
       worktrees.set(args[5]!, null)

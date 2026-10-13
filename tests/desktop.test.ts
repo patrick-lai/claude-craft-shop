@@ -90,6 +90,26 @@ test('the worktree tab draws its steps and slots on the desktop', { options: { a
   await show(ui, 'worktree-ready')
 })
 
+test('the worktree tab draws a slot setting up and a Remove waiting for its second press', { options: { autoWorktree: true, worktreeRoot: '/slots', setupCommand: 'pnpm install' } }, async ($, on) => {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('/repo'))
+  const dir = `/slots/repo-${[...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('').slice(0, 6)}`
+  const { clock } = world(on, {
+    slots: [1, 2, 3].map(n => `${dir}/${n}`),
+    store: { [`lease:${dir}/1`]: { sessionId: 'someone-else', beatAt: 1_000_000 } },
+    isSetupHeld: true,
+  })
+  await $.session.start({ cwd: '/other/wt', surface: 'desktop', isInteractive: true })
+  await clock.advance(1)
+  const ui = await mountPane($, 'desktop')
+  await activate(ui, 'tab-worktree')
+  await activate(ui, 'pool-add')
+  await clock.advance(1)
+  await activate(ui, `slot-remove-${dir}/3`)
+  await ui.redraw()
+  expect(await ui.find({ type: 'Button', key: 'slot-remove-confirm' })).toBeDefined()
+  await show(ui, 'worktree-pool-edit')
+})
+
 test('the rail on Autopilot: a question waiting, then answered for the person', async ($, on) => {
   const { clock } = world(on, { isRepo: false, store: { dials: { foresight: 4, crew: 3, tenacity: 5, autonomy: 5, proof: 4, voice: 2 } } })
   on('turn.complete', ($, e) => ({ text: e.answer }))

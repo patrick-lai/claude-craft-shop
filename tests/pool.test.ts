@@ -269,3 +269,41 @@ test('a session that really ends gives its slot back', { options: { worktreeRoot
   await $.session.end({ reason: 'prompt_input_exit', sessionId: 's1', resume: { id: 's1' } } as never)
   expect(state.saved[`lease:${dir}/2`]).toBeUndefined()
 })
+
+test("the Slots list follows other sessions: a claim or release shows on Claude Code's file watch, and a lapsed lease shows free on time", { options: { worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
+  const dir = await repoDir()
+  const state = world(on, { slots: [1, 2].map(n => `${dir}/${n}`) })
+  on('classic.SessionStart', () => ({}))
+  on('classic.FileChanged', () => ({}))
+  await $.session.start({ cwd: '/other/wt', surface: 'terminal', isInteractive: true })
+  // Session start arms the watch on the pool's signal.
+  const started = await $.classic.SessionStart({ source: 'startup' } as never)
+  expect(started.watchPaths).toContain(`${dir}/.changed`)
+  const ui = await mountPane($, 'terminal')
+  await activate(ui, 'tab-worktree')
+  await state.clock.advance(1)
+  expect(await ui.find({ text: /#1 detached ○ free/ })).toBeDefined()
+
+  // Another session claims slot 1 and writes the signal.
+  state.kept[`lease:${dir}/1`] = { sessionId: 'someone-else', beatAt: state.clock.now() }
+  await $.classic.FileChanged({ file_path: `${dir}/.changed`, event: 'change' } as never)
+  await state.clock.advance(250)
+  await ui.redraw()
+  expect(await ui.find({ text: /#1 detached ● leased/ })).toBeDefined()
+
+  // It dies holding it: no signal, but the lease lapses and the list says so.
+  await state.clock.advance(3 * 60_000)
+  await ui.redraw()
+  expect(await ui.find({ text: /#1 detached ○ free/ })).toBeDefined()
+})
+
+test('a claim and a release write the pool signal other sessions watch', { options: { worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
+  const dir = await repoDir()
+  const state = world(on, { slots: [`${dir}/2`] })
+  on('session.end', ($, e) => ({ sessionId: e.sessionId }))
+  await $.session.start({ cwd: `${dir}/2`, surface: 'terminal', isInteractive: true })
+  expect(state.written).toContain(`${dir}/.changed`)
+  state.written.length = 0
+  await $.session.end({ reason: 'prompt_input_exit', sessionId: 's1', resume: { id: 's1' } } as never)
+  expect(state.written).toEqual([`${dir}/.changed`])
+})

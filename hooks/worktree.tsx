@@ -191,27 +191,78 @@ async function repoMain($: $): Promise<string | null> {
   return realPath($, common.exitCode === 0 && dir.endsWith('/.git') ? dir.slice(0, -'/.git'.length) : repo.root)
 }
 
+// The soonest a lease of another session lapses unrenewed, when the Slots
+// list is next checked: one timer, not a poll, so a session that died
+// shows its slot free on time.
+let lapseTimer: Timer | null = null
+
 async function refreshSlotsFor($: $, options: PluginOptions, main: string): Promise<void> {
   const { path: mine } = await read($, worktree)
   const repoDir = await slotsRoot($, options, main)
   const listed = await worktreePaths($, main)
+  const now = await $.clock.now()
   const found: Slot[] = []
+  let lapsesAt = Infinity
   for (const path of await slotDirs($, repoDir)) {
     const real = await realPath($, path)
     if (!listed.has(real)) continue
     const lease = await readLease($, path)
-    found.push({
-      path,
-      branch: listed.get(real) ?? null,
-      isLeased: await isLeaseLive($, lease),
-      isMine: path === mine,
-    })
+    const isLeased = await isLeaseLive($, lease)
+    if (isLeased && path !== mine) lapsesAt = Math.min(lapsesAt, lease!.beatAt + LEASE_TTL_MS)
+    found.push({ path, branch: listed.get(real) ?? null, isLeased, isMine: path === mine })
   }
-  await update($, slots, () => found)
+  lapseTimer?.cancel()
+  lapseTimer = Number.isFinite(lapsesAt) ? $.clock.after(Math.max(1_000, lapsesAt - now), () => void refreshSlotsFor($, options, main)) : null
+  // Unchanged, the pane is not drawn again.
+  if (JSON.stringify(await read($, slots)) !== JSON.stringify(found)) await update($, slots, () => found)
+}
+
+// The pool's change signal, a file beside the slots: every claim, release
+// and new slot rewrites it, and each session has Claude Code's own file
+// watcher on it (armed at session start), so the Slots list follows other
+// sessions as they go, with no polling.
+const POOL_SIGNAL = '.changed'
+
+async function signalPool($: $, slot: string): Promise<void> {
+  await $.fs.write(`${slot.slice(0, slot.lastIndexOf('/'))}/${POOL_SIGNAL}`, String(await $.clock.now())).catch(() => undefined)
+}
+
+// What a session watches for the Slots list: the pool's signal, and each
+// slot's HEAD, so a branch checked out in a slot shows too. None while the
+// repository has no pool.
+async function poolWatchPaths($: $, options: PluginOptions): Promise<string[]> {
+  const main = await repoMain($)
+  if (main === null) return []
+  const repoDir = await slotsRoot($, options, main)
+  const dirs = await slotDirs($, repoDir)
+  if (dirs.length === 0) return []
+  const signal = `${repoDir}/${POOL_SIGNAL}`
+  if (!(await $.fs.exists(signal))) await $.fs.write(signal, String(await $.clock.now()))
+  const heads: string[] = []
+  for (const slot of dirs) {
+    const gitdir = await $.fs.read(`${slot}/.git`).catch(() => '')
+    const admin = /^gitdir: (.+)$/m.exec(String(gitdir))?.[1]?.trim()
+    if (admin !== undefined) heads.push(`${admin}/HEAD`)
+  }
+  return [signal, ...heads]
+}
+
+// Changes come in bursts (a claim writes its lease, then its branch): one
+// refresh for each burst.
+let isRefreshQueued = false
+
+function queueRefresh($: $, options: PluginOptions): void {
+  if (isRefreshQueued) return
+  isRefreshQueued = true
+  $.clock.after(250, () => {
+    isRefreshQueued = false
+    void refreshSlots($, options)
+  })
 }
 
 async function releaseSlot($: $, path: string): Promise<void> {
   await $.store.delete(LEASE_PREFIX + path)
+  await signalPool($, path)
 }
 
 // A git write: never runs the repository's hooks, as CommissionAI's do not.
@@ -282,12 +333,14 @@ async function pickSlot($: $, options: PluginOptions, main: string): Promise<{ p
       const lease = await readLease($, path)
       if (lease?.sessionId !== sessionId && (await isLeaseLive($, lease))) continue
       await writeLease($, path)
+      await signalPool($, path)
       return { path, isNew: false }
     }
     const next = dirs.reduce((most, path) => Math.max(most, Number(path.split('/').pop())), 0) + 1
     const path = `${repoDir}/${next}`
     await $.process.run(['mkdir', '-p', path])
     await writeLease($, path)
+    await signalPool($, path)
     return { path, isNew: true }
   } finally {
     await unlock($, repoDir)
@@ -304,6 +357,7 @@ async function claimSlot($: $, options: PluginOptions, main: string, base: strin
     await scrubSlot($, path)
   }
   await gitWrite($, ['checkout', '-q', '-B', branch, base], path, 'Could not check out the base branch in the slot.')
+  await signalPool($, path)
   return path
 }
 
@@ -459,6 +513,7 @@ async function prewarm($: $, options: PluginOptions, main: string): Promise<void
       await update($, poolNote, () => `Warming slot ${path.split('/').pop()} of ${Math.max(POOL_SIZE, warmTo, total + 1)}…`)
       await createSlot($, main, path, sha)
       await seedDependencies($, options, main, path, SILENT)
+      await signalPool($, path)
       await refreshSlotsFor($, options, main)
     }
     await update($, poolNote, () => note)
@@ -660,6 +715,7 @@ async function startWorktree($: $, options: PluginOptions, cwd: string, isForced
       const at = await $.clock.now()
       await update($, worktree, (): Worktree => ({ ...IDLE_WORKTREE, phase: 'ready', main, path, branch, step: 'Carried on in this slot', steps: [{ label: 'Carried on in this slot', at, isWarning: false }] }))
       await writeLease($, path)
+      await signalPool($, path)
       startHeartbeat($, path)
       await refreshSlots($, options)
       return
@@ -790,6 +846,20 @@ export function registerWorktree(on: On, options: PluginOptions): void {
   on('classic.SessionStart', { source: 'clear' }, async ($, e, next) => {
     const done = await next(e)
     await carryOverClear($)
+    return done
+  })
+
+  // Every start arms the file watch the Slots list follows; Claude Code
+  // takes watch paths from session start alone.
+  on('classic.SessionStart', async ($, e, next) => {
+    const done = await next(e)
+    const paths = await poolWatchPaths($, options).catch(() => [])
+    return paths.length === 0 ? done : { ...done, watchPaths: [...(done.watchPaths ?? []), ...paths] }
+  })
+
+  on('classic.FileChanged', async ($, e, next) => {
+    const done = await next(e)
+    if (e.file_path.endsWith(`/${POOL_SIGNAL}`) || /\/worktrees\/[^/]+\/HEAD$/.test(e.file_path)) queueRefresh($, options)
     return done
   })
 

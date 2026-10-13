@@ -25,6 +25,10 @@ export type World = {
   notices: (string | undefined)[]
   // What the plugin last saved under each store key.
   saved: Record<string, unknown>
+  // Files the plugin wrote, by path, in order.
+  written: string[]
+  // What the store holds now: a test writes here as another session would.
+  kept: Record<string, unknown>
   // With isMoveHeld, confirms the held EnterWorktree, as the person would.
   confirmMove: () => void
 }
@@ -81,7 +85,7 @@ export function world(
   const panes: string[] = []
   const commands: string[] = []
   const dirty = new Set<string>()
-  const state: World = { clock, toolCalls, fetched, dialogs: 0, closeDialog: () => undefined, panes, commands, dirty, answer: () => undefined, notified: [], notices: [], saved: {}, confirmMove: () => undefined }
+  const state: World = { clock, toolCalls, fetched, dialogs: 0, closeDialog: () => undefined, panes, commands, dirty, answer: () => undefined, notified: [], notices: [], saved: {}, written: [], kept, confirmMove: () => undefined }
 
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
@@ -120,6 +124,10 @@ export function world(
     }))
     on('fs.read', ($, e) => ({ value: files[e.path] ?? '' }))
   }
+  on('fs.write', ($, e) => {
+    state.written.push(e.path)
+    return { value: undefined }
+  })
   on('fs.stat', ($, e) => ({ value: { kind: /\.\w+$/.test(e.path) ? 'file' : 'dir', size: 0, mtimeMs: 0, isLink: false, realPath: e.path } }))
   on('http.fetch', ($, e) => {
     fetched.push(e.url)

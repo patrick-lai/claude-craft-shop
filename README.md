@@ -68,7 +68,7 @@ It's fast because the work happens before you need it:
 - **No copying.** `node_modules` is cloned copy-on-write (APFS), so a slot costs almost no disk until something changes.
 - **Nothing lost.** A slot is reused once its session ends. Anything left uncommitted is saved under `refs/fish/backup/` first.
 
-It works with Claude Code's own worktrees too. `claude --worktree feat-x` and the desktop app's worktree option land in a slot on `fish/feat-x`.
+It works with Claude Code's own worktrees too. `claude --worktree feat-x` and the desktop app's worktree option land in a slot on `fish/feat-x`. In the desktop app, that option decides: with **worktree** unticked in the composer, the session stays in the main checkout (**Create worktree now** still makes one).
 
 <p align="center">
   <img src="docs/media/worktree-desktop.png" width="760" alt="The Worktrees tab in the desktop app: Use worktrees on, the pool's status, this session's slot and branch, and the slots list">

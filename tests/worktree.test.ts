@@ -64,14 +64,45 @@ test('a session outside the main checkout gets no worktree', async ($, on) => {
   expect((await $.tool.call(EDIT)).deny).toBeUndefined()
 })
 
-test('a desktop session, headless at start, claims its worktree when the app attaches', { options: { autoWorktree: true } }, async ($, on) => {
+test('a VS Code session, headless at start, claims its worktree when the editor attaches', { options: { autoWorktree: true } }, async ($, on) => {
   const { clock, toolCalls } = world(on)
   on('session.surfaces', () => ({ value: [] }))
   on('session.attach', ($, e) => ({ clientId: e.clientId }))
   await $.session.start({ cwd: '/repo', surface: null, isInteractive: false })
   expect((await $.tool.call(EDIT)).deny).toBeUndefined()
 
+  await $.session.attach({ surface: 'vscode', clientId: 'vscode:default', viewport: { columns: 120, rows: 40, isFullscreen: false } })
+  expect((await $.tool.call(EDIT)).deny).toContain('Read-only until the worktree is ready')
+  await clock.advance(1)
+  expect(toolCalls).toContain('EnterWorktree')
+})
+
+// The desktop's composer has its own worktree switch: unticked, the session
+// starts in the main checkout and stays there; ticked, the desktop makes a
+// worktree under .claude/worktrees/, which is adopted.
+test("a desktop session in the main checkout stays there: the desktop's worktree option was off", { options: { autoWorktree: true } }, async ($, on) => {
+  const { clock, toolCalls } = world(on)
+  on('session.surfaces', () => ({ value: [] }))
+  on('session.attach', ($, e) => ({ clientId: e.clientId }))
+  await $.session.start({ cwd: '/repo', surface: null, isInteractive: false })
   await $.session.attach({ surface: 'desktop', clientId: 'desktop:default', viewport: { columns: 120, rows: 40, isFullscreen: true } })
+  await clock.advance(1)
+  expect(toolCalls).not.toContain('EnterWorktree')
+  expect((await $.tool.call(EDIT)).deny).toBeUndefined()
+
+  // Asked for by name, it is made all the same.
+  const ui = await $.ui.mount({ plugin: 'fishstack', surface: 'desktop', component: 'Pane', requestId: 'fishstack', props: PANE_PROPS })
+  await activate(ui, 'tab-worktree')
+  await activate(ui, 'worktree-create')
+  await clock.advance(1)
+  expect(toolCalls).toContain('EnterWorktree')
+})
+
+test("a desktop session in the worktree its option made is adopted into a slot", { options: { autoWorktree: true, setupCommand: '' } }, async ($, on) => {
+  const { clock, toolCalls } = world(on)
+  const made = '/repo/.claude/worktrees/feat-x'
+  on('session.surfaces', () => ({ value: ['desktop'] }))
+  await $.session.start({ cwd: made, surface: null, isInteractive: false })
   expect((await $.tool.call(EDIT)).deny).toContain('Read-only until the worktree is ready')
   await clock.advance(1)
   expect(toolCalls).toContain('EnterWorktree')

@@ -838,7 +838,7 @@ async function setAuto($: $, options: PluginOptions, isOn: boolean): Promise<voi
   if (main !== null) $.clock.after(0, () => void prewarm($, options, main))
 }
 
-async function startWorktree($: $, options: PluginOptions, cwd: string, isForced = false): Promise<void> {
+async function startWorktree($: $, options: PluginOptions, cwd: string, { isForced = false, isDesktop = false } = {}): Promise<void> {
   if (hasStarted) return
   hasStarted = true
   const current = await read($, worktree)
@@ -908,6 +908,11 @@ async function startWorktree($: $, options: PluginOptions, cwd: string, isForced
     adoptedName = here.split('/').pop()!.replace(/[^A-Za-z0-9._-]+/g, '-').slice(0, 40)
   } else if (main !== (await realPath($, repo.root))) {
     return
+  } else if (isDesktop && !isForced) {
+    // The desktop's composer asks whether a session gets a worktree, and
+    // makes one itself when it does (adopted above). In the main checkout,
+    // the person asked for none: it stays there.
+    return
   }
 
   await update($, worktree, now => ({ ...now, main }))
@@ -932,7 +937,7 @@ let adoptedName: string | null = null
 // The empty state's button: claims a slot now, whether the toggle is on or off.
 async function claimNow($: $, options: PluginOptions): Promise<void> {
   hasStarted = false
-  await startWorktree($, options, await $.session.cwd(), true)
+  await startWorktree($, options, await $.session.cwd(), { isForced: true })
   if ((await read($, worktree)).phase === 'off') {
     const other = await read($, elsewhere)
     await $.ui.toast(other === null ? "No worktree: this session isn't in a git repository." : `This session already works in a worktree fishStack does not manage: ${other}`)
@@ -992,13 +997,14 @@ export function registerWorktree(on: On, options: PluginOptions): void {
 
   on('session.start', { isInteractive: false }, async ($, e, next) => {
     const started = await next(e)
-    if ((await $.session.surfaces()).some(one => one === 'desktop' || one === 'vscode')) await startWorktree($, options, e.cwd)
+    const surfaces = await $.session.surfaces()
+    if (surfaces.some(one => one === 'desktop' || one === 'vscode')) await startWorktree($, options, e.cwd, { isDesktop: surfaces.includes('desktop') })
     return started
   })
 
   on('session.attach', async ($, e, next) => {
     const attached = await next(e)
-    if (e.surface === 'desktop' || e.surface === 'vscode') await startWorktree($, options, await $.session.cwd())
+    if (e.surface === 'desktop' || e.surface === 'vscode') await startWorktree($, options, await $.session.cwd(), { isDesktop: e.surface === 'desktop' })
     if (e.viewport?.isFullscreen === true && !hasAutoOpened) {
       hasAutoOpened = true
       $.clock.after(0, () => void $.ui.open({ id: PANE, title: PANE_TITLE }))
@@ -1230,7 +1236,7 @@ export function registerWorktree(on: On, options: PluginOptions): void {
             <Text bold>Where the agent works</Text>
             <Text dimColor>
               {isAuto
-                ? "On: new sessions in a main checkout, and Claude's own worktrees, get a lasting slot. Read-only until it is ready, then the lock lifts."
+                ? "On: new sessions in a main checkout, and Claude's own worktrees, get a lasting slot. Read-only until it is ready, then the lock lifts. In the desktop app, its worktree option decides."
                 : "Off: fishStack leaves worktrees to Claude Code (the desktop's worktree option, claude --worktree, EnterWorktree)."}
             </Text>
             {isAuto && (

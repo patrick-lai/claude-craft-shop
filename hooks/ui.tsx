@@ -15,14 +15,15 @@ export type Ui = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button' | 'Markdow
 
 // $.ui.resolve completes every table with stand-ins that draw nothing; this
 // leaves out what the surface lacks, so the tabs can test for it: the
-// terminal draws no Svg, mobile no Input or Select.
-export function resolveUi(table: Ui, surface: string): Ui {
+// terminal draws no Svg, mobile no Input or Select. A Client that failed
+// (ui.fault) leaves them all out until a reload, the Buttons standing in.
+export function resolveUi(table: Ui, surface: string, isClientDown: boolean): Ui {
   return {
     ...table,
     Svg: surface === 'terminal' ? undefined : table.Svg,
     // Drawn controls take presses through a Client, which only the desktop
     // lays over a picture; the terminal keeps its Buttons.
-    Client: surface === 'desktop' ? table.Client : undefined,
+    Client: surface === 'desktop' && !isClientDown ? table.Client : undefined,
     Input: surface === 'mobile' ? undefined : table.Input,
     Select: surface === 'mobile' ? undefined : table.Select,
   }

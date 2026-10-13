@@ -5,6 +5,7 @@ import { hoverHandlers, pressHandlers } from './kit'
 import { isTab, PANE, PANE_TITLE, TABS } from './ui'
 
 const tab = atom({ plugin: 'fishstack', key: 'tab' } as const, 'worktree')
+const isClientDown = atom({ plugin: 'fishstack', key: 'isClientDown' } as const, false)
 
 // /fishstack opens the pane, and /fs is its short form: bare /fish reads as
 // the fish shell.
@@ -31,6 +32,16 @@ export function registerPane(on: On): void {
     const data = e.data as { press?: unknown; hover?: unknown } | null
     if (data?.press === true) pressHandlers.get(e.element)?.()
     else if (typeof data?.hover === 'boolean') hoverHandlers.get(e.element)?.(data.hover)
+    return next(e)
+  })
+
+  // A Client that failed (its module never loaded, or never answered a
+  // render) stays drawn as the desktop's placeholder unless the redraw the
+  // engine makes leaves it out: every drawn control falls back to its Button
+  // until a load (session.ts clears it at session.start) tries them again.
+  on('ui.fault', async ($, e, next) => {
+    $.ui.log(`Client ${e.element} (${e.module}) failed at ${e.phase}: ${e.reason}`, { to: 'debug' })
+    await update($, isClientDown, () => true)
     return next(e)
   })
 

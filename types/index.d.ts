@@ -101,6 +101,9 @@ declare module 'claude-code' {
       contextDraft: ContextDraft
       contextStatus: string
       isWindowShown: boolean
+      // A Client failed on a surface (ui.fault): drawn controls fall back to
+      // Buttons until the next load.
+      isClientDown: boolean
     }
   }
 }

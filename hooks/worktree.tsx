@@ -32,6 +32,7 @@ const isTurnRunning = atom({ plugin: 'fishstack', key: 'isTurnRunning' } as cons
 const owedMoveNote = atom({ plugin: 'fishstack', key: 'owedMoveNote' } as const, null)
 const slots = atom({ plugin: 'fishstack', key: 'slots' } as const, [])
 const tab = atom({ plugin: 'fishstack', key: 'tab' } as const, 'worktree')
+const isClientDown = atom({ plugin: 'fishstack', key: 'isClientDown' } as const, false)
 const worktree = atom({ plugin: 'fishstack', key: 'worktree' } as const, IDLE_WORKTREE)
 const isStepsShown = atom({ plugin: 'fishstack', key: 'isStepsShown' } as const, false)
 const dials = atom({ plugin: 'fishstack', key: 'dials' } as const, BALANCED)
@@ -123,7 +124,9 @@ async function gitOut($: $, args: string[], cwd: string, failure: string): Promi
   const ran = await git($, args, cwd)
   if (ran.exitCode !== 0) {
     $.ui.log(`git ${args.join(' ')} failed: ${ran.stderr.trim()}`, { to: 'debug' })
-    throw new StepError(failure)
+    // Git's last line says why, which the step alone cannot.
+    const why = ran.stderr.trim().split('\n').pop()?.trim() ?? ''
+    throw new StepError(why === '' ? failure : `${failure} ${why.slice(0, 160)}`)
   }
   return ran.stdout.trim()
 }
@@ -393,37 +396,60 @@ async function scrubSlot($: $, path: string): Promise<void> {
   await gitWrite($, ['checkout', '-q', '--detach', 'HEAD'], path, 'Could not detach the slot.')
 }
 
-// Picks a slot under the lock: an idle one (listed, no live lease) or the next
+// Picks a slot under the lock: the one this session already leases (a retry
+// comes back to it), else an idle one (listed, no live lease), else the next
 // number, reserved by its empty folder. Leased before the lock lifts.
-async function pickSlot($: $, options: PluginOptions, main: string): Promise<{ path: string; isNew: boolean }> {
+async function pickSlot($: $, options: PluginOptions, main: string): Promise<{ path: string; isNew: boolean; isMine: boolean }> {
   const repoDir = await slotsRoot($, options, main)
   await lock($, repoDir)
   try {
     const listed = await worktreePaths($, main)
     const sessionId = await $.session.id()
     const dirs = await slotDirs($, repoDir)
+    const free: { path: string; isMine: boolean }[] = []
     for (const path of dirs) {
       if (!listed.has(await realPath($, path))) continue
       if (await isWarmingLive($, await readWarming($, path))) continue
       const lease = await readLease($, path)
-      if (lease?.sessionId !== sessionId && (await isLeaseLive($, lease))) continue
-      await writeLease($, path)
-      await signalPool($, path)
-      return { path, isNew: false }
+      const isMine = lease?.sessionId === sessionId
+      if (!isMine && (await isLeaseLive($, lease))) continue
+      free.push({ path, isMine })
+    }
+    const picked = free.find(one => one.isMine) ?? free[0]
+    if (picked !== undefined) {
+      await writeLease($, picked.path)
+      await signalPool($, picked.path)
+      return { ...picked, isNew: false }
     }
     const next = dirs.reduce((most, path) => Math.max(most, Number(path.split('/').pop())), 0) + 1
     const path = `${repoDir}/${next}`
     await $.process.run(['mkdir', '-p', path])
     await writeLease($, path)
     await signalPool($, path)
-    return { path, isNew: true }
+    return { path, isNew: true, isMine: false }
   } finally {
     await unlock($, repoDir)
   }
 }
 
-async function claimSlot($: $, options: PluginOptions, main: string, base: string, baseSha: string, branch: string) {
-  const { path, isNew } = await pickSlot($, options, main)
+// The slot's branch, this session's alone: the name asked for while no branch
+// has it, or while this session's own slot is on it (a retry); else that name
+// with the session's id. Claude Code reuses a worktree folder for a new
+// session, so a name taken from the folder does not say whose a branch is,
+// and checkout -B over another session's branch would reset its commits away.
+async function freeBranch($: $, main: string, path: string, isMine: boolean, wanted: string): Promise<string> {
+  const own = isMine ? ((await worktreePaths($, main)).get(await realPath($, path)) ?? null) : null
+  const id = (await $.session.id()).slice(0, 6)
+  for (const name of [wanted, `${wanted}-${id}`]) {
+    if (name === own) return name
+    if ((await git($, ['rev-parse', '--verify', '--quiet', `refs/heads/${name}`], main)).exitCode !== 0) return name
+  }
+  return `${wanted}-${id}-${(await $.clock.now()).toString(36)}`
+}
+
+async function claimSlot($: $, options: PluginOptions, main: string, base: string, baseSha: string, wanted: string) {
+  const { path, isNew, isMine } = await pickSlot($, options, main)
+  const branch = await freeBranch($, main, path, isMine, wanted)
   if (isNew) {
     await setStep($, 'Creating a new worktree')
     await createSlot($, main, path, baseSha)
@@ -433,7 +459,7 @@ async function claimSlot($: $, options: PluginOptions, main: string, base: strin
   }
   await gitWrite($, ['checkout', '-q', '-B', branch, base], path, 'Could not check out the base branch in the slot.')
   await signalPool($, path)
-  return path
+  return { path, branch }
 }
 
 // What the dependencies are pinned to: the git hashes of the lockfiles there.
@@ -716,12 +742,12 @@ async function prepare($: $, options: PluginOptions): Promise<void> {
       await setStep($, `Could not fetch origin; starting from the local ${branchName}`, true)
     }
     const baseSha = await gitOut($, ['rev-parse', base], main, `Could not resolve ${base}.`)
-    const branch = `fish/${adoptedName ?? (await $.session.id()).slice(0, 6)}`
-    await update($, worktree, current => ({ ...current, base, baseSha, branch }))
+    const wanted = `fish/${adoptedName ?? (await $.session.id()).slice(0, 6)}`
+    await update($, worktree, current => ({ ...current, base, baseSha }))
 
     await setStep($, 'Claiming a slot')
-    const path = await claimSlot($, options, main, base, baseSha, branch)
-    await update($, worktree, current => ({ ...current, path }))
+    const { path, branch } = await claimSlot($, options, main, base, baseSha, wanted)
+    await update($, worktree, current => ({ ...current, path, branch }))
     startHeartbeat($, path)
     await seedDependencies($, options, main, path, (label, isWarning) => setStep($, label, isWarning))
     await refreshSlots($, options)
@@ -972,11 +998,11 @@ async function claimForCreate($: $, options: PluginOptions, cwd: string, name: s
     const fetched = await git($, ['fetch', '-q', 'origin', branchName], main)
     const base = fetched.exitCode === 0 ? `origin/${branchName}` : branchName
     const baseSha = await gitOut($, ['rev-parse', base], main, `Could not resolve ${base}.`)
-    const branch = `fish/${name.replace(/[^A-Za-z0-9._-]+/g, '-').slice(0, 40) || (await $.session.id()).slice(0, 6)}`
+    const wanted = `fish/${name.replace(/[^A-Za-z0-9._-]+/g, '-').slice(0, 40) || (await $.session.id()).slice(0, 6)}`
     hasStarted = true
-    await update($, worktree, (): Worktree => ({ ...IDLE_WORKTREE, phase: 'preparing', step: 'Claiming a slot', main, base, baseSha, branch }))
-    const path = await claimSlot($, options, main, base, baseSha, branch)
-    await update($, worktree, current => ({ ...current, path }))
+    await update($, worktree, (): Worktree => ({ ...IDLE_WORKTREE, phase: 'preparing', step: 'Claiming a slot', main, base, baseSha }))
+    const { path, branch } = await claimSlot($, options, main, base, baseSha, wanted)
+    await update($, worktree, current => ({ ...current, path, branch }))
     startHeartbeat($, path)
     $.clock.after(0, () => void seedThenUnlock($, options, main, path))
     $.clock.after(0, () => void prewarm($, options, main))
@@ -1155,7 +1181,7 @@ export function registerWorktree(on: On, options: PluginOptions): void {
       // nothing is answered.
       const isDials = await read($, isDialsOn)
       const auto = isDials && values.autonomy === 5 ? await read($, autopilot) : null
-      const ui: Ui = resolveUi($.ui.resolve(e), e.surface)
+      const ui: Ui = resolveUi($.ui.resolve(e), e.surface, await read($, isClientDown))
       return drawRail(
         ui,
         {
@@ -1226,7 +1252,7 @@ export function registerWorktree(on: On, options: PluginOptions): void {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
     if ((await read($, tab)) !== 'worktree') return next(e)
-    const ui: Ui = resolveUi($.ui.resolve(e), e.surface)
+    const ui: Ui = resolveUi($.ui.resolve(e), e.surface, await read($, isClientDown))
     const { Box, Text, Button } = ui
     const state = await read($, worktree)
     const list = await read($, slots)

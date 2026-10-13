@@ -39,8 +39,8 @@ export type World = {
   finishSetup: () => void
 }
 
-function ran(stdout = '', exitCode = 0) {
-  return { value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+function ran(stdout = '', exitCode = 0, stderr = '') {
+  return { value: { exitCode, stdout, stderr, isStdoutTruncated: false, isStderrTruncated: false } }
 }
 
 // `store` is what the plugin's store holds at the start; `files`, text files
@@ -54,6 +54,8 @@ export function world(
     files,
     nodeModules = {},
     slots = [],
+    onBranch = {},
+    branches = [],
     folders = [],
     isMoveHeld = false,
     isSetupHeld = false,
@@ -65,6 +67,10 @@ export function world(
     nodeModules?: Record<string, string[]>
     // Worktrees already made, by path, detached.
     slots?: string[]
+    // Of those, the ones a branch is out in: path to branch.
+    onBranch?: Record<string, string>
+    // Branches that exist with no worktree on them.
+    branches?: string[]
     // Folders already on disk, by path.
     folders?: string[]
     // EnterWorktree waits for state.confirmMove, as Claude Code's dialog does.
@@ -156,7 +162,8 @@ export function world(
     for (let at = path; at.length > 1; at = parentOf(at)) dirs.add(at)
   }
   for (const path of [...slots, ...folders]) makeDir(path)
-  for (const path of slots) worktrees.set(path, null)
+  for (const path of slots) worktrees.set(path, onBranch[path] ?? null)
+  const refs = new Set<string>(['main', ...branches, ...Object.values(onBranch)])
   const excluded = new Set<string>()
   on('process.run', ($, e) => {
     const argv = e.argv
@@ -234,10 +241,16 @@ export function world(
       worktrees.set(args[5]!, null)
       return ran()
     }
+    // As git 2.43 on: -B refuses a branch another worktree has out.
     if (sub.startsWith('checkout -q -B ')) {
-      worktrees.set(cwd, args[3]!)
+      const branch = args[3]!
+      const holder = [...worktrees].find(([path, one]) => one === branch && path !== cwd)?.[0]
+      if (holder !== undefined) return ran('', 128, `fatal: '${branch}' is already used by worktree at '${holder}'\n`)
+      worktrees.set(cwd, branch)
+      refs.add(branch)
       return ran()
     }
+    if (sub.startsWith('rev-parse --verify --quiet refs/heads/')) return ran('', refs.has(args[3]!.slice('refs/heads/'.length)) ? 0 : 1)
     if (sub === 'checkout -q --detach HEAD') {
       worktrees.set(cwd, null)
       dirty.delete(cwd)

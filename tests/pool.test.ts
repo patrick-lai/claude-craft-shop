@@ -205,6 +205,30 @@ test("a session started in a worktree Claude Code made (claude --worktree, the d
   expect(toolCalls).toContain('EnterWorktree')
 })
 
+// Claude Code reuses a worktree folder for a new session: the branch named
+// for it may be out in another slot still, or left behind by a session that
+// ended. Either way it is not this session's, so it gets one of its own.
+for (const [what, held] of [['still out in another slot', true], ['left with no worktree on it', false]] as const) {
+  test(`a Claude Code worktree reused by a new session, its old branch ${what}, gets a branch of its own and leaves the old one be`, { options: { autoWorktree: true, worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
+    const dir = await repoDir()
+    const { clock, commands, toolCalls } = world(on, held ? { slots: [`${dir}/1`, `${dir}/2`], onBranch: { [`${dir}/2`]: 'fish/feat-x' } } : { slots: [`${dir}/1`], branches: ['fish/feat-x'] })
+    await $.session.start({ cwd: `${REPO}/.claude/worktrees/feat-x`, surface: 'terminal', isInteractive: true })
+    await clock.advance(1)
+    expect(commands).toContain(`${dir}/1$ git -c core.hooksPath=/dev/null checkout -q -B fish/feat-x-abcdef origin/main`)
+    expect(commands.filter(one => one.endsWith('checkout -q -B fish/feat-x origin/main'))).toEqual([])
+    expect(toolCalls).toContain('EnterWorktree')
+  })
+}
+
+test('a retry comes back to the slot this session already leases, ahead of an idle one before it', { options: { autoWorktree: true, worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
+  const dir = await repoDir()
+  const { clock, commands } = world(on, { slots: [`${dir}/1`, `${dir}/2`], store: { [`lease:${dir}/2`]: { sessionId: 'abcdef123456', beatAt: 1_000_000 } } })
+  await startSession($)
+  await clock.advance(1)
+  expect(commands).toContain(`${dir}/2$ git -c core.hooksPath=/dev/null checkout -q -B fish/abcdef origin/main`)
+  expect(commands.filter(one => one.startsWith(`${dir}/1$`))).toEqual([])
+})
+
 for (const [what, mark] of [['uncommitted', 'dirty'], ['committed', 'ahead']] as const) {
   test(`a Claude Code worktree with ${what} work in it is left where it is, its work with it`, { options: { autoWorktree: true, worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
     const one = world(on)

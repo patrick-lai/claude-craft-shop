@@ -21,6 +21,7 @@ const isContextOn = atom({ plugin: 'fishstack', key: 'isContextOn' } as const, t
 const isEnforced = atom({ plugin: 'fishstack', key: 'isEnforced' } as const, true)
 const autopilot = atom({ plugin: 'fishstack', key: 'autopilot' } as const, null)
 const railTick = atom({ plugin: 'fishstack', key: 'railTick' } as const, 0)
+const isClientDown = atom({ plugin: 'fishstack', key: 'isClientDown' } as const, false)
 
 // What the agent is told of the dials and the context, as one text: what a
 // change mid-session compares against. A tab switched off says so, so an
@@ -247,6 +248,8 @@ export function registerSession(on: On, options: PluginOptions): void {
     // Before the rest of the chain, so every later hook reads what came over
     // from Craftshop's store.
     await migrateStore($)
+    // A load tries the Clients again that a fault (pane.tsx) put down.
+    await update($, isClientDown, () => false)
     const started = await next(e)
     await loadSaved($)
     const kept = (await $.store.get(AUTOPILOT_STORE_KEY)) as AutopilotKept | null | undefined

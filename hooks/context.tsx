@@ -26,6 +26,7 @@ const isTurnRunning = atom({ plugin: 'fishstack', key: 'isTurnRunning' } as cons
 const isWindowShown = atom({ plugin: 'fishstack', key: 'isWindowShown' } as const, false)
 const sources = atom({ plugin: 'fishstack', key: 'sources' } as const, [])
 const tab = atom({ plugin: 'fishstack', key: 'tab' } as const, 'worktree')
+const isClientDown = atom({ plugin: 'fishstack', key: 'isClientDown' } as const, false)
 const isContextOn = atom({ plugin: 'fishstack', key: 'isContextOn' } as const, true)
 
 // The Use context switch, kept across sessions. Off, no source reaches the
@@ -417,7 +418,7 @@ async function toggleFolderOpen($: $, id: string): Promise<void> {
 export function registerContext(on: On): void {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
     if ((await read($, tab)) !== 'context') return next(e)
-    const ui: Ui = resolveUi($.ui.resolve(e), e.surface)
+    const ui: Ui = resolveUi($.ui.resolve(e), e.surface, await read($, isClientDown))
     const { Box, Text, Button, Input, Markdown } = ui
     const rich = isRich(ui)
     const list = await read($, sources)

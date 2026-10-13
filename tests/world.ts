@@ -17,6 +17,8 @@ export type World = {
   commands: string[]
   // Slots with uncommitted work, by path.
   dirty: Set<string>
+  // Worktrees with a commit no other branch or remote holds, by path.
+  ahead: Set<string>
   // Answers the question the agent is waiting on, as the person would.
   answer: (answers: Record<string, string>) => void
   // Notifications sent, by text.
@@ -85,7 +87,8 @@ export function world(
   const panes: string[] = []
   const commands: string[] = []
   const dirty = new Set<string>()
-  const state: World = { clock, toolCalls, fetched, dialogs: 0, closeDialog: () => undefined, panes, commands, dirty, answer: () => undefined, notified: [], notices: [], saved: {}, written: [], kept, confirmMove: () => undefined }
+  const ahead = new Set<string>()
+  const state: World = { clock, toolCalls, fetched, dialogs: 0, closeDialog: () => undefined, panes, commands, dirty, ahead, answer: () => undefined, notified: [], notices: [], saved: {}, written: [], kept, confirmMove: () => undefined }
 
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
@@ -217,6 +220,7 @@ export function world(
       return ran()
     }
     if (sub.startsWith('status')) return ran(dirty.has(cwd) ? ' M a.ts\n' : '')
+    if (sub.startsWith('rev-list -n 1 HEAD --not ')) return ran(ahead.has(cwd) ? 'c0ffee\n' : '')
     if (sub === 'stash create') return ran('5ta5h\n')
     if (sub.startsWith('hash-object ')) return ran('10ck\n')
     if (['reset --hard -q', 'clean -fdq', 'add -A'].includes(sub) || sub.startsWith('update-ref ')) return ran()

@@ -753,7 +753,9 @@ async function startWorktree($: $, options: PluginOptions, cwd: string, isForced
     // WorktreeCreate never reaches fishStack. Adopt it: a slot on its name,
     // read-only until the slot is ready, then the session moves in. Any
     // other worktree (a slot of ours among them) is left as it is.
-    if (!here.startsWith(`${main}/.claude/worktrees/`)) {
+    // Work already begun there (a reload mid-session runs this again) stays
+    // with it: a slot starts from origin, and moving would leave it behind.
+    if (!here.startsWith(`${main}/.claude/worktrees/`) || !(await isUntouched($, here))) {
       await update($, elsewhere, () => here)
       return
     }
@@ -764,6 +766,17 @@ async function startWorktree($: $, options: PluginOptions, cwd: string, isForced
 
   await update($, worktree, now => ({ ...now, main }))
   await beginWorktree($, options)
+}
+
+// Nothing uncommitted and no commit of its own: what any other branch or
+// remote holds is not this worktree's. When git cannot say, it is touched.
+async function isUntouched($: $, path: string): Promise<boolean> {
+  const status = await git($, ['status', '--porcelain'], path)
+  if (status.exitCode !== 0 || status.stdout.trim() !== '') return false
+  const branch = (await git($, ['rev-parse', '--abbrev-ref', 'HEAD'], path)).stdout.trim()
+  const others = branch === '' || branch === 'HEAD' ? [] : [`--exclude=${branch}`]
+  const own = await git($, ['rev-list', '-n', '1', 'HEAD', '--not', ...others, '--branches', '--remotes'], path)
+  return own.exitCode === 0 && own.stdout.trim() === ''
 }
 
 // The name of the Claude Code worktree this session started in, which its

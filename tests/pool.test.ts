@@ -205,6 +205,17 @@ test("a session started in a worktree Claude Code made (claude --worktree, the d
   expect(toolCalls).toContain('EnterWorktree')
 })
 
+for (const [what, mark] of [['uncommitted', 'dirty'], ['committed', 'ahead']] as const) {
+  test(`a Claude Code worktree with ${what} work in it is left where it is, its work with it`, { options: { autoWorktree: true, worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
+    const one = world(on)
+    one[mark].add(`${REPO}/.claude/worktrees/feat-x`)
+    await $.session.start({ cwd: `${REPO}/.claude/worktrees/feat-x`, surface: 'terminal', isInteractive: true })
+    expect((await $.tool.call({ tool: 'Edit', file_path: '/repo/a.ts', old_string: 'a', new_string: 'b' })).deny).toBeUndefined()
+    await one.clock.advance(1)
+    expect(one.toolCalls).not.toContain('EnterWorktree')
+  })
+}
+
 test('a session started in some other worktree, a slot of ours among them, is left where it is', { options: { autoWorktree: true, worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
   const { clock, toolCalls } = world(on)
   await $.session.start({ cwd: '/slots/repo-x/1', surface: 'terminal', isInteractive: true })

@@ -1,0 +1,34 @@
+{
+  "name": "fishstack-mod",
+  "version": "0.7.1",
+  "description": "Installs the fishStack mod into Claude Code: npx -y fishstack-mod install",
+  "keywords": [
+    "claude-code",
+    "claude-code-plugin",
+    "claude-code-mod",
+    "installer"
+  ],
+  "homepage": "https://github.com/patrick-lai/claude-fish-stack-mod#readme",
+  "bugs": "https://github.com/patrick-lai/claude-fish-stack-mod/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/patrick-lai/claude-fish-stack-mod.git",
+    "directory": "installer"
+  },
+  "license": "MIT",
+  "author": "Patrick Lai",
+  "bin": {
+    "fishstack-mod": "bin/fishstack-mod.js"
+  },
+  "files": [
+    "bin",
+    "README.md",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "claude-fish-stack-mod": "0.7.1"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -49,6 +49,13 @@ claude plugin marketplace add patrick-lai/claude-fish-stack-mod
 claude plugin install fishstack@claude-fish-stack-mod
 ```
 
+Or in one step, with no `/plugin` commands:
+
+```bash
+npx -y fishstack-mod install
+npx -y fishstack-mod uninstall
+```
+
 Restart Claude Code, then open the pane with **`/fs`** (or `/fishstack`). `/fs dials` goes straight to a tab. Keys <kbd>1</kbd>–<kbd>3</kbd> switch tabs.
 
 fishStack is built and tested on macOS: copy-on-write cloning and the file pickers use macOS tools.

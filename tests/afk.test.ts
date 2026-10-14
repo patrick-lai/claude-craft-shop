@@ -205,3 +205,13 @@ test('below Autopilot a question shows nothing on the rail and no line under it'
   state.answer({ 'Which database?': 'SQLite' })
   await pending
 })
+
+// Autopilot answers the agent's questions. fishStack's own "Where should
+// this session work?" is the person's, however long they are away.
+test("on Autopilot, fishStack's own question at the start is left for the person", { options: { autoWorktree: true } }, async ($, on) => {
+  const { clock, notices, toolCalls } = world(on, { store: { dials: AUTOPILOT }, where: 'held' })
+  await startSession($)
+  await clock.advance(16 * MINUTE)
+  expect(notices.join('\n')).not.toContain('Autopilot picks')
+  expect(toolCalls).not.toContain('EnterWorktree')
+})

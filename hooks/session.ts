@@ -196,9 +196,11 @@ const PERSON_ORIGINS = new Set(['composer', 'sdk', 'bridge'])
 export function registerSession(on: On, options: PluginOptions): void {
   on('tool.call', { tool: 'AskUserQuestion' }, async ($, e, next) => {
     const input = e as unknown as { questions?: AskedQuestion[]; metadata?: { source?: string } }
-    // Only the agent's own questions: a plugin asking through $.ui.ask
-    // carries a source, and is not Autopilot's to answer.
-    if (!(await read($, isDialsOn)) || (await read($, dials)).autonomy < 5 || input.metadata?.source !== undefined || input.questions === undefined) return next(e)
+    // Only the agent's own questions: one a plugin raised ($.ui.ask, as
+    // fishStack asks where a session works) or one with a source is the
+    // person's, not Autopilot's to answer.
+    const isAgents = next.origin.plugin === 'engine' && input.metadata?.source === undefined
+    if (!isAgents || !(await read($, isDialsOn)) || (await read($, dials)).autonomy < 5 || input.questions === undefined) return next(e)
     const ms = Math.max(0, Number(options.autoAnswerMinutes ?? AUTO_ANSWER_MINUTES)) * 60_000
     const id = e.tool_use_id ?? `call-${++calls}`
     const since = await $.clock.now()

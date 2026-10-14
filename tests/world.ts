@@ -23,6 +23,10 @@ export type World = {
   ahead: Set<string>
   // Answers the question the agent is waiting on, as the person would.
   answer: (answers: Record<string, string>) => void
+  // Every question asked through AskUserQuestion, by text.
+  asked: string[]
+  // The same questions whole: their headers and options.
+  askedWith: unknown[]
   // Notifications sent, by text.
   notified: string[]
   // Lines shown under an open dialog, by text (undefined removes one).
@@ -41,6 +45,10 @@ export type World = {
   finishSetup: () => void
   // With fetch 'held', lets the held fetches of origin finish.
   finishFetches: () => void
+  // With fetch 'held', lets every fetch finish and the claim and the pool's
+  // warming run to their end (each waits out the other's lock), so nothing
+  // is left running past the test.
+  drain: () => Promise<void>
 }
 
 function ran(stdout = '', exitCode = 0, stderr = '') {
@@ -65,6 +73,7 @@ export function world(
     isMoveHeld = false,
     isSetupHeld = false,
     fetch = 'quick',
+    where = 'A worktree',
   }: {
     isRepo?: boolean
     isDialogSlow?: boolean
@@ -88,6 +97,10 @@ export function world(
     // How fetching origin goes: at once; held until state.finishFetches; or
     // still running at its timeout, so the call rejects.
     fetch?: 'quick' | 'held' | 'stuck'
+    // How the person answers fishStack's own "Where should this session
+    // work?": a label, at once; 'held' waits for state.answer, as the
+    // agent's questions do; 'dismissed' closes the dialog.
+    where?: string
   } = {},
 ): World {
   const clock = mock.clock(on, { now: 1_000_000 })
@@ -112,7 +125,12 @@ export function world(
   const commands: string[] = []
   const dirty = new Set<string>()
   const ahead = new Set<string>()
-  const state: World = { clock, toolCalls, fetched, dialogs: 0, closeDialog: () => undefined, panes, commands, inits: {}, dirty, ahead, answer: () => undefined, notified: [], notices: [], saved: {}, written: [], kept, confirmMove: () => undefined, prompts: [], finishSetup: () => heldSetups.splice(0).forEach(finish => finish()), finishFetches: () => heldFetches.splice(0).forEach(finish => finish()) }
+  const state: World = { clock, toolCalls, fetched, dialogs: 0, closeDialog: () => undefined, panes, commands, inits: {}, dirty, ahead, answer: () => undefined, asked: [], askedWith: [], notified: [], notices: [], saved: {}, written: [], kept, confirmMove: () => undefined, prompts: [], finishSetup: () => heldSetups.splice(0).forEach(finish => finish()), finishFetches: () => heldFetches.splice(0).forEach(finish => finish()), drain: async () => {
+    for (let tries = 0; tries < 10; tries++) {
+      state.finishFetches()
+      await clock.advance(200)
+    }
+  } }
   const heldSetups: (() => void)[] = []
   const heldFetches: (() => void)[] = []
 
@@ -275,6 +293,18 @@ export function world(
       return ran()
     }
     if (sub.startsWith('rev-parse --verify --quiet refs/heads/')) return ran('', refs.has(args[3]!.slice('refs/heads/'.length)) ? 0 : 1)
+    if (sub === 'rev-parse --abbrev-ref HEAD') {
+      const branch = worktrees.get(cwd)
+      return ran(`${typeof branch === 'string' ? branch : 'HEAD'}\n`)
+    }
+    if (sub === 'symbolic-ref --short -q HEAD') {
+      const branch = worktrees.get(cwd)
+      return typeof branch === 'string' ? ran(`${branch}\n`) : ran('', 1)
+    }
+    if (sub === 'checkout -q --detach') {
+      worktrees.set(cwd, null)
+      return ran()
+    }
     if (sub === 'checkout -q --detach HEAD') {
       worktrees.set(cwd, null)
       dirty.delete(cwd)
@@ -295,7 +325,13 @@ export function world(
       return new Promise(resolve => (state.confirmMove = () => resolve({ result: 'ok' } as never)))
     }
     if (String(e.tool) === 'AskUserQuestion') {
-      const asked = (e as unknown as { questions: unknown[] }).questions
+      const asked = (e as unknown as { questions: { question: string }[] }).questions
+      state.asked.push(...asked.map(one => one.question))
+      state.askedWith.push(...asked)
+      if (asked[0]?.question === 'Where should this session work?' && where !== 'held') {
+        if (where === 'dismissed') return { deny: 'dismissed' }
+        return { result: { questions: asked, answers: { [asked[0].question]: where } } as never }
+      }
       return new Promise(resolve => (state.answer = answers => resolve({ result: { questions: asked, answers } as never })))
     }
     return { result: 'ok' }

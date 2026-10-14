@@ -1,10 +1,10 @@
 import { atom, read } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 
-import { isReadOnlyShell } from './readonly'
+import { checkedOutBranches, isReadOnlyShell } from './readonly'
 import { BALANCED } from './dials'
 import { crewRefusal, EDIT_TOOLS, foresightRefusal, isCheckCommand, isShellWrite, noteAgent, noteChange, noteCheck, notePlan, noteSaid, stopReason, SUBAGENT_TOOLS } from './enforce'
-import { IDLE_WORKTREE, isReadOnlyPhase, READ_ONLY_DENY } from './worktree'
+import { defaultBranch, IDLE_WORKTREE, isReadOnlyPhase, READ_ONLY_DENY } from './worktree'
 
 const dials = atom({ plugin: 'fishstack', key: 'dials' } as const, BALANCED)
 const worktree = atom({ plugin: 'fishstack', key: 'worktree' } as const, IDLE_WORKTREE)
@@ -30,6 +30,25 @@ async function refusalOf($: EngineInterface, call: Call): Promise<string | null>
     if (SUBAGENT_TOOLS.has(call.tool)) return crewRefusal(values.crew)
     if (EDIT_TOOLS.has(call.tool)) return foresightRefusal(values.foresight)
     return null
+  } catch {
+    return null
+  }
+}
+
+// A worktree fishStack set up never takes the default branch: git checks a
+// branch out in one worktree at a time, so a worktree on it locks the main
+// checkout out of its own default branch. Null lets the command run; so does
+// any failure here.
+async function defaultBranchRefusal($: EngineInterface, command: unknown): Promise<string | null> {
+  try {
+    if (typeof command !== 'string') return null
+    const { phase, main, path } = await read($, worktree)
+    if (phase !== 'ready' || main === null || path === null) return null
+    const here = checkedOutBranches(command).filter(one => one.dir === null || one.dir === path || one.dir.startsWith(`${path}/`))
+    if (here.length === 0) return null
+    const branch = await defaultBranch($, main)
+    if (!here.some(one => one.branch === branch)) return null
+    return `fishStack: this worktree does not check out \`${branch}\`. It stays free for the main checkout at \`${main}\`, since git lets only one worktree have a branch at a time. To work from the latest ${branch}, run \`git fetch origin ${branch}\`, then \`git switch -c <new-branch> origin/${branch}\` (or \`git switch --detach origin/${branch}\` to look around).`
   } catch {
     return null
   }
@@ -79,6 +98,10 @@ export function registerGuard(on: On): void {
     if (isReadOnlyPhase((await read($, worktree)).phase)) {
       const isWrite = WRITE_TOOLS.has(tool) || (e.tool === 'Bash' && !isReadOnlyShell(e.command))
       if (isWrite) return { deny: READ_ONLY_DENY }
+    }
+    if (e.tool === 'Bash') {
+      const kept = await defaultBranchRefusal($, e.command)
+      if (kept !== null) return { deny: kept }
     }
     const call = { ...(e as unknown as Call), tool }
     const refusal = await refusalOf($, call)

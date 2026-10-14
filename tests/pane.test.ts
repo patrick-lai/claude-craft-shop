@@ -1,5 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
+import { faultRetryMs } from '../hooks/pane'
+import { drawRail } from '../hooks/rail'
 import { resolveUi } from '../hooks/ui'
 import type { Ui } from '../hooks/ui'
 import { activate, keysOf, mountBand, mountPane, startSession, world } from './world'
@@ -310,4 +312,25 @@ test('with a Client down the desktop table leaves Clients out', async () => {
   expect(resolveUi(table, 'desktop', false).Client).toBeDefined()
   expect(resolveUi(table, 'desktop', true).Client).toBeUndefined()
   expect(resolveUi(table, 'desktop', true).Svg).toBeDefined()
+})
+
+// A render that did not answer in time is often the desktop busy for a
+// moment: the Buttons stand in, then the drawn controls are tried again,
+// twice at most. A module that never loaded stays down for the session.
+test('a Client fault is retried a minute later, twice at most; one that never loaded is not', () => {
+  expect(faultRetryMs('render', 1)).toBe(60_000)
+  expect(faultRetryMs('run', 2)).toBe(60_000)
+  expect(faultRetryMs('render', 3)).toBeNull()
+  expect(faultRetryMs('load', 1)).toBeNull()
+})
+
+// With its Client down the desktop rail is Buttons, and still one row: a
+// rail that wraps pushes the prompt down and reads as two.
+test('the desktop rail keeps one row while its Buttons stand in; the terminal may wrap', () => {
+  const figures = { isWorking: true, cacheSecondsLeft: 200, cachePercent: 90, tokens: { input: 12_700_000, output: 56_000 }, costUsd: 7.36, preset: 'Autopilot', presetLevels: [4, 3, 5, 5, 4, 2], sourcesOn: 0, sourcesTotal: 0, branch: 'kind-hermann-f2092f', autopilot: null, isDialsOn: true, isContextOn: true }
+  const element = (name: string) => (props: unknown) => ({ name, props })
+  const table = { Box: element('Box'), Text: element('Text'), Button: element('Button'), Markdown: element('Markdown'), Code: element('Code'), Svg: element('Svg'), Client: element('Client') } as unknown as Ui
+  const row = (surface: string) => drawRail(resolveUi(table, surface, true), figures, () => undefined, null, () => undefined, 120) as unknown as { props: Record<string, unknown> }
+  expect(row('desktop').props).toMatchObject({ flexWrap: 'nowrap', overflow: 'hidden' })
+  expect(row('terminal').props).toMatchObject({ flexWrap: 'wrap' })
 })

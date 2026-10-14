@@ -25,6 +25,20 @@ async function openPane($: EngineInterface, args: string): Promise<{ text: strin
   return { text: label === undefined ? 'Opened fishStack.' : `Opened fishStack · ${label}.` }
 }
 
+// Faults heard since this load: a reload starts over, as session.ts does.
+let faults = 0
+
+const FAULT_RETRY_MS = 60_000
+const FAULT_RETRIES = 2
+
+// How long the Buttons stand in after a Client's fault before the drawn
+// controls are tried again, or null to keep them down for the session: a
+// module that never loaded will not load on a retry, and a third fault in
+// one load is no passing hiccup.
+export function faultRetryMs(phase: 'load' | 'render' | 'run', faultsSoFar: number): number | null {
+  return phase === 'load' || faultsSoFar > FAULT_RETRIES ? null : FAULT_RETRY_MS
+}
+
 export function registerPane(on: On): void {
   // Every other drawn control: its press, or the pointer entering or leaving
   // it, runs what its drawing registered.
@@ -35,15 +49,24 @@ export function registerPane(on: On): void {
     return next(e)
   })
 
-  // A Client that failed (its module never loaded, or never answered a
-  // render) stays drawn as the desktop's placeholder unless the redraw the
-  // engine makes leaves it out: every drawn control falls back to its Button
-  // until a load (session.ts clears it at session.start) tries them again.
-  // The transcript says so: the whole session draws plainer from here, and
-  // the debug log, the only other place the fault is named, is rarely on.
+  // A Client that failed stays drawn as the desktop's placeholder unless the
+  // redraw the engine makes leaves it out: every drawn control falls back to
+  // its Button at once. A slow or failed render is often the desktop busy for
+  // a moment, so the controls come back after a while and try again; a module
+  // that never loaded, or one that keeps failing, stays down until a load
+  // (session.ts clears it at session.start). Only giving up is said in the
+  // transcript: a fallback that mends itself is the debug log's.
   on('ui.fault', async ($, e, next) => {
-    $.ui.log(`fishStack: drawn control ${e.element} (${e.module}) failed at ${e.phase} on ${e.surface}: ${e.reason}. Buttons stand in until the next session.`)
+    faults += 1
+    const retryMs = faultRetryMs(e.phase, faults)
+    const what = `drawn control ${e.element} (${e.module}) failed at ${e.phase} on ${e.surface}: ${e.reason}`
     await update($, isClientDown, () => true)
+    if (retryMs === null) {
+      $.ui.log(`fishStack: ${what}. Buttons stand in until the next session.`)
+    } else {
+      $.ui.log(`${what}; Buttons stand in, trying again in ${retryMs / 1000}s`, { to: 'debug' })
+      $.clock.after(retryMs, () => void update($, isClientDown, () => false))
+    }
     return next(e)
   })
 

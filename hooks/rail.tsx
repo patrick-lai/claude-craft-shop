@@ -88,8 +88,11 @@ export function drawRail(ui: Ui, figures: RailFigures, open: (tab: Tab | null) =
   )
   // An item with no pane of its own: shown, not pressed.
   const still = (key: string, children: RenderElement) => <Box key={key}>{children}</Box>
+  // The terminal wraps a rail too wide for it; the desktop keeps the drawn
+  // rail's one row, clipped at its end, while its Buttons stand in.
+  const isDesktop = Svg !== undefined
   return (
-    <Box gap={2} alignItems="center" flexWrap="wrap">
+    <Box gap={isDesktop ? 1 : 2} alignItems="center" flexWrap={isDesktop ? 'nowrap' : 'wrap'} overflow={isDesktop ? 'hidden' : undefined}>
       {item(
         'open-fishstack',
         null,

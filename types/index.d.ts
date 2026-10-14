@@ -88,6 +88,9 @@ declare module 'claude-code' {
       isBandHidden: boolean
       isStepsShown: boolean
       isHeadStartPrompted: boolean
+      // A terminal session in the main checkout was asked where it works:
+      // once per session, so a reload does not ask again.
+      isWhereAsked: boolean
       // Where the session moved mid-turn with no head start told: the note the
       // agent is owed at its next batch or prompt.
       owedMoveNote: string | null

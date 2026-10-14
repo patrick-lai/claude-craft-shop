@@ -445,6 +445,25 @@ test('a session that really ends gives its slot back', { options: { worktreeRoot
   expect(state.saved[`lease:${dir}/2`]).toBeUndefined()
 })
 
+test('a slot left on the default branch lets go of it as its session ends', { options: { worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
+  const dir = await repoDir()
+  const state = world(on, { slots: [`${dir}/2`], onBranch: { [`${dir}/2`]: 'main' } })
+  on('session.end', ($, e) => ({ sessionId: e.sessionId }))
+  await $.session.start({ cwd: `${dir}/2`, surface: 'terminal', isInteractive: true })
+  await $.session.end({ reason: 'prompt_input_exit', sessionId: 's1', resume: { id: 's1' } } as never)
+  expect(state.commands).toContain(`${dir}/2$ git -c core.hooksPath=/dev/null checkout -q --detach`)
+  expect(state.saved[`lease:${dir}/2`]).toBeUndefined()
+})
+
+test('a slot on a branch of its own keeps it as its session ends', { options: { worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
+  const dir = await repoDir()
+  const state = world(on, { slots: [`${dir}/2`], onBranch: { [`${dir}/2`]: 'fish/feat' } })
+  on('session.end', ($, e) => ({ sessionId: e.sessionId }))
+  await $.session.start({ cwd: `${dir}/2`, surface: 'terminal', isInteractive: true })
+  await $.session.end({ reason: 'prompt_input_exit', sessionId: 's1', resume: { id: 's1' } } as never)
+  expect(state.commands.some(one => one.endsWith('checkout -q --detach'))).toBe(false)
+})
+
 test("the Slots list follows other sessions: a claim or release shows on Claude Code's file watch, and a lapsed lease shows free on time", { options: { worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
   const dir = await repoDir()
   const state = world(on, { slots: [1, 2].map(n => `${dir}/${n}`) })

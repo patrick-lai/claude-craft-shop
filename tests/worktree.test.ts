@@ -5,8 +5,9 @@ import { activate, mountBand, PANE_PROPS, startSession, world } from './world'
 const EDIT = { tool: 'Edit', file_path: '/repo/a.ts', old_string: 'a', new_string: 'b' } as const
 
 test('the head start is read-only until the worktree is ready, then the session moves in', { options: { autoWorktree: true } }, async ($, on) => {
-  const { clock, toolCalls } = world(on)
+  const { clock, toolCalls, drain } = world(on, { fetch: 'held' })
   await startSession($)
+  await clock.settle()
 
   expect((await $.tool.call(EDIT)).deny).toContain('Read-only until the worktree is ready')
   expect((await $.tool.call({ tool: 'Bash', command: 'rm -rf src' })).deny).toBeDefined()
@@ -16,7 +17,7 @@ test('the head start is read-only until the worktree is ready, then the session 
   const submitted = await $.prompt.submit({ text: 'create hello.txt', wait: false, origin: { kind: 'composer' } })
   expect(submitted.context?.join('\n')).toContain('Read-only head start')
 
-  await clock.advance(1)
+  await drain()
   expect(toolCalls).toContain('EnterWorktree')
   expect((await $.tool.call(EDIT)).deny).toBeUndefined()
 })
@@ -36,8 +37,9 @@ test('the ready band hides itself a moment later, giving way to the rail', { opt
 })
 
 test('read-only shell commands pass and anything that writes is refused', { options: { autoWorktree: true } }, async ($, on) => {
-  world(on)
+  const { clock, drain } = world(on, { fetch: 'held' })
   await startSession($)
+  await clock.settle()
   const allowed = ['ls -la', 'git -C /repo log --oneline -5', 'find . -name "*.ts"', "sed -n '1,20p' a.ts", 'cat a.ts 2>/dev/null']
   const refused = [
     'ls && rm a.ts',
@@ -56,6 +58,7 @@ test('read-only shell commands pass and anything that writes is refused', { opti
   for (const command of refused) {
     expect((await $.tool.call({ tool: 'Bash', command })).deny, command).toBeDefined()
   }
+  await drain()
 })
 
 test('a session outside the main checkout gets no worktree', async ($, on) => {
@@ -65,15 +68,16 @@ test('a session outside the main checkout gets no worktree', async ($, on) => {
 })
 
 test('a VS Code session, headless at start, claims its worktree when the editor attaches', { options: { autoWorktree: true } }, async ($, on) => {
-  const { clock, toolCalls } = world(on)
+  const { clock, toolCalls, drain } = world(on, { fetch: 'held' })
   on('session.surfaces', () => ({ value: [] }))
   on('session.attach', ($, e) => ({ clientId: e.clientId }))
   await $.session.start({ cwd: '/repo', surface: null, isInteractive: false })
   expect((await $.tool.call(EDIT)).deny).toBeUndefined()
 
   await $.session.attach({ surface: 'vscode', clientId: 'vscode:default', viewport: { columns: 120, rows: 40, isFullscreen: false } })
+  await clock.settle()
   expect((await $.tool.call(EDIT)).deny).toContain('Read-only until the worktree is ready')
-  await clock.advance(1)
+  await drain()
   expect(toolCalls).toContain('EnterWorktree')
 })
 
@@ -81,7 +85,7 @@ test('a VS Code session, headless at start, claims its worktree when the editor 
 // mid-turn: the agent learns of the head start at its next batch, once, and
 // is told to continue once it has moved.
 test('a head start that begins after the prompt reaches the agent at its next batch', { options: { autoWorktree: true } }, async ($, on) => {
-  const { clock, toolCalls, prompts } = world(on)
+  const { clock, toolCalls, prompts, drain } = world(on, { fetch: 'held' })
   on('classic.PostToolBatch', () => ({}))
   on('session.surfaces', () => ({ value: [] }))
   on('session.attach', ($, e) => ({ clientId: e.clientId }))
@@ -92,6 +96,7 @@ test('a head start that begins after the prompt reaches the agent at its next ba
   const submitted = await $.prompt.submit({ text: 'how long is the readme', wait: false, origin: { kind: 'composer' } })
   expect(submitted.context?.join('\n') ?? '').not.toContain('Read-only head start')
   await $.session.attach({ surface: 'vscode', clientId: 'vscode:default', viewport: { columns: 120, rows: 40, isFullscreen: false } })
+  await clock.settle()
   // A subagent's batch does not take it.
   expect(await batch('sub-1')).toBe('')
   const told = await batch()
@@ -99,7 +104,7 @@ test('a head start that begins after the prompt reaches the agent at its next ba
   expect(told).toContain('Read-only head start')
   expect(await batch()).toBe('')
 
-  await clock.advance(1)
+  await drain()
   expect(toolCalls).toContain('EnterWorktree')
   expect(prompts.at(-1)).toContain('Your worktree is ready')
   expect(await batch()).toBe('')
@@ -192,7 +197,7 @@ test('Perm worktree is off by default: no slot and no read-only guard', async ($
   await activate(ui, 'tab-worktree')
   expect(await ui.find({ text: /Off: fishStack leaves worktrees to Claude Code/ })).toBeDefined()
   await activate(ui, 'auto-worktree')
-  expect(await ui.find({ text: /On: new sessions in a main checkout/ })).toBeDefined()
+  expect(await ui.find({ text: /On: a new terminal session in a main checkout asks/ })).toBeDefined()
 })
 
 test("Claude Code's own worktree creation gets a slot, read-only until it is seeded", { options: { autoWorktree: true, setupCommand: '' } }, async ($, on) => {
@@ -204,4 +209,107 @@ test("Claude Code's own worktree creation gets a slot, read-only until it is see
   expect((await $.tool.call(EDIT)).deny).toContain('Read-only until the worktree is ready')
   await clock.advance(1)
   expect((await $.tool.call(EDIT)).deny).toBeUndefined()
+})
+
+// Plain `claude` in a main checkout says nothing about a worktree, so the
+// person is asked, as the desktop's composer asks. The pool warms meanwhile.
+test('plain claude in a main checkout asks where the session works, and claims nothing until told', { options: { autoWorktree: true } }, async ($, on) => {
+  const state = world(on, { where: 'held' })
+  await startSession($)
+  await state.clock.advance(1)
+  expect(state.asked).toEqual(['Where should this session work?'])
+  expect((await $.tool.call(EDIT)).deny).toBeUndefined()
+  expect(state.toolCalls).not.toContain('EnterWorktree')
+
+  state.answer({ 'Where should this session work?': 'A worktree' })
+  await state.clock.advance(1)
+  expect(state.toolCalls).toContain('EnterWorktree')
+  expect(state.asked).toHaveLength(1)
+})
+
+for (const where of ['This main checkout', 'dismissed']) {
+  test(`answered "${where}", the session stays in the main checkout with full access, and Create worktree now still claims one`, { options: { autoWorktree: true } }, async ($, on) => {
+    const { clock, toolCalls, asked } = world(on, { where })
+    await startSession($)
+    await clock.advance(1)
+    expect((await $.tool.call(EDIT)).deny).toBeUndefined()
+    expect((await $.tool.call({ tool: 'Bash', command: 'git switch main' })).deny).toBeUndefined()
+    expect(toolCalls).not.toContain('EnterWorktree')
+
+    const ui = await $.ui.mount({ plugin: 'fishstack', surface: 'desktop', component: 'Pane', requestId: 'fishstack', props: PANE_PROPS })
+    await activate(ui, 'tab-worktree')
+    expect(await ui.find({ text: /This session works in the main checkout/ })).toBeDefined()
+    await activate(ui, 'worktree-create')
+    await clock.advance(1)
+    expect(toolCalls).toContain('EnterWorktree')
+    expect(asked).toHaveLength(1)
+  })
+}
+
+test('claude --worktree is its own answer: the slot is claimed with no question', { options: { autoWorktree: true } }, async ($, on) => {
+  const { clock, toolCalls, asked } = world(on)
+  await $.session.start({ cwd: '/repo/.claude/worktrees/feat-x', surface: 'terminal', isInteractive: true })
+  await clock.advance(1)
+  expect(asked).toEqual([])
+  expect(toolCalls).toContain('EnterWorktree')
+})
+
+// git gives a branch to one worktree at a time: a worktree on main would
+// lock the main checkout out of its own default branch.
+test('a worktree never checks out the default branch, so the main checkout can always switch to it', { options: { autoWorktree: true } }, async ($, on) => {
+  const { clock } = world(on)
+  await startSession($)
+  await clock.advance(1)
+  const refused = ['git switch main', 'git checkout main', 'git checkout -q main', 'git fetch origin main && git switch main', 'git checkout -B main origin/main', 'git switch -C main', 'git switch --create=main']
+  const allowed = ['git switch -c feat origin/main', 'git checkout -b feat main', 'git switch --detach origin/main', 'git checkout --detach main', 'git checkout main -- a.ts', 'git checkout main a.ts', 'git checkout origin/main', 'git switch feat', 'git switch -', 'cd /repo && git switch main', 'git -C /repo switch main']
+  for (const command of refused) {
+    const deny = (await $.tool.call({ tool: 'Bash', command })).deny
+    expect(deny, command).toContain('stays free for the main checkout at `/repo`')
+    expect(deny, command).toContain('git switch -c <new-branch> origin/main')
+  }
+  for (const command of allowed) {
+    expect((await $.tool.call({ tool: 'Bash', command })).deny, command).toBeUndefined()
+  }
+})
+
+test('each answer says where it leads: the main checkout by its branch, a worktree from origin', { options: { autoWorktree: true } }, async ($, on) => {
+  const { clock, askedWith } = world(on, { where: 'held' })
+  // The engine beneath the plugin: the props its own dialog is handed.
+  let drawn: { questions: { header: string; options: { label: string; description?: string }[] }[] } | null = null
+  on('ui.render', ($, e) => {
+    if (e.component === 'AskUserQuestion') drawn = e.props as never
+    return { type: 'engine', component: e.component, props: e.props } as never
+  })
+  await startSession($)
+  await clock.advance(1)
+  await $.ui.render({ surface: 'terminal', component: 'AskUserQuestion', props: { tool: 'AskUserQuestion', questions: askedWith } } as never)
+  const [question] = drawn!.questions
+  expect(question!.header).toBe('Worktree')
+  expect(question!.options.map(one => one.label)).toEqual(['A worktree', 'This main checkout', 'Always a worktree'])
+  expect(question!.options[0]!.description).toContain('from the latest origin/main')
+  expect(question!.options[1]!.description).toContain('Right here, on main, with full access')
+})
+
+// Someone who always wants a worktree says so once: from then on a new
+// terminal session takes one with no question, until the tab says ask again.
+test('"Always a worktree" takes one now and for every new terminal session, until the tab says ask again', { options: { autoWorktree: true } }, async ($, on) => {
+  const { clock, toolCalls, saved } = world(on, { where: 'Always a worktree' })
+  await startSession($)
+  await clock.advance(1)
+  expect(toolCalls).toContain('EnterWorktree')
+  expect(saved.terminalWorktree).toBe('always')
+
+  const ui = await $.ui.mount({ plugin: 'fishstack', surface: 'desktop', component: 'Pane', requestId: 'fishstack', props: PANE_PROPS })
+  await activate(ui, 'tab-worktree')
+  expect(await ui.find({ text: /On: a new terminal session in a main checkout takes a lasting slot/ })).toBeDefined()
+  await activate(ui, 'terminal-worktree-ask')
+  expect(saved.terminalWorktree).toBe('ask')
+})
+
+test('with Always a worktree kept, a new terminal session takes one with no question', { options: { autoWorktree: true } }, async ($, on) => {
+  const { clock, toolCalls, asked } = world(on, { store: { terminalWorktree: 'always' } })
+  await startSession($)
+  await clock.advance(1)
+  expect(asked).toEqual([])
+  expect(toolCalls).toContain('EnterWorktree')
 })

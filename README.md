@@ -29,7 +29,7 @@ fishStack adds one pane with three tabs, and a status rail above the prompt. Eac
 
 | Tab | What it does |
 | - | - |
-| **[Worktrees](#worktrees)** | Every new session moves into a worktree of its own, already set up, typically in about three seconds. |
+| **[Worktrees](#worktrees)** | A new session can move into a worktree of its own, already set up, typically in about three seconds. |
 | **[Dials](#dials)** | Six dials set how the agent plans, delegates, persists, asks, proves and talks. Some levels are enforced in code, not only asked for. |
 | **[Context](#context)** | Notes, links and files the agent reads in every request. Mark one Strict and the agent treats it as ground truth. |
 
@@ -59,7 +59,17 @@ fishStack is built and tested on macOS: copy-on-write cloning and the file picke
   <img src="docs/media/claim.gif" width="100%" alt="Real Claude Code in a terminal: a new session claims a warm slot, moves in on its own branch, and answers a question">
 </p>
 
-Turn on **Use worktrees** and each new session gets a worktree of its own, on its own `fish/…` branch, kept around to reuse. Your main checkout stays untouched. It is off until you turn it on.
+Turn on **Use worktrees** and a new session can have a worktree of its own, on its own `fish/…` branch, kept around to reuse. Your main checkout stays untouched. It is off until you turn it on.
+
+Plain `claude` in a main checkout doesn't say whether you want one, so fishStack asks once at the start:
+
+| Answer | What happens |
+| - | - |
+| **A worktree** | A branch of its own from the latest origin, read-only for the few seconds until it moves in |
+| **This main checkout** | It works right there, on whatever branch is checked out (the dialog names it), with full access |
+| **Always a worktree** | A worktree now, and for every new terminal session without asking. **New terminal sessions: Ask each time** in the tab brings the question back |
+
+The pool keeps warming while the question is open, so a worktree is still quick to take, and **Create worktree now** in the tab changes your mind later. Autopilot never answers this question for you. `claude --worktree` is an answer already, so it is not asked.
 
 It's fast because the work happens before you need it:
 
@@ -67,6 +77,7 @@ It's fast because the work happens before you need it:
 - **A head start.** While the slot is prepared, the agent can already read, search and plan. Anything that writes waits until it has moved in.
 - **No copying.** `node_modules` is cloned copy-on-write (APFS), so a slot costs almost no disk until something changes.
 - **Nothing lost.** A slot is reused once its session ends. Anything left uncommitted is saved under `refs/fish/backup/` first.
+- **The default branch stays free.** Git lets only one worktree have a branch at a time, so a worktree on `main` (or `master`) locks the main checkout out of its own default branch. Inside a fishStack worktree, the guard refuses `git switch` or `git checkout` onto the default branch and points to `origin/<default>` instead (`git switch -c <branch> origin/main`). A slot that still ends its session on the default branch is detached as it is released.
 
 It works with Claude Code's own worktrees too. `claude --worktree feat-x` lands in a slot on `fish/feat-x`. In the desktop app, its worktree option decides. Ticked, the session stays in the worktree the app made, which fishStack sets up in place (dependencies cloned, `setupCommand` run, read-only until then), so the app's diff, PR and archive keep following it. Unticked, the session stays in the main checkout (**Create worktree now** still claims a slot).
 
@@ -81,7 +92,7 @@ Every Claude Code client in the repository reads those settings, so the hook dec
 | Caller | Gets |
 | - | - |
 | The desktop app, fishStack enabled, **Use worktrees** on | A slot from the pool |
-| The CLI with fishStack | A slot, as before: fishStack answers its worktree creation itself, before the hook |
+| The CLI with fishStack | A slot: fishStack answers its worktree creation itself, before the hook (plain `claude` asks first) |
 | Anything else: ACP, the SDK, the CLI without fishStack | The worktree Claude Code makes itself, `.claude/worktrees/<name>` on `worktree-<name>` from origin's default branch |
 | Any client once fishStack is disabled or **Use worktrees** is off | Claude Code's own worktree, and the hook takes its entries out of the settings |
 

@@ -10,7 +10,7 @@ import type { Slot, Tab, Worktree, WorktreePhase } from '../types'
 import { frame, PANE, PANE_TITLE, resolveUi } from './ui'
 import type { Ui } from './ui'
 import { BALANCED, presetName } from './dials'
-import { branchArt, card, label, svg, useSwitch } from './kit'
+import { branchArt, card, label, segmented, svg, useSwitch } from './kit'
 import { beginTurn } from './enforce'
 import { drawRail } from './rail'
 
@@ -28,6 +28,7 @@ export const IDLE_WORKTREE: Worktree = {
 
 const isBandHidden = atom({ plugin: 'fishstack', key: 'isBandHidden' } as const, false)
 const isHeadStartPrompted = atom({ plugin: 'fishstack', key: 'isHeadStartPrompted' } as const, false)
+const isWhereAsked = atom({ plugin: 'fishstack', key: 'isWhereAsked' } as const, false)
 const isTurnRunning = atom({ plugin: 'fishstack', key: 'isTurnRunning' } as const, false)
 const owedMoveNote = atom({ plugin: 'fishstack', key: 'owedMoveNote' } as const, null)
 const slots = atom({ plugin: 'fishstack', key: 'slots' } as const, [])
@@ -364,6 +365,19 @@ function queueRefresh($: $, options: PluginOptions): void {
 
 // Slots this process is removing, so a redraw meanwhile still says so.
 const removing = new Set<string>()
+
+// A slot left on the default branch (checked out by hand, past the guard)
+// lets go of it as its session ends: the main checkout may want it, and git
+// gives a branch to one worktree at a time. Uncommitted work stays in place.
+async function freeDefaultBranch($: $, main: string, path: string): Promise<void> {
+  try {
+    const on = await git($, ['symbolic-ref', '--short', '-q', 'HEAD'], path)
+    if (on.exitCode !== 0 || on.stdout.trim() !== (await defaultBranch($, main))) return
+    await git($, ['-c', 'core.hooksPath=/dev/null', 'checkout', '-q', '--detach'], path)
+  } catch (error) {
+    $.ui.log(`default branch not freed in ${path}: ${String(error)}`, { to: 'debug' })
+  }
+}
 
 async function releaseSlot($: $, path: string): Promise<void> {
   await $.store.delete(LEASE_PREFIX + path)
@@ -829,7 +843,7 @@ async function prewarm($: $, options: PluginOptions, main: string): Promise<void
   }
 }
 
-async function defaultBranch($: $, main: string): Promise<string> {
+export async function defaultBranch($: $, main: string): Promise<string> {
   const head = await git($, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], main)
   if (head.exitCode === 0) return head.stdout.trim().replace(/^origin\//, '')
   return gitOut($, ['rev-parse', '--abbrev-ref', 'HEAD'], main, 'Could not read the current branch.')
@@ -1155,8 +1169,73 @@ async function startWorktree($: $, options: PluginOptions, cwd: string, { isForc
     // makes one itself when it does (adopted above). In the main checkout,
     // the person asked for none: it stays there.
     return
+  } else if (!isForced && (await terminalChoice($)) === 'ask') {
+    // From the terminal or an editor, plain `claude` in the main checkout
+    // says nothing about a worktree, so the person is asked, once a session,
+    // unless they said always. The pool warms meanwhile, so a worktree is
+    // still quick to take.
+    if (await read($, isWhereAsked)) return
+    await update($, isWhereAsked, () => true)
+    $.clock.after(0, () => void askWhere($, options, main))
+    return
   }
 
+  await update($, worktree, now => ({ ...now, main }))
+  await beginWorktree($, options)
+}
+
+const WHERE_QUESTION = 'Where should this session work?'
+const WHERE_WORKTREE = 'A worktree'
+const WHERE_MAIN = 'This main checkout'
+const WHERE_ALWAYS = 'Always a worktree'
+
+// What a new terminal session in a main checkout does with Use worktrees on:
+// asks, or takes a worktree as the person said it always should. Kept across
+// sessions, like the toggle.
+export const TERMINAL_KEY = 'terminalWorktree'
+type TerminalChoice = 'ask' | 'always'
+const TERMINAL_CHOICES = [
+  { value: 'ask', label: 'Ask each time' },
+  { value: 'always', label: 'Always a worktree' },
+] as const
+
+async function terminalChoice($: $): Promise<TerminalChoice> {
+  return (await $.store.get(TERMINAL_KEY)) === 'always' ? 'always' : 'ask'
+}
+
+async function setTerminalChoice($: $, choice: TerminalChoice): Promise<void> {
+  await $.store.set(TERMINAL_KEY, choice)
+  $.ui.invalidate('ui.render')
+}
+
+// What each answer to the where question leads to, the main checkout's
+// branch among it: the dialog draws them under the labels (see the
+// AskUserQuestion render below), as $.ui.ask carries labels alone.
+let whereDetails: Record<string, string> | null = null
+
+// Off the session's start, so its dialog never holds the start up. A
+// worktree, now or always, claims one; the main checkout, a dismissed
+// dialog or a typed answer leave the session where it is, with Create
+// worktree now in the tab. A plugin's question, so Autopilot leaves it to
+// the person.
+async function askWhere($: $, options: PluginOptions, main: string): Promise<void> {
+  let answer: string
+  try {
+    const on = (await git($, ['rev-parse', '--abbrev-ref', 'HEAD'], main)).stdout.trim()
+    const base = await defaultBranch($, main).catch(() => 'the default branch')
+    whereDetails = {
+      [WHERE_WORKTREE]: `A branch of its own from the latest origin/${base}. It reads and plans at once and edits once it moves in, in seconds.`,
+      [WHERE_MAIN]: `Right here, ${on === '' || on === 'HEAD' ? 'on a detached HEAD' : `on ${on}`}, with full access. Nothing is claimed.`,
+      [WHERE_ALWAYS]: 'A worktree now, and for every new terminal session. Back to asking from /fs.',
+    }
+    answer = await $.ui.ask(WHERE_QUESTION, { header: 'Worktree', options: [WHERE_WORKTREE, WHERE_MAIN, WHERE_ALWAYS] })
+  } catch {
+    return
+  } finally {
+    whereDetails = null
+  }
+  if (answer === WHERE_ALWAYS) await setTerminalChoice($, 'always')
+  if ((answer !== WHERE_WORKTREE && answer !== WHERE_ALWAYS) || (await read($, worktree)).phase !== 'off') return
   await update($, worktree, now => ({ ...now, main }))
   await beginWorktree($, options)
 }
@@ -1230,6 +1309,15 @@ export function registerWorktree(on: On, options: PluginOptions): void {
     return path === null ? next(e) : { worktreePath: path }
   })
 
+  // The where question's options, each with what it leads to.
+  on('ui.render', { component: 'AskUserQuestion' }, async ($, e, next) => {
+    const details = whereDetails
+    const [question, ...rest] = e.props.questions as { question?: string; options?: { label: string; description?: string }[] }[]
+    if (details === null || question?.question !== WHERE_QUESTION || question.options === undefined) return next(e)
+    const options = question.options.map(one => ({ ...one, description: details[one.label] ?? one.description }))
+    return next({ ...e, props: { ...e.props, questions: [{ ...question, options }, ...rest] } })
+  })
+
   on('session.start', { isInteractive: true }, async ($, e, next) => {
     const started = await next(e)
     await startWorktree($, options, e.cwd)
@@ -1263,7 +1351,10 @@ export function registerWorktree(on: On, options: PluginOptions): void {
     }
     heartbeat?.cancel()
     const { main, path } = await read($, worktree)
-    if (main !== null && path !== null && (await isSlot($, options, main, path))) await releaseSlot($, path)
+    if (main !== null && path !== null && (await isSlot($, options, main, path))) {
+      await freeDefaultBranch($, main, path)
+      await releaseSlot($, path)
+    }
     return next(e)
   })
 
@@ -1460,6 +1551,7 @@ export function registerWorktree(on: On, options: PluginOptions): void {
     const select = (id: Tab) => void update($, tab, () => id)
 
     const isAuto = await isAutoOn($, options)
+    const terminal = await terminalChoice($)
     const isInSlot = state.main !== null && state.path !== null && (await isSlot($, options, state.main, state.path))
     const note = await read($, poolNote)
     const settingUp = list.filter(one => one.setup !== null).length
@@ -1470,7 +1562,7 @@ export function registerWorktree(on: On, options: PluginOptions): void {
             <Text bold>Where the agent works</Text>
             <Text dimColor>
               {isAuto
-                ? "On: new sessions in a main checkout, and Claude's own worktrees, get a lasting slot. Read-only until it is ready, then the lock lifts. In the desktop app, its worktree option decides, and its worktree is set up where it is."
+                ? `On: a new terminal session in a main checkout ${terminal === 'always' ? 'takes' : 'asks whether to take'} a lasting slot, and Claude's own worktrees (claude --worktree) get one. Read-only until it is ready, then the lock lifts. In the desktop app, its worktree option decides, and its worktree is set up where it is.`
                 : "Off: fishStack leaves worktrees to Claude Code (the desktop's worktree option, claude --worktree, EnterWorktree)."}
             </Text>
             {isAuto && (
@@ -1482,6 +1574,12 @@ export function registerWorktree(on: On, options: PluginOptions): void {
                   </Text>
                   {note !== '' && <Text dimColor> · {note}</Text>}
                 </Text>
+              </Box>
+            )}
+            {isAuto && (
+              <Box key="terminal-line" gap={1} alignItems="center" flexWrap="wrap">
+                <Text dimColor>New terminal sessions</Text>
+                {segmented(ui, 'terminal-worktree', TERMINAL_CHOICES, terminal, choice => void setTerminalChoice($, choice))}
               </Box>
             )}
           </Box>
@@ -1593,7 +1691,7 @@ export function registerWorktree(on: On, options: PluginOptions): void {
               <Box flexDirection="column" flexShrink={1} flexGrow={1} gap={1}>
                 <Box flexDirection="column">
                   <Text bold>No worktree for this session</Text>
-                  <Text dimColor>{isAuto ? 'This session started before the toggle was on, or outside a main checkout.' : 'Create one for this session now, or turn Use worktrees on for new sessions.'}</Text>
+                  <Text dimColor>{!isAuto ? 'Create one for this session now, or turn Use worktrees on for new sessions.' : (await read($, isWhereAsked)) ? 'This session works in the main checkout. Create one now if you change your mind.' : 'This session started before the toggle was on, or outside a main checkout.'}</Text>
                 </Box>
                 <Box flexDirection="column">
                   <Text dimColor>✓ An isolated branch and folder</Text>

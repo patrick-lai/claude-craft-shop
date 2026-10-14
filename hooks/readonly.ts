@@ -171,3 +171,60 @@ function shellSegments(command: string): string[][] | null {
   const filled = segments.filter(words => words.length > 0)
   return filled.every(words => !words[0]!.includes('=')) ? filled : null
 }
+
+// A branch a shell command would check out (git checkout or switch, one it
+// makes with -b, -B, -c or -C too), with the folder it runs in when the
+// command names one absolutely (git -C, or an earlier cd); null is the
+// session's own. A detach, a checkout of files and a start point take none.
+export type CheckedOut = { branch: string; dir: string | null }
+
+const CREATE_FLAGS = new Set(['-b', '-B', '-c', '-C', '--create', '--force-create', '--orphan'])
+const GIT_VALUE_FLAGS = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace'])
+
+export function checkedOutBranches(command: string): CheckedOut[] {
+  const segments =
+    shellSegments(command.trim()) ??
+    command.split(/[;&|\n]+/).map(part => part.trim().split(/\s+/).filter(word => word !== ''))
+  const found: CheckedOut[] = []
+  let cwd: string | null = null
+  for (const words of segments) {
+    if (words[0] === 'cd') {
+      const to = words[1]
+      if (to !== undefined && to.startsWith('/')) cwd = to
+      continue
+    }
+    const one = checkoutOf(words)
+    if (one !== null) found.push({ branch: one.branch, dir: one.dir ?? cwd })
+  }
+  return found
+}
+
+function checkoutOf(words: string[]): { branch: string; dir: string | null } | null {
+  if (words[0] !== 'git') return null
+  let dir: string | null = null
+  let index = 1
+  while (words[index]?.startsWith('-')) {
+    if (words[index] === '-C' && words[index + 1]?.startsWith('/')) dir = words[index + 1]!
+    index += GIT_VALUE_FLAGS.has(words[index]!) ? 2 : 1
+  }
+  const subcommand = words[index]
+  if (subcommand !== 'checkout' && subcommand !== 'switch') return null
+  let args = words.slice(index + 1)
+  if (args.includes('--detach') || (subcommand === 'switch' && args.includes('-d'))) return null
+  const dash = args.indexOf('--')
+  if (dash !== -1) {
+    // Files after `--` are restored, not switched to.
+    if (dash < args.length - 1) return null
+    args = args.slice(0, dash)
+  }
+  for (let at = 0; at < args.length; at += 1) {
+    const arg = args[at]!
+    if (CREATE_FLAGS.has(arg)) return args[at + 1] === undefined ? null : { branch: args[at + 1]!, dir }
+    const inline = /^--(?:create|force-create|orphan)=(.+)$/.exec(arg)
+    if (inline !== null) return { branch: inline[1]!, dir }
+  }
+  const targets = args.filter(arg => !arg.startsWith('-'))
+  // `git checkout <tree> <file>…` restores files too.
+  if (targets.length !== 1) return null
+  return { branch: targets[0]!, dir }
+}

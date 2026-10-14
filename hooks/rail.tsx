@@ -1,4 +1,4 @@
-// The rail above the prompt while there is no worktree news: fishStack's
+// The rail above the prompt, unless the worktree failed: fishStack's
 // status at a glance (context window, prompt cache, cost, dials, sources,
 // worktree), each item opening its tab. worktree.tsx gathers the figures.
 import type { RenderElement } from 'claude-code'
@@ -23,6 +23,8 @@ export type RailFigures = {
   sourcesOn: number
   sourcesTotal: number
   branch: string | null
+  // While the worktree is made, the step it is on; null once ready or off.
+  preparingStep: string | null
   autopilot: RailAutopilot | null
   isDialsOn: boolean
   isContextOn: boolean
@@ -174,7 +176,13 @@ export function drawRail(ui: Ui, figures: RailFigures, open: (tab: Tab | null) =
       {item(
         'rail-worktree',
         'worktree',
-        figures.branch === null ? (
+        figures.preparingStep !== null ? (
+          <Text>
+            <Text color="warning">⎇ </Text>
+            <Text bold>Preparing</Text>
+            <Text dimColor> (read-only)</Text>
+          </Text>
+        ) : figures.branch === null ? (
           <Text dimColor>Worktree off</Text>
         ) : (
           <Text>

@@ -26,7 +26,6 @@ export const IDLE_WORKTREE: Worktree = {
   error: null,
 }
 
-const isBandHidden = atom({ plugin: 'fishstack', key: 'isBandHidden' } as const, false)
 const isHeadStartPrompted = atom({ plugin: 'fishstack', key: 'isHeadStartPrompted' } as const, false)
 const isWhereAsked = atom({ plugin: 'fishstack', key: 'isWhereAsked' } as const, false)
 const isTurnRunning = atom({ plugin: 'fishstack', key: 'isTurnRunning' } as const, false)
@@ -67,7 +66,6 @@ const HEARTBEAT_MS = 60_000
 const LEASE_TTL_MS = 3 * HEARTBEAT_MS
 const SETUP_TIMEOUT_MS = 10 * 60_000
 const LOCK_STALE_MS = 30_000
-const READY_BAND_MS = 4_000
 // As CommissionAI's: three slots ready, and no warming below 20 GB free
 // (the minFreeGb option).
 export const POOL_SIZE = 3
@@ -883,16 +881,9 @@ async function fail($: $, error: unknown): Promise<void> {
   await update($, worktree, (current): Worktree => ({ ...current, phase: 'failed', step: message, error: message }))
 }
 
-// The ready band is news, not a fixture: it gives way to the rail on its own.
-// A retry may have started over by then, so only a band still ready hides.
 async function markReady($: $): Promise<void> {
   await setStep($, 'Worktree ready')
   await update($, worktree, (current): Worktree => ({ ...current, phase: 'ready', error: null }))
-  $.clock.after(READY_BAND_MS, () => void hideIfReady($))
-}
-
-async function hideIfReady($: $): Promise<void> {
-  if ((await read($, worktree)).phase === 'ready') await update($, isBandHidden, () => true)
 }
 
 async function enter($: $, options: PluginOptions): Promise<void> {
@@ -964,7 +955,6 @@ async function prepare($: $, options: PluginOptions): Promise<void> {
 
 async function beginWorktree($: $, options: PluginOptions): Promise<void> {
   await update($, worktree, (current): Worktree => ({ ...current, phase: 'preparing', step: 'Starting', steps: [], error: null }))
-  await update($, isBandHidden, () => false)
   $.clock.after(0, () => void prepare($, options))
 }
 
@@ -984,17 +974,16 @@ let hasAutoOpened = false
 // session headless, so its session.start says no one is at the prompt).
 let hasStarted = false
 // Where the session worked as a /clear ended it, for the session after.
-let carried: { worktree: Worktree; elsewhere: string | null; isBandHidden: boolean } | null = null
+let carried: { worktree: Worktree; elsewhere: string | null } | null = null
 
 // After a /clear: the session that follows works where the last one did,
 // in the same slot, its lease kept alive from here.
 async function carryOverClear($: $, options: PluginOptions): Promise<void> {
   if (carried === null) return
-  const { worktree: was, elsewhere: where, isBandHidden: wasHidden } = carried
+  const { worktree: was, elsewhere: where } = carried
   carried = null
   await update($, worktree, () => was)
   await update($, elsewhere, () => where)
-  await update($, isBandHidden, () => wasHidden)
   if (was.phase === 'ready' && was.path !== null && was.main !== null && (await isSlot($, options, was.main, was.path))) startHeartbeat($, was.path)
 }
 
@@ -1346,7 +1335,7 @@ export function registerWorktree(on: On, options: PluginOptions): void {
     // slot, so the lease stays, and what the next session needs is kept for
     // it (the state starts over, and no session.start follows).
     if (e.reason === 'clear') {
-      carried = { worktree: await read($, worktree), elsewhere: await read($, elsewhere), isBandHidden: await read($, isBandHidden) }
+      carried = { worktree: await read($, worktree), elsewhere: await read($, elsewhere) }
       return next(e)
     }
     heartbeat?.cancel()
@@ -1415,7 +1404,6 @@ export function registerWorktree(on: On, options: PluginOptions): void {
     await update($, lastReplyAt, () => repliedAt)
     await $.store.set(RAIL_STORE_KEY, { sessionId, repliedAt, tokens: await read($, tokenTotals) })
     await update($, isTurnRunning, () => false)
-    if ((await read($, worktree)).phase === 'ready') await update($, isBandHidden, () => true)
     return done
   })
 
@@ -1448,8 +1436,9 @@ export function registerWorktree(on: On, options: PluginOptions): void {
       railHover = null
       return next(e)
     }
-    if (state.phase === 'off' || (await read($, isBandHidden))) {
-      // With no worktree news, the band is fishStack's status rail. Reading
+    if (state.phase !== 'failed') {
+      // The band is fishStack's status rail, its worktree pill saying how the
+      // worktree stands; only a failure, which wants a Retry, takes over. Reading
       // isTurnRunning redraws it as each turn starts and ends.
       const isWorking = await read($, isTurnRunning)
       await read($, railTick)
@@ -1485,6 +1474,7 @@ export function registerWorktree(on: On, options: PluginOptions): void {
           sourcesOn: list.filter(one => one.mode !== 'off').length,
           sourcesTotal: list.length,
           branch: state.phase === 'ready' ? state.branch : null,
+          preparingStep: state.phase === 'preparing' ? state.step : null,
           isDialsOn: isDials,
           isContextOn: await read($, isContextOn),
           autopilot:
@@ -1510,32 +1500,13 @@ export function registerWorktree(on: On, options: PluginOptions): void {
     // The rail is not drawn, so its Clients send no leave: start unlit.
     railHover = null
     const { Box, Text, Button } = $.ui.resolve(e)
-    if (state.phase === 'preparing') {
-      return (
-        <Text wrap="truncate-end">
-          <Text color="warning" bold>Read-only until the worktree is ready</Text>
-          <Text dimColor> · {state.step}</Text>
-        </Text>
-      )
-    }
-    if (state.phase === 'failed') {
-      return (
-        <Box gap={1}>
-          <Text wrap="truncate-end">
-            <Text color="error" bold>Worktree failed, still read-only</Text>
-            <Text dimColor> · {state.error}</Text>
-          </Text>
-          <Button key="worktree-retry" label="Retry" variant="primary" onPress={() => void beginWorktree($, options)} />
-        </Box>
-      )
-    }
     return (
       <Box gap={1}>
         <Text wrap="truncate-end">
-          <Text color="success" bold>Worktree ready</Text>
-          <Text dimColor> · {state.branch}</Text>
+          <Text color="error" bold>Worktree failed, still read-only</Text>
+          <Text dimColor> · {state.error}</Text>
         </Text>
-        <Button key="band-hide" label="Hide" dimColor onPress={() => void update($, isBandHidden, () => true)} />
+        <Button key="worktree-retry" label="Retry" variant="primary" onPress={() => void beginWorktree($, options)} />
       </Box>
     )
   })

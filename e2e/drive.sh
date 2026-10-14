@@ -69,9 +69,9 @@ start_claude() {
 }
 
 # Moving into the worktree (EnterWorktree) resets the prompt, dropping keys
-# typed meanwhile: wait for the band to say it is done.
+# typed meanwhile: wait for the rail's worktree pill to name the slot's branch.
 wait_moved_in() {
-  approve_until 'screen | grep -q "Worktree ready"' 60
+  approve_until 'screen | grep -q "⎇ fish/"' 60
   sleep 2
 }
 

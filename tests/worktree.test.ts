@@ -22,17 +22,19 @@ test('the head start is read-only until the worktree is ready, then the session 
   expect((await $.tool.call(EDIT)).deny).toBeUndefined()
 })
 
-test('the ready band hides itself a moment later, giving way to the rail', { options: { autoWorktree: true } }, async ($, on) => {
+test('the rail stays up while the worktree is made, its pill saying Preparing, then the branch', { options: { autoWorktree: true } }, async ($, on) => {
   const { clock } = world(on)
   await startSession($)
-  await clock.advance(1)
   const band = await mountBand($, 'terminal')
-  expect(JSON.stringify(await band.drawn())).toContain('Worktree ready')
-  expect(await band.find({ key: 'rail-worktree' })).toBeUndefined()
+  expect(JSON.stringify(await band.find({ key: 'rail-worktree' }))).toContain('Preparing')
+  const desktop = await mountBand($, 'desktop')
+  expect(JSON.stringify(await desktop.drawn())).toContain('Read-only until the worktree is ready')
 
-  await clock.advance(4_000)
+  await clock.advance(1)
   await band.redraw()
-  expect(JSON.stringify(await band.drawn())).not.toContain('Worktree ready')
+  const drawn = JSON.stringify(await band.drawn())
+  expect(drawn).not.toContain('Worktree ready')
+  expect(drawn).not.toContain('Preparing')
   expect(await band.find({ key: 'rail-worktree' })).toBeDefined()
 })
 

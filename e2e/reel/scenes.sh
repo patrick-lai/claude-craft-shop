@@ -120,7 +120,7 @@ if has claim; then
   rec_start claim
   ready
   # Keys typed while the session moves into its slot are dropped: ask after.
-  approve_until 'screen | grep -q "Worktree ready"' 90
+  approve_until 'screen | grep -q "⎇ fish/"' 90
   sleep 2
   c type demo 'In one sentence, what does server.js serve?'
   sleep 2

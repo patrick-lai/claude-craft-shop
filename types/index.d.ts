@@ -85,7 +85,6 @@ declare module 'claude-code' {
       isContextOn: boolean
       lastReplyAt: number | null
       tokenTotals: { input: number; output: number; cacheRead?: number; cacheWrite?: number } | null
-      isBandHidden: boolean
       isStepsShown: boolean
       isHeadStartPrompted: boolean
       // A terminal session in the main checkout was asked where it works:

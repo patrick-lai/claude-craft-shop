@@ -23,14 +23,15 @@ test('the head start is read-only until the worktree is ready, then the session 
 })
 
 test('the rail stays up while the worktree is made, its pill saying Preparing, then the branch', { options: { autoWorktree: true } }, async ($, on) => {
-  const { clock } = world(on)
+  const { clock, drain } = world(on, { fetch: 'held' })
   await startSession($)
+  await clock.settle()
   const band = await mountBand($, 'terminal')
   expect(JSON.stringify(await band.find({ key: 'rail-worktree' }))).toContain('Preparing')
   const desktop = await mountBand($, 'desktop')
   expect(JSON.stringify(await desktop.drawn())).toContain('Read-only until the worktree is ready')
 
-  await clock.advance(1)
+  await drain()
   await band.redraw()
   const drawn = JSON.stringify(await band.drawn())
   expect(drawn).not.toContain('Worktree ready')

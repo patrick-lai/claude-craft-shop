@@ -9,6 +9,7 @@ import type { EngineInterface, On } from 'claude-code'
 import type { ContextView, Folder, Source, SourceMode, Tab } from '../types'
 import { switchArt } from './art'
 import { card, drawnButton, folderArt, glyph, GLYPH_COLOR, isRich, svg, tickMeter, track, useSwitch } from './kit'
+import { setSetting, settingsHome } from './settings'
 import { bar, frame, PANE, resolveUi, tokens } from './ui'
 import type { Ui } from './ui'
 
@@ -29,12 +30,12 @@ const tab = atom({ plugin: 'fishstack', key: 'tab' } as const, 'worktree')
 const isClientDown = atom({ plugin: 'fishstack', key: 'isClientDown' } as const, false)
 const isContextOn = atom({ plugin: 'fishstack', key: 'isContextOn' } as const, true)
 
-// The Use context switch, kept across sessions. Off, no source reaches the
+// The Use context switch, kept across sessions for each repository. Off, no source reaches the
 // agent, whatever each source's own switch says; the library is kept.
 export const CONTEXT_ON_KEY = 'useContext'
 
 async function setContextOn($: EngineInterface, isOn: boolean): Promise<void> {
-  await $.store.set(CONTEXT_ON_KEY, isOn)
+  await setSetting($, CONTEXT_ON_KEY, isOn)
   await update($, isContextOn, () => isOn)
 }
 
@@ -145,13 +146,8 @@ function fillColor(percent: number): string {
   return percent >= 85 ? 'error' : percent >= 65 ? 'warning' : 'success'
 }
 
-async function libraryRoot($: $): Promise<string> {
-  const repo = await $.session.repo()
-  return repo?.root ?? (await $.session.root())
-}
-
 async function save($: $): Promise<void> {
-  await $.store.set(libraryStoreKey(await libraryRoot($)), {
+  await $.store.set(libraryStoreKey(await settingsHome($)), {
     sources: await read($, sources),
     folders: await read($, folders),
   })

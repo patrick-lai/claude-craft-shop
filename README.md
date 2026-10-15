@@ -27,6 +27,8 @@ If you run Claude Code all day, a few things keep getting in the way:
 
 fishStack adds one pane with three tabs, and a status rail above the prompt. Each tab has a switch at the top (**Use worktrees**, **Use dials**, **Use context**), so you can turn any of them off and the rail shows it.
 
+Every setting is kept per repository: the switches, **Enforce**, the dials, **Ask each time** or **Always a worktree**, and the context library. A worktree shares its main checkout's settings; outside git, the folder has its own. A repository that hasn't set something yet starts from the value you had before settings were per repository.
+
 | Tab | What it does |
 | - | - |
 | **[Worktrees](#worktrees)** | A new session can move into a worktree of its own, already set up, typically in about three seconds. |
@@ -209,7 +211,7 @@ Set them in `/config`. They're stored under `pluginConfigs["fishstack"].options`
 
 | Option | Default | What it does |
 | - | - | - |
-| `autoWorktree` | `false` | Use worktrees' starting value. Once you flip the switch, your choice sticks. |
+| `autoWorktree` | `false` | Use worktrees' starting value. Once you flip the switch in a repository, your choice sticks there. |
 | `worktreeRoot` | empty | Where slots live. Empty: `<repo>/.claude/worktrees/fishstack/<n>`, added to the repository's local `info/exclude` if nothing ignores it yet. Set: `<root>/<repo>-<hash>/<n>`, and Claude Code asks before each move in. |
 | `setupCommand` | empty | Runs in a new slot before the session moves in, `pnpm install` say. Times out after 10 minutes. |
 | `minFreeGb` | `20` | The pool stops warming below this much free disk. |

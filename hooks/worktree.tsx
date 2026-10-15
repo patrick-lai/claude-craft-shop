@@ -13,6 +13,7 @@ import { BALANCED, presetName } from './dials'
 import { branchArt, card, label, segmented, svg, useSwitch } from './kit'
 import { beginTurn } from './enforce'
 import { drawRail } from './rail'
+import { getSetting, repoMain, setSetting } from './settings'
 
 export const IDLE_WORKTREE: Worktree = {
   phase: 'off',
@@ -275,17 +276,6 @@ async function slotDirs($: $, repoDir: string): Promise<string[]> {
 async function refreshSlots($: $, options: PluginOptions): Promise<void> {
   const main = (await read($, worktree)).main ?? (await repoMain($))
   if (main !== null) await refreshSlotsFor($, options, main)
-}
-
-// The main checkout of the session's repository, or null outside one: the
-// folder holding the repository's .git, so a session working in a linked
-// worktree finds the same pool as one in the main checkout.
-async function repoMain($: $): Promise<string | null> {
-  const repo = await $.session.repo()
-  if (repo === null) return null
-  const common = await git($, ['rev-parse', '--path-format=absolute', '--git-common-dir'], repo.root)
-  const dir = common.stdout.trim()
-  return realPath($, common.exitCode === 0 && dir.endsWith('/.git') ? dir.slice(0, -'/.git'.length) : repo.root)
 }
 
 // The soonest a lease of another session lapses unrenewed, when the Slots
@@ -1058,15 +1048,15 @@ async function removeSlot($: $, options: PluginOptions, path: string): Promise<v
   }
 }
 
-// The Worktrees tab's toggle, kept across sessions; until it is pressed,
-// the autoWorktree option decides, off unless set.
+// The Worktrees tab's toggle, kept across sessions for each repository;
+// until it is pressed, the autoWorktree option decides, off unless set.
 async function isAutoOn($: $, options: PluginOptions): Promise<boolean> {
-  const stored = await $.store.get(AUTO_WORKTREE_KEY)
+  const stored = await getSetting($, AUTO_WORKTREE_KEY)
   return typeof stored === 'boolean' ? stored : options.autoWorktree === true
 }
 
 async function setAuto($: $, options: PluginOptions, isOn: boolean): Promise<void> {
-  await $.store.set(AUTO_WORKTREE_KEY, isOn)
+  await setSetting($, AUTO_WORKTREE_KEY, isOn)
   $.ui.invalidate('ui.render')
   const main = (await read($, worktree)).main ?? (await repoMain($))
   if (main === null) return
@@ -1180,7 +1170,7 @@ const WHERE_ALWAYS = 'Always a worktree'
 
 // What a new terminal session in a main checkout does with Use worktrees on:
 // asks, or takes a worktree as the person said it always should. Kept across
-// sessions, like the toggle.
+// sessions for each repository, like the toggle.
 export const TERMINAL_KEY = 'terminalWorktree'
 type TerminalChoice = 'ask' | 'always'
 const TERMINAL_CHOICES = [
@@ -1189,11 +1179,11 @@ const TERMINAL_CHOICES = [
 ] as const
 
 async function terminalChoice($: $): Promise<TerminalChoice> {
-  return (await $.store.get(TERMINAL_KEY)) === 'always' ? 'always' : 'ask'
+  return (await getSetting($, TERMINAL_KEY)) === 'always' ? 'always' : 'ask'
 }
 
 async function setTerminalChoice($: $, choice: TerminalChoice): Promise<void> {
-  await $.store.set(TERMINAL_KEY, choice)
+  await setSetting($, TERMINAL_KEY, choice)
   $.ui.invalidate('ui.render')
 }
 

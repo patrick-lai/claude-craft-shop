@@ -104,11 +104,13 @@ trap restore_store EXIT
 
 # The toggle and the dials are kept in the --plugin-dir copy's own store
 # across runs: start each run with the toggle off (the run turns it on) and
-# the Quick dials (no subagents, short answers), so turns stay short.
+# the Quick dials (no subagents, short answers), so turns stay short. A
+# repository's own values (autoWorktree:<repo>) would win, so they go.
 python3 -I - <<'PY'
 import glob, json, os
 for path in glob.glob(os.path.expanduser('~/.claude/plugins/store/fishstack_inline-*.json')):
     data = json.load(open(path))
+    data = {key: value for key, value in data.items() if not key.startswith(('autoWorktree:', 'dials:'))}
     data['autoWorktree'] = False
     data['dials'] = {'foresight': 1, 'crew': 1, 'tenacity': 2, 'autonomy': 4, 'proof': 2, 'voice': 2}
     json.dump(data, open(path, 'w'))

@@ -10,6 +10,7 @@ import type { DialKey, DialValues, Tab } from '../types'
 import { presetArt } from './art'
 import { enforcedRule } from './enforce'
 import { card, chip, dialIcon, drawnButton, isRich, svg, track, useSwitch } from './kit'
+import { setSetting } from './settings'
 import { bar, frame, PANE, resolveUi } from './ui'
 import type { Ui } from './ui'
 
@@ -22,23 +23,23 @@ const tab = atom({ plugin: 'fishstack', key: 'tab' } as const, 'worktree')
 const isClientDown = atom({ plugin: 'fishstack', key: 'isClientDown' } as const, false)
 const isDialsOn = atom({ plugin: 'fishstack', key: 'isDialsOn' } as const, true)
 
-// The Use dials switch, kept across sessions. Off, the agent gets no working
+// The Use dials switch, kept across sessions for each repository. Off, the agent gets no working
 // style and the dials do nothing; their settings are kept for when it is on.
 export const DIALS_ON_KEY = 'useDials'
 
 async function setDialsOn($: EngineInterface, isOn: boolean): Promise<void> {
-  await $.store.set(DIALS_ON_KEY, isOn)
+  await setSetting($, DIALS_ON_KEY, isOn)
   await update($, isDialsOn, () => isOn)
 }
 
-// The Enforce switch, kept across sessions: on, the rules enforce.ts can
+// The Enforce switch, kept across sessions for each repository: on, the rules enforce.ts can
 // check hold the agent to some levels in code; off, the dials are the
 // prompt alone.
 const isEnforced = atom({ plugin: 'fishstack', key: 'isEnforced' } as const, true)
 export const ENFORCE_KEY = 'enforceDials'
 
 async function setEnforced($: EngineInterface, isOn: boolean): Promise<void> {
-  await $.store.set(ENFORCE_KEY, isOn)
+  await setSetting($, ENFORCE_KEY, isOn)
   await update($, isEnforced, () => isOn)
 }
 
@@ -158,7 +159,7 @@ export function isDialValues(value: unknown): value is DialValues {
 
 async function setDials($: EngineInterface, change: (values: DialValues) => DialValues): Promise<void> {
   await update($, dials, change)
-  await $.store.set(DIALS_STORE_KEY, await read($, dials))
+  await setSetting($, DIALS_STORE_KEY, await read($, dials))
 }
 
 // CommissionAI's dial hues (Radar.tsx HUES), as hex an SVG image draws on any

@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { activate, mountBand, PANE_PROPS, startSession, world } from './world'
+import { activate, mountBand, PANE_PROPS, REPO, startSession, world } from './world'
 
 const EDIT = { tool: 'Edit', file_path: '/repo/a.ts', old_string: 'a', new_string: 'b' } as const
 
@@ -300,13 +300,13 @@ test('"Always a worktree" takes one now and for every new terminal session, unti
   await startSession($)
   await clock.advance(1)
   expect(toolCalls).toContain('EnterWorktree')
-  expect(saved.terminalWorktree).toBe('always')
+  expect(saved[`terminalWorktree:${REPO}`]).toBe('always')
 
   const ui = await $.ui.mount({ plugin: 'fishstack', surface: 'desktop', component: 'Pane', requestId: 'fishstack', props: PANE_PROPS })
   await activate(ui, 'tab-worktree')
   expect(await ui.find({ text: /On: a new terminal session in a main checkout takes a lasting slot/ })).toBeDefined()
   await activate(ui, 'terminal-worktree-ask')
-  expect(saved.terminalWorktree).toBe('ask')
+  expect(saved[`terminalWorktree:${REPO}`]).toBe('ask')
 })
 
 test('with Always a worktree kept, a new terminal session takes one with no question', { options: { autoWorktree: true } }, async ($, on) => {

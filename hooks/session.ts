@@ -7,6 +7,7 @@ import type { AutopilotWait, DialValues, Folder, Source } from '../types'
 import { CONTEXT_ON_KEY, CONTEXT_SECTION_ID, contextSection, legacyStoreKey, libraryStoreKey, parseLibrary } from './context'
 import { BALANCED, brief, DIALS_ON_KEY, DIALS_SECTION_ID, DIALS_STORE_KEY, ENFORCE_KEY, isDialValues } from './dials'
 import { FISH_COMMANDS } from './pane'
+import { getSetting, settingsHome } from './settings'
 import { headStartNote, IDLE_WORKTREE, isReadOnlyPhase, MID_TURN_FROM } from './worktree'
 
 const dials = atom({ plugin: 'fishstack', key: 'dials' } as const, BALANCED)
@@ -172,19 +173,23 @@ function notice($: EngineInterface, id: string, text: string | undefined): void 
   }
 }
 
-// The dials and this repository's library, as the store keeps them.
+// This repository's dials, switches and library, as the store keeps them.
 async function loadSaved($: EngineInterface): Promise<void> {
-  const storedDials = await $.store.get(DIALS_STORE_KEY)
-  if (isDialValues(storedDials)) await update($, dials, () => storedDials)
-  const useDials = await $.store.get(DIALS_ON_KEY)
+  const storedDials = await getSetting($, DIALS_STORE_KEY)
+  await update($, dials, () => (isDialValues(storedDials) ? storedDials : BALANCED))
+  const useDials = await getSetting($, DIALS_ON_KEY)
   await update($, isDialsOn, () => useDials !== false)
-  const useContext = await $.store.get(CONTEXT_ON_KEY)
+  const useContext = await getSetting($, CONTEXT_ON_KEY)
   await update($, isContextOn, () => useContext !== false)
-  const enforce = await $.store.get(ENFORCE_KEY)
+  const enforce = await getSetting($, ENFORCE_KEY)
   await update($, isEnforced, () => enforce !== false)
+  // The library under the main checkout; before that it was kept under the
+  // folder the session started in, a worktree's own among them.
+  const home = await settingsHome($)
   const repo = await $.session.repo()
   const root = repo?.root ?? (await $.session.root())
-  const library = parseLibrary(await $.store.get(libraryStoreKey(root)), await $.store.get(legacyStoreKey(root)))
+  const kept = await $.store.get(libraryStoreKey(home))
+  const library = parseLibrary(kept ?? (await $.store.get(libraryStoreKey(root))), await $.store.get(legacyStoreKey(root)))
   await update($, sources, () => library.sources)
   await update($, folders, () => library.folders)
 }
@@ -220,8 +225,8 @@ export function registerSession(on: On, options: PluginOptions): void {
       if (first !== 'away') return first
       // The dial may have come down while the question waited: read where a
       // change is saved, as this hook's own reads hold what it began with.
-      const now = await $.store.get(DIALS_STORE_KEY)
-      if ((isDialValues(now) && now.autonomy < 5) || (await $.store.get(DIALS_ON_KEY)) === false) {
+      const now = await getSetting($, DIALS_STORE_KEY)
+      if ((isDialValues(now) && now.autonomy < 5) || (await getSetting($, DIALS_ON_KEY)) === false) {
         waitingOn.delete(id)
         await showWaiting($)
         notice($, id, undefined)

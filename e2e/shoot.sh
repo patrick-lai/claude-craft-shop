@@ -15,7 +15,8 @@ for page in "$out"/*.html; do
   [ "$name" = index ] && continue
   # The rail is one row as wide as the composer: shot wide and short.
   size=820,1500
-  case "$name" in rail*) size=1280,110 ;; esac
+  # The sidebar is about 44 cells (352px) wide, as the desktop docks it.
+  case "$name" in rail*) size=1280,110 ;; side*) size=420,1400 ;; esac
   "$chrome" --headless=new --disable-gpu --hide-scrollbars --force-device-scale-factor=2 \
     --window-size="$size" --screenshot="$out/png/$name.png" "file://$page" >/dev/null 2>&1
 done

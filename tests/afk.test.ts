@@ -3,7 +3,7 @@ import type { Engine } from 'claude-code/testing'
 
 import { railArt } from '../hooks/rail-art'
 import type { RailArtFigures } from '../hooks/rail-art'
-import { activate, mountBand, mountPane, startSession, world } from './world'
+import { activate, mountBand, mountPane, openCard, startSession, world } from './world'
 
 const AUTOPILOT = { foresight: 4, crew: 3, tenacity: 5, autonomy: 5, proof: 4, voice: 2 }
 const DECIDE = { ...AUTOPILOT, autonomy: 4 }
@@ -76,7 +76,7 @@ test('a dial lowered while the question waits stops Autopilot answering it', asy
   const pending = ask($)
   await state.clock.advance(5 * MINUTE)
   const ui = await mountPane($, 'terminal')
-  await activate(ui, 'tab-dials')
+  await openCard(ui, 'dials')
   await activate(ui, 'preset-Balanced')
   await state.clock.advance(20 * MINUTE)
   state.answer({ 'Which database?': 'SQLite' })
@@ -85,7 +85,7 @@ test('a dial lowered while the question waits stops Autopilot answering it', asy
 })
 
 // The rail as each surface shows it: the desktop's dials pill (its tone, its
-// caption, its ring) and the terminal's dials item.
+// caption, its ring) and the terminal's dials item, the Dials card's head.
 async function rail($: Engine) {
   const desktop = JSON.stringify(await (await mountBand($, 'desktop')).drawn())
   const terminal = (await (await mountBand($, 'terminal')).find({ key: 'rail-dials' }))?.text ?? ''
@@ -102,7 +102,7 @@ test('on Autopilot the rail counts down a waiting question, then says what it pi
   let now = await rail($)
   expect(now.desktop).toContain('class=\\"pill wait\\"')
   expect(now.desktop).toContain('Autopilot picks Postgres, Lint in 15 min unless you answer')
-  expect(now.terminal).toContain('Dials Autopilot · picks Postgres, Lint in 15 min')
+  expect(now.terminal).toBe('◇ Answers in 15 min')
   // The terminal hides the rail under the dialog: the dialog's line says it.
   expect(state.notices).toContain('Autopilot picks Postgres, Lint in 15 min unless you answer')
   const fullRing = /stroke-dasharray=\\"([\d.]+) /.exec(now.desktop)![1]
@@ -111,6 +111,7 @@ test('on Autopilot the rail counts down a waiting question, then says what it pi
   now = await rail($)
   expect(now.desktop).toContain('Autopilot picks Postgres, Lint in 5 min unless you answer')
   expect(Number(/stroke-dasharray=\\"([\d.]+) /.exec(now.desktop)![1])).toBeLessThan(Number(fullRing) / 2)
+  expect(now.terminal).toBe('◇ Answers in 5 min')
   expect(state.notices).toContain('Autopilot picks Postgres, Lint in 5 min unless you answer')
 
   await state.clock.advance(5 * MINUTE)
@@ -119,7 +120,8 @@ test('on Autopilot the rail counts down a waiting question, then says what it pi
   expect(now.desktop).toContain('class=\\"pill done\\"')
   expect(now.desktop).toContain('Autopilot answered Postgres, Lint at ')
   expect(now.desktop).toContain('nobody had for 15 min')
-  expect(now.terminal).toContain('Dials Autopilot · ✓ picked Postgres, Lint for you')
+  // The terminal's item is the card's head: the countdown over, the preset.
+  expect(now.terminal).toBe('◇ Autopilot')
   expect(state.saved.autopilot).toMatchObject({ answered: { kind: 'answered', picked: 'Postgres, Lint' } })
 
   // A notification arriving is not the person: the check stays.
@@ -128,7 +130,7 @@ test('on Autopilot the rail counts down a waiting question, then says what it pi
   await $.prompt.submit({ text: 'thanks', wait: false, origin: { kind: 'composer' } })
   now = await rail($)
   expect(now.desktop).not.toContain('pill done')
-  expect(now.terminal).not.toContain('pick')
+  expect(now.terminal).toBe('◇ Autopilot')
   expect(state.saved.autopilot).toBeNull()
 })
 
@@ -149,11 +151,11 @@ test('the cue goes when the person answers, and never shows below Autopilot', as
   await state.clock.advance(MINUTE)
   expect((await rail($)).desktop).toContain('pill wait')
   const ui = await mountPane($, 'terminal')
-  await activate(ui, 'tab-dials')
+  await openCard(ui, 'dials')
   await activate(ui, 'preset-Balanced')
   const lowered = await rail($)
   expect(lowered.desktop).not.toContain('pill wait')
-  expect(lowered.terminal).not.toContain('picks')
+  expect(lowered.terminal).toBe('◇ Balanced')
   state.answer({ 'Which database?': 'SQLite' })
   await again
 })
@@ -200,7 +202,7 @@ test('below Autopilot a question shows nothing on the rail and no line under it'
   await state.clock.advance(MINUTE)
   const now = await rail($)
   expect(now.desktop).not.toContain('pill wait')
-  expect(now.terminal).not.toContain('pick')
+  expect(now.terminal).not.toContain('Answers in')
   expect(state.notices).toEqual([])
   state.answer({ 'Which database?': 'SQLite' })
   await pending

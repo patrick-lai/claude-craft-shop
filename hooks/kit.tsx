@@ -312,7 +312,7 @@ export function drawnButton(ui: Ui, key: string, source: string, alt: string, wi
   )
 }
 
-const ON_OFF = [
+export const ON_OFF = [
   { value: 'off', label: 'Off' },
   { value: 'on', label: 'On' },
 ] as const
@@ -325,6 +325,22 @@ export function useSwitch(ui: Ui, key: string, name: string, isOn: boolean, onCh
       <Text dimColor>{name}</Text>
       {drawnButton(ui, key, switchArt(isOn ? 'on' : 'off'), `${name}: ${isOn ? 'on' : 'off'}`, 36, 22, () => onChange(!isOn)) ??
         segmented(ui, key, ON_OFF, isOn ? 'on' : 'off', choice => onChange(choice === 'on'))}
+    </Box>
+  )
+}
+
+// A setting's row in a card: its name on the left, its switch on the right,
+// and under it, dim, one short line of what it does now.
+export function switchRow(ui: Ui, key: string, name: string, isOn: boolean, hint: string, onChange: (isOn: boolean) => void) {
+  const { Box, Text } = ui
+  return (
+    <Box key={`${key}-row`} flexDirection="column">
+      <Box justifyContent="space-between" alignItems="center" gap={1}>
+        <Text bold>{name}</Text>
+        {drawnButton(ui, key, switchArt(isOn ? 'on' : 'off'), `${name}: ${isOn ? 'on' : 'off'}`, 36, 22, () => onChange(!isOn)) ??
+          segmented(ui, key, ON_OFF, isOn ? 'on' : 'off', choice => onChange(choice === 'on'))}
+      </Box>
+      <Text dimColor>{hint}</Text>
     </Box>
   )
 }

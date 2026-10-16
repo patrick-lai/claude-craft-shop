@@ -2,9 +2,13 @@ import type { Elements, RenderElement } from 'claude-code'
 
 import type { Tab } from '../types'
 import { wordmarkArt } from './art'
+import { card } from './kit'
+import type { Head } from './state'
 
 export const PANE = 'fishstack'
 export const PANE_TITLE = 'fishStack'
+// How wide the pane asks to dock: a sidebar, as the desktop's own panel is.
+export const PANE_COLUMNS = 46
 
 // The elements the pane draws with, so it draws on every surface: mobile has
 // no Input or Select, the terminal no Svg, and the tabs leave those out where
@@ -29,59 +33,61 @@ export function resolveUi(table: Ui, surface: string, isClientDown: boolean): Ui
   }
 }
 
-export const TABS: { id: Tab; label: string }[] = [
-  { id: 'worktree', label: 'Worktrees' },
-  { id: 'dials', label: 'Dials' },
-  { id: 'context', label: 'Context' },
+export const TABS: { id: Tab; label: string; icon: string }[] = [
+  { id: 'worktree', label: 'Worktree', icon: '⎇' },
+  { id: 'dials', label: 'Dials', icon: '◇' },
+  { id: 'context', label: 'Context', icon: '▤' },
 ]
 
 export function isTab(value: string): value is Tab {
   return TABS.some(one => one.id === value)
 }
 
-// Each tab's file draws the whole pane while its tab is active (a $ never
-// crosses an import, so a tab cannot be drawn from another file); this is
-// the frame they share.
-export function frame(ui: Ui, current: Tab, columns: number, onSelect: (id: Tab) => void, body: RenderElement) {
+// The pane is one column of cards, as the desktop's own side panel is: each
+// card's head names it on the left and says its state on the right, and a
+// press opens it in place, one at a time. Each tab's file draws the whole
+// pane while its card is open (a $ never crosses an import, so a card cannot
+// be drawn from another file); pane.tsx draws it with every card closed.
+export function frame(ui: Ui, current: Tab | null, columns: number, onSelect: (id: Tab | null) => void, body: RenderElement | null, heads: Record<Tab, Head>) {
   const { Box, Button, Text, Svg } = ui
-  // The tabs are the surface's own buttons, so a press answers at once (a
-  // drawn tab bar went through a Client and a redrawn picture, and lagged);
-  // the current one filled, keys 1 to 3. No tray behind them: the desktop
-  // draws a box's background square, and it read as a stray box. On the
-  // desktop the mark and the name lead, a still picture.
-  const tabs = (
-    <Box gap={1}>
-      {TABS.map((one, index) => (
-        <Button
-          key={`tab-${one.id}`}
-          label={one.label}
-          hotkey={String(index + 1)}
-          variant={one.id === current ? 'primary' : undefined}
-          dimColor={one.id !== current}
-          onPress={() => onSelect(one.id)}
-        />
-      ))}
-    </Box>
-  )
-  if (Svg !== undefined) {
-    const mark = wordmarkArt()
-    return (
-      <Box flexDirection="column" width={columns} gap={1}>
-        <Box key="pane-head" gap={2} alignItems="center">
-          <Svg source={mark.source} alt="fishStack" width={mark.width} height={mark.height} />
-          {tabs}
-        </Box>
-        {body}
-      </Box>
+  const rich = Svg !== undefined
+  const cardOf = (one: (typeof TABS)[number], index: number) => {
+    const isOpen = one.id === current
+    const head = heads[one.id]
+    const toggle = () => onSelect(isOpen ? null : one.id)
+    return card(
+      ui,
+      `card-${one.id}`,
+      [
+        <Box key={`head-${one.id}`} justifyContent="space-between" alignItems="center" gap={1}>
+          <Button key={`tab-${one.id}`} plain hotkey={String(index + 1)} onPress={toggle}>
+            <Text color="suggestion">{one.icon} </Text>
+            <Text bold>{one.label}</Text>
+          </Button>
+          <Button key={`tab-${one.id}-state`} plain onPress={toggle}>
+            <Text color={head.tone} dimColor={head.tone === undefined}>
+              {head.value}
+            </Text>
+            <Text dimColor> {isOpen ? '⌄' : '›'}</Text>
+          </Button>
+        </Box>,
+        isOpen && body !== null && (
+          <Box key={`body-${one.id}`} flexDirection="column" gap={1} marginTop={1}>
+            {body}
+          </Box>
+        ),
+      ],
+      { tone: isOpen ? 'selected' : 'plain' },
     )
   }
   return (
-    <Box flexDirection="column" width={columns} gap={1}>
-      <Box justifyContent="space-between" alignItems="center">
-        {tabs}
-        <Text dimColor>fishStack</Text>
-      </Box>
-      {body}
+    <Box flexDirection="column" width={columns} gap={rich ? 1 : 0}>
+      {rich && (
+        <Box key="pane-head">
+          <Svg source={wordmarkArt().source} alt="fishStack" width={wordmarkArt().width} height={wordmarkArt().height} />
+        </Box>
+      )}
+      {TABS.map(cardOf)}
     </Box>
   )
 }

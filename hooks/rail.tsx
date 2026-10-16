@@ -9,6 +9,7 @@ import { COMPACTABLE, railArt } from './rail-art'
 import type { Compactable, RailAutopilot, RailPill } from './rail-art'
 import { tokens } from './ui'
 import type { Ui } from './ui'
+import type { Head } from './state'
 
 export type RailFigures = {
   isWorking: boolean
@@ -28,6 +29,8 @@ export type RailFigures = {
   autopilot: RailAutopilot | null
   isDialsOn: boolean
   isContextOn: boolean
+  // What each card's head says, which the terminal's line repeats.
+  heads?: Record<Tab, Head>
 }
 
 // A desktop cell's width in pixels, guessed low: the band is measured in the
@@ -41,12 +44,15 @@ const CELL_PX = 7
 export function fitPills(figures: RailFigures, columns: number): RailPill[] {
   const budget = (columns - 3) * CELL_PX
   const compact = new Set<Compactable>()
-  let pills = railArt(figures, compact)
+  // The status line says where the agent works and how; the cache and the
+  // spend are Claude Code's own to show.
+  const shown = () => railArt(figures, compact).filter(pill => pill.id !== 'cache' && pill.id !== 'tokens')
+  let pills = shown()
   const width = () => pills.reduce((sum, pill) => sum + pill.width, 0) + (pills.length - 1) * CELL_PX
   for (const id of COMPACTABLE) {
     if (width() <= budget) break
     compact.add(id)
-    pills = railArt(figures, compact)
+    pills = shown()
   }
   return pills
 }
@@ -80,117 +86,41 @@ export function drawRail(ui: Ui, figures: RailFigures, open: (tab: Tab | null) =
       </Box>
     )
   }
-  const left = figures.cacheSecondsLeft
-  const isWarm = figures.isWorking || (left !== null && left > 0)
-  const clock = left === null ? '' : `${Math.floor(left / 60)}:${String(Math.floor(left % 60)).padStart(2, '0')}`
+  // The terminal's status line: the three cards' heads, each opening its
+  // card, in the words the pane uses.
+  const heads = figures.heads
   const item = (key: string, tab: Tab | null, children: RenderElement) => (
     <Button key={key} plain onPress={() => open(tab)}>
       {children}
     </Button>
   )
-  // An item with no pane of its own: shown, not pressed.
-  const still = (key: string, children: RenderElement) => <Box key={key}>{children}</Box>
-  // The terminal wraps a rail too wide for it; the desktop keeps the drawn
-  // rail's one row, clipped at its end, while its Buttons stand in.
+  const part = (key: string, tab: Tab, icon: string) => {
+    const head = heads?.[tab]
+    return item(
+      key,
+      tab,
+      <Text>
+        <Text color={head?.tone ?? 'suggestion'}>{icon} </Text>
+        <Text color={head?.tone} bold={head?.tone !== undefined}>
+          {head?.value ?? ''}
+        </Text>
+      </Text>,
+    )
+  }
   const isDesktop = Svg !== undefined
   return (
-    <Box gap={isDesktop ? 1 : 2} alignItems="center" flexWrap={isDesktop ? 'nowrap' : 'wrap'} overflow={isDesktop ? 'hidden' : undefined}>
+    <Box gap={2} alignItems="center" flexWrap="nowrap" overflow="hidden">
       {item(
         'open-fishstack',
         null,
         <Text bold color="suggestion">
-          ≋
+          ≋ fishStack
         </Text>,
       )}
-      <Box gap={1} alignItems="center">
-        {Svg !== undefined ? (
-          <Svg source={cacheGauge(left ?? 0, figures.isWorking, figures.cachePercent)} alt={isWarm ? `Prompt cache warm, ${clock} left` : 'Prompt cache cold'} width={70} height={20} isInteractive />
-        ) : (
-          <Text color={isWarm ? 'warning' : undefined} dimColor={!isWarm}>
-            {'▮'.repeat(figures.isWorking ? 5 : Math.ceil((left ?? 0) / 60))}
-            {'▯'.repeat(figures.isWorking ? 0 : 5 - Math.ceil((left ?? 0) / 60))}
-          </Text>
-        )}
-        {still(
-          'rail-cache',
-          figures.isWorking ? (
-            <Text dimColor>Working</Text>
-          ) : left === null ? (
-            <Text dimColor>Cache starts next reply</Text>
-          ) : isWarm ? (
-              <Text>
-                <Text dimColor>Cache warm </Text>
-                <Text bold>{clock}</Text>
-                {figures.cachePercent !== null && <Text dimColor> · {figures.cachePercent}% hit</Text>}
-              </Text>
-            ) : (
-            <Text dimColor>Cache cold</Text>
-          ),
-        )}
-      </Box>
-      {(figures.tokens !== null || figures.costUsd !== null) &&
-        still(
-          'rail-tokens',
-          <Text>
-            {figures.tokens !== null && (
-              <Text>
-                <Text color="suggestion">↑</Text>
-                <Text bold>{tokens(figures.tokens.input)}</Text>
-                <Text dimColor> in </Text>
-                <Text color="success">↓</Text>
-                <Text bold>{tokens(figures.tokens.output)}</Text>
-                <Text dimColor> out</Text>
-              </Text>
-            )}
-            {figures.costUsd !== null && <Text dimColor>{figures.tokens !== null ? ' · ' : ''}≈ ${figures.costUsd.toFixed(2)} API price</Text>}
-          </Text>,
-        )}
-      {item(
-        'rail-dials',
-        'dials',
-        <Text>
-          <Text dimColor>Dials </Text>
-          {figures.isDialsOn ? <Text bold>{figures.preset}</Text> : <Text dimColor>off</Text>}
-          {figures.autopilot?.kind === 'waiting' && (
-            <Text color="warning">
-              {' '}· picks {figures.autopilot.picked} {figures.autopilot.secondsLeft < 60 ? 'in under a minute' : `in ${Math.ceil(figures.autopilot.secondsLeft / 60)} min`}
-            </Text>
-          )}
-          {figures.autopilot?.kind === 'answered' && <Text color="success"> · ✓ picked {figures.autopilot.picked} for you</Text>}
-        </Text>,
-      )}
-      {item(
-        'rail-sources',
-        'context',
-        figures.isContextOn ? (
-          <Text>
-            <Text bold>{figures.sourcesOn}</Text>
-            <Text dimColor>
-              {figures.sourcesTotal === figures.sourcesOn ? '' : `/${figures.sourcesTotal}`} {figures.sourcesOn === 1 && figures.sourcesTotal <= 1 ? 'source on' : 'sources on'}
-            </Text>
-          </Text>
-        ) : (
-          <Text dimColor>Context off</Text>
-        ),
-      )}
-      {item(
-        'rail-worktree',
-        'worktree',
-        figures.preparingStep !== null ? (
-          <Text>
-            <Text color="warning">⎇ </Text>
-            <Text bold>Preparing</Text>
-            <Text dimColor> (read-only)</Text>
-          </Text>
-        ) : figures.branch === null ? (
-          <Text dimColor>Worktree off</Text>
-        ) : (
-          <Text>
-            <Text color="success">⎇ </Text>
-            <Text bold>{figures.branch}</Text>
-          </Text>
-        ),
-      )}
+      {part('rail-worktree', 'worktree', '⎇')}
+      {part('rail-dials', 'dials', '◇')}
+      {part('rail-sources', 'context', '▤')}
+      {!isDesktop && <Text dimColor>/fs</Text>}
     </Box>
   )
 }

@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { COMPOSE, mountPane, REPO, startSession, world } from './world'
+import { COMPOSE, mountPane, openCard, REPO, startSession, world } from './world'
 
 const STORE = '/home/me/.claude/plugins/store'
 // Dive in and Solo: told apart from the Balanced default at a glance.
@@ -13,6 +13,7 @@ async function told($: Engine) {
 
 async function isAutoShown($: Engine) {
   const pane = await mountPane($, 'desktop')
+  await openCard(pane, 'worktree')
   return JSON.stringify(await pane.drawn()).includes('"alt":"Use worktrees: on"')
 }
 

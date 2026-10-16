@@ -1,10 +1,10 @@
-// Every tab drawn on the desktop with real content: each tree must validate
+// Every card drawn on the desktop with real content: each tree must validate
 // against the desktop's table (drawn() rejects otherwise). Each drawing is
 // also printed between PREVIEW markers, which e2e/preview.mjs turns into an
 // HTML page for a look at the layout.
 import { expect, test } from 'claude-code/testing'
 
-import { activate, keysOf, mountPane, startSession, world } from './world'
+import { activate, keysOf, mountPane, openCard, openPool, startSession, world } from './world'
 
 declare const console: { log: (...args: unknown[]) => void }
 
@@ -20,7 +20,7 @@ async function buttons(ui: Drawing, key: RegExp) {
   return (await ui.findAll({ type: 'Button' })).filter(one => one.key !== undefined && key.test(one.key))
 }
 
-test('every tab draws on the desktop with content in it', async ($, on) => {
+test('every card draws on the desktop with content in it', async ($, on) => {
   world(on, { isRepo: false })
   on('fs.list', () => ({
     value: [
@@ -33,7 +33,7 @@ test('every tab draws on the desktop with content in it', async ($, on) => {
   await startSession($)
   const ui = await mountPane($, 'desktop')
 
-  await activate(ui, 'tab-context')
+  await openCard(ui, 'context')
   await show(ui, 'context-empty')
 
   await ui.press({ key: 'pick-folder' })
@@ -49,12 +49,12 @@ test('every tab draws on the desktop with content in it', async ($, on) => {
   await activate(ui, open!)
   await show(ui, 'context-source')
 
-  await activate(ui, 'tab-dials')
+  await openCard(ui, 'dials')
   await activate(ui, 'preset-Autopilot')
   await ui.press({ key: 'dial-tenacity' })
   await show(ui, 'dials')
 
-  await activate(ui, 'tab-worktree')
+  await openCard(ui, 'worktree')
   await show(ui, 'worktree-off')
 
   await $.turn.complete({ turnId: 't1', answer: 'done', durationMs: 1_000, reason: 'answer', isAborted: false, usage: { input_tokens: 1_200, output_tokens: 3_400, cache_read_input_tokens: 48_000, cache_creation_input_tokens: 2_100, model: 'claude-opus-5-5' } } as never)
@@ -65,9 +65,9 @@ test('every tab draws on the desktop with content in it', async ($, on) => {
     props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 120, scroll: { offset: 0, bodyRows: 10 }, view: {} },
   })
   await show(band, 'rail')
-  // The pointer on the tokens pill, as its Client reports it.
-  await band.resize({ columns: 20, rows: 1, in: 'rail-tokens-press' })
-  await band.pointer({ type: 'enter', x: 5, y: 0, in: 'rail-tokens-press' })
+  // The pointer on the sources pill, as its Client reports it.
+  await band.resize({ columns: 20, rows: 1, in: 'rail-sources-press' })
+  await band.pointer({ type: 'enter', x: 5, y: 0, in: 'rail-sources-press' })
   await band.redraw()
   await show(band, 'rail-hover')
   // About 490px, as a narrow window leaves the composer.
@@ -80,17 +80,17 @@ test('every tab draws on the desktop with content in it', async ($, on) => {
   await show(narrow, 'rail-narrow')
 })
 
-test('the worktree tab draws its steps and slots on the desktop', { options: { autoWorktree: true } }, async ($, on) => {
+test('the worktree card draws its steps and slots on the desktop', { options: { autoWorktree: true } }, async ($, on) => {
   const { clock } = world(on)
   await startSession($)
   const ui = await mountPane($, 'desktop')
-  await activate(ui, 'tab-worktree')
+  await openPool(ui)
   await show(ui, 'worktree-preparing')
   await clock.advance(1)
   await show(ui, 'worktree-ready')
 })
 
-test('the worktree tab draws a slot setting up and a Remove waiting for its second press', { options: { autoWorktree: true, worktreeRoot: '/slots', setupCommand: 'pnpm install' } }, async ($, on) => {
+test('the worktree card draws a slot setting up and a Remove waiting for its second press', { options: { autoWorktree: true, worktreeRoot: '/slots', setupCommand: 'pnpm install' } }, async ($, on) => {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('/repo'))
   const dir = `/slots/repo-${[...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('').slice(0, 6)}`
   const { clock } = world(on, {
@@ -101,7 +101,7 @@ test('the worktree tab draws a slot setting up and a Remove waiting for its seco
   await $.session.start({ cwd: '/other/wt', surface: 'desktop', isInteractive: true })
   await clock.advance(1)
   const ui = await mountPane($, 'desktop')
-  await activate(ui, 'tab-worktree')
+  await openPool(ui)
   await activate(ui, 'pool-add')
   await clock.advance(1)
   await activate(ui, `slot-remove-${dir}/3`)

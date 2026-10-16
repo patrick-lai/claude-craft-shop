@@ -7,19 +7,20 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 
 import type { DialKey, DialValues, Tab } from '../types'
-import { presetArt } from './art'
+import { presetArt, switchArt } from './art'
 import { enforcedRule } from './enforce'
-import { card, chip, dialIcon, drawnButton, isRich, svg, track, useSwitch } from './kit'
+import { chip, drawnButton, isRich, ON_OFF, segmented, svg, switchRow } from './kit'
 import { setSetting } from './settings'
+import { BALANCED, paneHeads, presetName, PRESETS } from './state'
 import { bar, frame, PANE, resolveUi } from './ui'
 import type { Ui } from './ui'
 
-export const BALANCED: DialValues = { foresight: 3, crew: 3, tenacity: 3, autonomy: 3, proof: 3, voice: 3 }
+export { BALANCED, presetName }
 
 const dials = atom({ plugin: 'fishstack', key: 'dials' } as const, BALANCED)
 const isBriefShown = atom({ plugin: 'fishstack', key: 'isBriefShown' } as const, false)
 const selectedDial = atom({ plugin: 'fishstack', key: 'selectedDial' } as const, null)
-const tab = atom({ plugin: 'fishstack', key: 'tab' } as const, 'worktree')
+const tab = atom({ plugin: 'fishstack', key: 'tab' } as const, null)
 const isClientDown = atom({ plugin: 'fishstack', key: 'isClientDown' } as const, false)
 const isDialsOn = atom({ plugin: 'fishstack', key: 'isDialsOn' } as const, true)
 
@@ -121,23 +122,11 @@ const DIALS: Dial[] = [
   },
 ]
 
-const PRESETS: { name: string; values: DialValues }[] = [
-  { name: 'Balanced', values: BALANCED },
-  { name: 'Quick', values: { foresight: 1, crew: 1, tenacity: 2, autonomy: 4, proof: 2, voice: 2 } },
-  { name: 'Deep work', values: { foresight: 4, crew: 3, tenacity: 4, autonomy: 3, proof: 4, voice: 3 } },
-  { name: 'Autopilot', values: { foresight: 4, crew: 3, tenacity: 5, autonomy: 5, proof: 4, voice: 2 } },
-]
-
 export const DIALS_STORE_KEY = 'dials'
 export const DIALS_SECTION_ID = 'fishstack:dials'
 
 function levelOf(dial: Dial, values: DialValues): Level {
   return dial.levels[values[dial.key] - 1]!
-}
-
-export function presetName(values: DialValues): string {
-  const preset = PRESETS.find(one => DIALS.every(dial => one.values[dial.key] === values[dial.key]))
-  return preset?.name ?? 'Custom'
 }
 
 export function brief(values: DialValues): string {
@@ -296,80 +285,57 @@ export function registerDials(on: On): void {
     const isShown = await read($, isBriefShown)
     const current = presetName(values)
     const columns = e.props.bodyColumns
+    // The radar only where the pane is wide; a sidebar keeps the rows.
     const isWide = columns >= 86
     const guess = estimate(values)
-    // The estimate cards take what the radar leaves of the row.
-    const trackWidth = isWide ? Math.max(140, columns * 8 - RADAR_W - 16 - 4 * 8) : Math.max(140, (columns - 4) * 8)
     const pick = (key: DialKey, level: number) => void setDials($, now => ({ ...now, [key]: Math.min(5, Math.max(1, level)) }))
-
-    const estimateCard = (key: string, title: string, value: string, fraction: number) => (
-      <Box key={key} flexDirection="column">
-        <Text>
-          <Text dimColor>{title} </Text>
-          <Text bold>{value}</Text>
-        </Text>
-        {rich ? (
-          <Box>{svg(ui, track(fraction, trackWidth), `${title} ${value}`, trackWidth, 6)}</Box>
-        ) : (
-          <Text color="suggestion">{bar(fraction, 16)}</Text>
-        )}
-      </Box>
-    )
-
-    const estimates = (
-      <Box flexDirection="column" gap={2} flexGrow={1} justifyContent="center">
-        {estimateCard('est-spend', 'Spend', spendText(guess.spend), (guess.spend - 0.4) / 2)}
-        {estimateCard('est-time', 'Time to done', guess.paceLabel, Math.min(1, guess.pace / 2))}
-        {estimateCard('est-asks', 'Asks you', guess.asks, (6 - values.autonomy) / 5)}
-      </Box>
-    )
-
-    const overview = rich ? (
-      <Box flexDirection={isWide ? 'row' : 'column'} gap={2} alignItems={isWide ? 'center' : 'stretch'}>
-        <Box justifyContent="center">
-          {/* The radar is a picture; a Client laid over it takes the drags. */}
-          <Box key="radar" position="relative">
-            {svg(ui, radar(values, selected), `Dials: ${summaryOf(values)}. Drag a dot to change its level.`, RADAR_W, RADAR_H)}
-            {Client !== undefined && (
-              <Box position="absolute" top={0} left={0} right={0} bottom={0}>
-                <Client
-                  key="radar-drag"
-                  module="./radar-drag.tsx"
-                  props={{ levels: DIALS.map(dial => values[dial.key]), width: RADAR_W, height: RADAR_H, radius: RADIUS }}
-                  width="100%"
-                  height="100%"
-                />
-              </Box>
-            )}
-          </Box>
-        </Box>
-        {estimates}
-      </Box>
-    ) : (
-      <Text>
-        <Text dimColor>Spend </Text>
-        <Text bold>{spendText(guess.spend)}</Text>
-        <Text dimColor> · Time to done </Text>
-        <Text bold>{guess.paceLabel}</Text>
-        <Text dimColor> · Asks you </Text>
-        <Text bold>{guess.asks}</Text>
-      </Text>
-    )
-
     const isOn = await read($, isDialsOn)
     const isEnforcing = await read($, isEnforced)
-    const dialCard = (dial: Dial) => {
+    const select = (id: Tab | null) => void update($, tab, () => id)
+    const heads = await paneHeads($)
+
+    const setting = switchRow(ui, 'dials-on', 'Use dials', isOn, isOn ? 'The agent works the way these dials say.' : 'The agent gets no working style.', turned => void setDialsOn($, turned))
+    if (!isOn) return frame(ui, 'dials', columns, select, setting, heads)
+
+    const presets = (
+      <Box key="presets" gap={1} flexWrap="wrap" alignItems="center">
+        {PRESETS.map(preset => {
+          const isActive = preset.name === current
+          const art = presetArt(preset.name, DIALS.map(dial => preset.values[dial.key]), isActive)
+          return (
+            drawnButton(ui, `preset-${preset.name}`, art.source, preset.name, art.width, art.height, () => void setDials($, () => preset.values)) ?? (
+              <Button key={`preset-${preset.name}`} label={preset.name} variant={isActive ? 'primary' : undefined} dimColor={!isActive} onPress={() => void setDials($, () => preset.values)} />
+            )
+          )
+        })}
+        {current === 'Custom' && chip(ui, 'Custom', 'claude')}
+      </Box>
+    )
+
+    const radarBox = isWide && rich && (
+      <Box key="radar-box" justifyContent="center">
+        <Box key="radar" position="relative">
+          {svg(ui, radar(values, selected), `Dials: ${summaryOf(values)}. Drag a dot to change its level.`, RADAR_W, RADAR_H)}
+          {Client !== undefined && (
+            <Box position="absolute" top={0} left={0} right={0} bottom={0}>
+              <Client key="radar-drag" module="./radar-drag.tsx" props={{ levels: DIALS.map(dial => values[dial.key]), width: RADAR_W, height: RADAR_H, radius: RADIUS }} width="100%" height="100%" />
+            </Box>
+          )}
+        </Box>
+      </Box>
+    )
+
+    // One row a dial: its name opens what it does and what the agent is told.
+    const dialRow = (dial: Dial) => {
       const level = levelOf(dial, values)
       const value = values[dial.key]
       const isSelected = selected === dial.key
       const color = COLOR[dial.key]
-      return card(
-        ui,
-        `card-${dial.key}`,
-        [
+      const rule = isEnforcing ? enforcedRule(dial.key, value) : null
+      return (
+        <Box key={`card-${dial.key}`} flexDirection="column">
           <Box justifyContent="space-between" alignItems="center" gap={1}>
-            <Box gap={2} alignItems="center" flexShrink={1}>
-              {svg(ui, dialIcon(dial.key, color), dial.name, 18, 18)}
+            <Box gap={1} alignItems="center" flexShrink={1}>
               <Button key={`dial-${dial.key}`} plain onPress={() => void update($, selectedDial, now => (now === dial.key ? null : dial.key))}>
                 <Text bold color={isSelected ? color : undefined}>
                   {dial.name.padEnd(10)}
@@ -387,51 +353,36 @@ export function registerDials(on: On): void {
                 </Box>
               )}
             </Box>
-            <Box gap={1} alignItems="center">
-              <Button key={`less-${dial.key}`} label="−" dimColor onPress={() => pick(dial.key, value - 1)} />
-              <Button key={`more-${dial.key}`} label="+" dimColor onPress={() => pick(dial.key, value + 1)} />
-              {isSelected && <Button key={`done-${dial.key}`} label="Done" onPress={() => void update($, selectedDial, () => null)} />}
-            </Box>
-          </Box>,
-          <Box>
-            <Text wrap="wrap">
-              <Text bold color={color}>
-                {level.label}.
-              </Text>{' '}
-              <Text dimColor>{level.summary}</Text>
-            </Text>
-          </Box>,
-          isOn && isEnforcing && enforcedRule(dial.key, value) !== null && (
-            <Box key={`enforced-${dial.key}`}>
-              <Text wrap="wrap" dimColor>
-                <Text color={color}>⚙ Enforced:</Text> {enforcedRule(dial.key, value)}
+            {rich ? (
+              <Box gap={1} alignItems="center" flexShrink={0}>
+                <Button key={`less-${dial.key}`} label="−" dimColor onPress={() => pick(dial.key, value - 1)} />
+                <Button key={`more-${dial.key}`} label="+" dimColor onPress={() => pick(dial.key, value + 1)} />
+              </Box>
+            ) : (
+              <Text color={color} wrap="truncate-end">
+                {level.label}
               </Text>
-            </Box>
-          ),
-          isSelected && (
-            <Box flexDirection="column" gap={1} marginTop={1}>
-              {card(
-                ui,
-                `told-${dial.key}`,
-                [
-                  <Box>
-                    <Text dimColor>
-                      {dial.question} · what the agent is told at{' '}
-                      <Text color={color} bold>
-                        {level.label}
-                      </Text>
-                    </Text>
-                  </Box>,
-                  <Box>
-                    <Text wrap="wrap">{level.prompt}</Text>
-                  </Box>,
-                ],
-                { tone: 'muted' },
+            )}
+          </Box>
+          {rich && (
+            <Text color={color} wrap="truncate-end">
+              {level.label}
+            </Text>
+          )}
+          {isSelected && (
+            <Box flexDirection="column" paddingLeft={1}>
+              <Text wrap="wrap" dimColor>
+                {dial.question}: {level.summary}
+              </Text>
+              {rule !== null && (
+                <Text wrap="wrap" dimColor>
+                  <Text color={color}>Enforced:</Text> {rule}
+                </Text>
               )}
+              <Text wrap="wrap">{level.prompt}</Text>
             </Box>
-          ),
-        ],
-        { tone: isSelected ? 'selected' : 'plain' },
+          )}
+        </Box>
       )
     }
 
@@ -439,49 +390,28 @@ export function registerDials(on: On): void {
       ui,
       'dials',
       columns,
-      (id: Tab) => void update($, tab, () => id),
+      select,
       <Box flexDirection="column" gap={1}>
-        <Box justifyContent="space-between" alignItems="flex-start" gap={1}>
-          <Box flexDirection="column" flexShrink={1}>
-            <Text bold>How the agent works</Text>
-            <Text dimColor>
-              {isOn
-                ? 'Six dials for how it plans, delegates, persists, asks, proves and talks.'
-                : 'Off: the agent gets no working style, and nothing below applies. Your dials are kept for when you turn them back on.'}
-            </Text>
-          </Box>
-          <Box flexDirection="column" alignItems="flex-end" gap={1} flexShrink={0}>
-            {useSwitch(ui, 'dials-on', 'Use dials', isOn, turned => void setDialsOn($, turned))}
-            {isOn && useSwitch(ui, 'dials-enforce', 'Enforce', isEnforcing, turned => void setEnforced($, turned))}
-            {isOn && (
-              <Button
-                key="brief-toggle"
-                label={isShown ? 'Hide brief' : 'What agents are told'}
-                hotkey="w"
-                dimColor
-                onPress={() => void update($, isBriefShown, now => !now)}
-              />
-            )}
-          </Box>
-        </Box>
-        {isOn && isShown && card(ui, 'brief', [<Markdown text={brief(values)} />], { tone: 'muted' })}
-        <Box gap={1} flexWrap="wrap" alignItems="center">
-          {PRESETS.map(preset => {
-            const isActive = preset.name === current
-            const art = presetArt(preset.name, DIALS.map(dial => preset.values[dial.key]), isActive)
-            return (
-              drawnButton(ui, `preset-${preset.name}`, art.source, preset.name, art.width, art.height, () => void setDials($, () => preset.values)) ?? (
-                <Button key={`preset-${preset.name}`} label={preset.name} variant={isActive ? 'primary' : 'secondary'} onPress={() => void setDials($, () => preset.values)} />
-              )
-            )
-          })}
-          {current === 'Custom' && chip(ui, 'Custom', 'claude')}
-        </Box>
-        {overview}
+        {setting}
+        {presets}
+        {radarBox}
+        <Text dimColor wrap="wrap">
+          {spendText(guess.spend)} spend · {guess.paceLabel.toLowerCase()} · asks {guess.asks.toLowerCase()}
+        </Text>
         <Box flexDirection="column" gap={rich ? 1 : 0}>
-          {DIALS.map(dialCard)}
+          {DIALS.map(dialRow)}
         </Box>
+        <Box key="dials-more" justifyContent="space-between" alignItems="center" gap={1} flexWrap="wrap">
+          <Box gap={1} alignItems="center">
+            <Text dimColor>Enforce</Text>
+            {drawnButton(ui, 'dials-enforce', switchArt(isEnforcing ? 'on' : 'off'), `Enforce: ${isEnforcing ? 'on' : 'off'}`, 36, 22, () => void setEnforced($, !isEnforcing)) ??
+              segmented(ui, 'dials-enforce', ON_OFF, isEnforcing ? 'on' : 'off', choice => void setEnforced($, choice === 'on'))}
+          </Box>
+          <Button key="brief-toggle" label={isShown ? 'Hide brief' : 'What agents are told'} hotkey="w" dimColor onPress={() => void update($, isBriefShown, now => !now)} />
+        </Box>
+        {isShown && <Markdown text={brief(values)} />}
       </Box>,
+      heads,
     )
   })
 }

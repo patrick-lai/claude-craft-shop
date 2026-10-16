@@ -4,7 +4,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { activate, COMPOSE, mountPane, REPO, startSession, world } from './world'
+import { activate, COMPOSE, mountPane, openCard, REPO, startSession, world } from './world'
 
 const SOLO = { foresight: 1, crew: 1, tenacity: 2, autonomy: 4, proof: 2, voice: 2 }
 const ELSEWHERE = '/elsewhere'
@@ -15,6 +15,7 @@ async function dialsSection($: Engine) {
 
 async function isAutoShown($: Engine) {
   const pane = await mountPane($, 'desktop')
+  await openCard(pane, 'worktree')
   return JSON.stringify(await pane.drawn()).includes('"alt":"Use worktrees: on"')
 }
 
@@ -38,13 +39,13 @@ test('a change is kept for this repository alone', { options: { worktreeRoot: '/
   const { clock, saved } = world(on)
   await startSession($)
   const ui = await mountPane($, 'terminal')
-  await activate(ui, 'tab-dials')
+  await openCard(ui, 'dials')
   await ui.press({ key: 'pip-crew-1' })
   await activate(ui, 'dials-enforce-off')
   await activate(ui, 'dials-on-off')
-  await activate(ui, 'tab-context')
+  await openCard(ui, 'context')
   await activate(ui, 'context-on-off')
-  await activate(ui, 'tab-worktree')
+  await openCard(ui, 'worktree')
   await activate(ui, 'auto-worktree-on')
   await activate(ui, 'terminal-worktree-always')
   await clock.advance(1)

@@ -5,7 +5,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { activate, mountPane, startSession, world } from './world'
+import { activate, mountPane, openCard, startSession, world } from './world'
 
 const AUTOPILOT = { foresight: 4, crew: 3, tenacity: 5, autonomy: 5, proof: 4, voice: 2 }
 
@@ -171,7 +171,9 @@ test('with Enforce off, or the dials off, nothing is refused or held back', asyn
   transcript(on)
   await startSession($)
   const ui = await mountPane($, 'terminal')
-  await activate(ui, 'tab-dials')
+  await openCard(ui, 'dials')
+  // A dial's row, opened, says the rule its level enforces.
+  await ui.press({ key: 'dial-foresight' })
   expect(await ui.find({ text: /Enforced: The first edit of a request waits for a spec/ })).toBeDefined()
   await activate(ui, 'dials-enforce-off')
   expect(await ui.find({ text: /Enforced:/ })).toBeUndefined()

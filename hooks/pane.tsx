@@ -1,16 +1,19 @@
-import { atom, update } from 'claude-code'
+import { atom, read, update } from 'claude-code'
 import type { CommandSpec, EngineInterface, On } from 'claude-code'
 
+import type { Tab } from '../types'
 import { hoverHandlers, pressHandlers } from './kit'
-import { isTab, PANE, PANE_TITLE, TABS } from './ui'
+import { paneHeads } from './state'
+import { frame, isTab, PANE, PANE_COLUMNS, PANE_TITLE, resolveUi, TABS } from './ui'
+import type { Ui } from './ui'
 
-const tab = atom({ plugin: 'fishstack', key: 'tab' } as const, 'worktree')
+const tab = atom({ plugin: 'fishstack', key: 'tab' } as const, null)
 const isClientDown = atom({ plugin: 'fishstack', key: 'isClientDown' } as const, false)
 
 // /fishstack opens the pane, and /fs is its short form: bare /fish reads as
 // the fish shell.
 export const FISH_COMMANDS: CommandSpec[] = [
-  { name: 'fishstack', description: 'Open the fishStack pane: perm worktree, dials and context', argumentHint: '[worktree|dials|context]' },
+  { name: 'fishstack', description: 'Open the fishStack pane: worktree, dials and context', argumentHint: '[worktree|dials|context]' },
   { name: 'fs', description: 'Open the fishStack pane (short for /fishstack)', argumentHint: '[worktree|dials|context]' },
 ]
 
@@ -20,7 +23,7 @@ async function openPane($: EngineInterface, args: string): Promise<{ text: strin
     return { text: `No tab named "${wanted}". Try /fishstack worktree, dials or context.` }
   }
   if (isTab(wanted)) await update($, tab, () => wanted)
-  await $.ui.open({ id: PANE, title: PANE_TITLE, focus: true })
+  await $.ui.open({ id: PANE, title: PANE_TITLE, columns: PANE_COLUMNS, focus: true })
   const label = TABS.find(one => one.id === wanted)?.label
   return { text: label === undefined ? 'Opened fishStack.' : `Opened fishStack · ${label}.` }
 }
@@ -68,6 +71,14 @@ export function registerPane(on: On): void {
       $.clock.after(retryMs, () => void update($, isClientDown, () => false))
     }
     return next(e)
+  })
+
+  // With every card closed, the pane is their heads alone; an open card's
+  // file draws the pane instead.
+  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
+    if ((await read($, tab)) !== null) return next(e)
+    const ui: Ui = resolveUi($.ui.resolve(e), e.surface, await read($, isClientDown))
+    return frame(ui, null, e.props.bodyColumns, (id: Tab | null) => void update($, tab, () => id), null, await paneHeads($))
   })
 
   on('command.run', { command: 'fishstack' }, async ($, e) => openPane($, e.args))

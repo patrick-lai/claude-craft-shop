@@ -3,7 +3,7 @@
 // README's desktop GIFs. Each tree is the desktop's own, so it must validate.
 import { expect, test } from 'claude-code/testing'
 
-import { activate, mountBand, mountPane, startSession, world } from './world'
+import { activate, mountBand, mountPane, openCard, startSession, world } from './world'
 
 declare const console: { log: (...args: unknown[]) => void }
 
@@ -21,7 +21,7 @@ test('media: the dials, preset by preset', async ($, on) => {
   world(on, { isRepo: false })
   await startSession($)
   const ui = await mountPane($, 'desktop')
-  await activate(ui, 'tab-dials')
+  await openCard(ui, 'dials')
   for (const preset of ['Balanced', 'Quick', 'Deep work', 'Autopilot']) {
     await activate(ui, `preset-${preset}`)
     await show(ui, `media-dials-${preset.toLowerCase().replace(' ', '-')}`)
@@ -61,11 +61,11 @@ test('media: the rail, from a reply to an answer Autopilot gave', { options: { a
   }
   await show(band, 'media-rail-1')
   await clock.advance(30_000)
-  await point('cache', null)
+  await point('sources', null)
   await show(band, 'media-rail-2')
-  await point('tokens', 'cache')
+  await point('worktree', 'sources')
   await show(band, 'media-rail-3')
-  await point(null, 'tokens')
+  await point(null, 'worktree')
   const pending = $.tool.call({ tool: 'AskUserQuestion', questions: [{ question: 'Which port?', header: 'Port', multiSelect: false, options: [{ label: '4517 (Recommended)', description: '' }, { label: '8080', description: '' }] }] } as never)
   await clock.advance(MINUTE)
   await point('dials', null)

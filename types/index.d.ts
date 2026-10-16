@@ -70,7 +70,8 @@ export type ContextDraft = { input: string }
 declare module 'claude-code' {
   interface PluginState {
     'fishstack': {
-      tab: Tab
+      // Which card of the pane is open; null with all of them closed.
+      tab: Tab | null
       worktree: Worktree
       slots: Slot[]
       poolNote: string
@@ -86,6 +87,7 @@ declare module 'claude-code' {
       lastReplyAt: number | null
       tokenTotals: { input: number; output: number; cacheRead?: number; cacheWrite?: number } | null
       isStepsShown: boolean
+      isSlotsShown: boolean
       isHeadStartPrompted: boolean
       // A terminal session in the main checkout was asked where it works:
       // once per session, so a reload does not ask again.

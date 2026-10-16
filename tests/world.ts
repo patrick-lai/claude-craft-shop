@@ -400,6 +400,20 @@ export async function activate(ui: Pressable, key: string): Promise<void> {
   await ui.pointer({ type: 'down', x: 1, y: 0, button: 'left', in: key })
 }
 
+// Opens the pane's card `id` as a person would, pressing its head, unless it
+// is open already: a second press on an open card's head closes it.
+export async function openCard(ui: Pressable & Pick<Drawing, 'find'>, id: 'worktree' | 'dials' | 'context'): Promise<void> {
+  if ((await ui.find({ key: `body-${id}` })) !== undefined) return
+  await activate(ui, `tab-${id}`)
+}
+
+// Shows the worktree card's pool, its slots and + Add slot, unless shown.
+export async function openPool(ui: Pressable & Pick<Drawing, 'find'>): Promise<void> {
+  await openCard(ui, 'worktree')
+  if ((await ui.find({ key: 'pool-add' })) !== undefined) return
+  await ui.press({ key: 'slots-toggle' })
+}
+
 // The keys of the controls, Buttons or drawn, whose key matches.
 export async function keysOf(ui: Pick<Drawing, 'findAll'>, pattern: RegExp): Promise<string[]> {
   const found = [...(await ui.findAll({ type: 'Button' })), ...(await ui.findAll({ type: 'Client' }))]

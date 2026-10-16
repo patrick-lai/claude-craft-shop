@@ -8,8 +8,9 @@ import type { EngineInterface, On } from 'claude-code'
 
 import type { ContextView, Folder, Source, SourceMode, Tab } from '../types'
 import { switchArt } from './art'
-import { card, drawnButton, folderArt, glyph, GLYPH_COLOR, isRich, svg, tickMeter, track, useSwitch } from './kit'
+import { drawnButton, glyph, GLYPH_COLOR, isRich, svg, switchRow } from './kit'
 import { setSetting, settingsHome } from './settings'
+import { paneHeads } from './state'
 import { bar, frame, PANE, resolveUi, tokens } from './ui'
 import type { Ui } from './ui'
 
@@ -26,7 +27,7 @@ const folders = atom({ plugin: 'fishstack', key: 'folders' } as const, [])
 const isTurnRunning = atom({ plugin: 'fishstack', key: 'isTurnRunning' } as const, false)
 const isWindowShown = atom({ plugin: 'fishstack', key: 'isWindowShown' } as const, false)
 const sources = atom({ plugin: 'fishstack', key: 'sources' } as const, [])
-const tab = atom({ plugin: 'fishstack', key: 'tab' } as const, 'worktree')
+const tab = atom({ plugin: 'fishstack', key: 'tab' } as const, null)
 const isClientDown = atom({ plugin: 'fishstack', key: 'isClientDown' } as const, false)
 const isContextOn = atom({ plugin: 'fishstack', key: 'isContextOn' } as const, true)
 
@@ -424,112 +425,79 @@ export function registerContext(on: On): void {
     const status = await read($, contextStatus)
     const columns = e.props.bodyColumns
     const go = (change: Partial<ContextView>) => () => void setView($, change)
+    const select = (id: Tab | null) => void update($, tab, () => id)
+    const heads = await paneHeads($)
+    const isOn = await read($, isContextOn)
+
+    const setting = switchRow(ui, 'context-on', 'Use context', isOn, isOn ? 'Sources that are on go into every request.' : 'No source reaches the agent.', turned => void setContextOn($, turned))
+    if (!isOn) return frame(ui, 'context', columns, select, setting, heads)
 
     const sharedList = list.filter(one => one.mode !== 'off')
-    const sharedChars = sharedList.reduce((sum, one) => sum + one.text.length, 0)
-    const sharedTokens = approxTokens(sharedChars)
+    const sharedTokens = approxTokens(sharedList.reduce((sum, one) => sum + one.text.length, 0))
     const isOver = sharedTokens > TOKEN_BUDGET
     const loose = list.filter(one => one.folderId === null)
     const isThin = (source: Source) => source.kind === 'link' && source.text.length < 200
+    // What a row's title may take: the card less its switch, mark and Strict.
+    const room = Math.max(12, columns - 24)
 
-    // On/Off is the main switch, drawn the same for a source and a folder.
     const onOff = (key: string, state: 'on' | 'off' | 'some', onPress: () => void) =>
       drawnButton(ui, key, switchArt(state), state === 'on' ? 'On' : state === 'some' ? 'Some on' : 'Off', 36, 22, onPress) ?? (
-      <Button key={key} onPress={onPress}>
-        {state === 'on' ? (
-          <Text color="success" bold>
-            ● On
-          </Text>
-        ) : state === 'some' ? (
-          <Text color="warning" bold>
-            ◐ Some on
-          </Text>
-        ) : (
-          <Text dimColor>○ Off</Text>
-        )}
-      </Button>
-    )
+        <Button key={key} plain onPress={onPress}>
+          {state === 'on' ? <Text color="success">●</Text> : state === 'some' ? <Text color="warning">◐</Text> : <Text dimColor>○</Text>}
+        </Button>
+      )
 
     const sourceRow = (source: Source, isNested: boolean) => {
-      const isOn = source.mode !== 'off'
+      const isSourceOn = source.mode !== 'off'
       const isOpen = view.openId === source.id
-      const parts = [
-              <Box justifyContent="space-between" alignItems="center" gap={1}>
-                <Box gap={1} alignItems="center" flexShrink={1}>
-                  {onOff(`toggle-${source.id}`, isOn ? 'on' : 'off', () => void setMode($, source.id, isOn ? 'off' : 'guidance'))}
-                  {rich ? svg(ui, glyph(source.kind), source.kind, 18, 18) : <Text color={GLYPH_COLOR[source.kind]}>{KIND_MARK[source.kind]}</Text>}
-                  <Button key={`open-${source.id}`} plain onPress={go({ openId: isOpen ? null : source.id, isEditingText: false })}>
-                    <Text color="suggestion" bold>
-                      {isOpen ? '▾ ' : '▸ '}
-                    </Text>
-                    <Text bold dimColor={!isOn}>
-                      {shorten(source.title, Math.max(20, columns - (isNested ? 52 : 46)))}
-                    </Text>
-                  </Button>
-                </Box>
-                <Box gap={1} alignItems="center" flexShrink={0}>
-                  <Text dimColor>{facts(source).replace(/^\w+ · /, '')}</Text>
-                  {isThin(source) && <Text color="warning">may be empty</Text>}
-                  {isThin(source) && <Button key={`thin-refresh-${source.id}`} label="Refresh" dimColor onPress={() => void refresh($, source)} />}
-                  {isOn && (
-                    <Button
-                      key={`strict-${source.id}`}
-                      label="Strict"
-                      variant={source.mode === 'strict' ? 'primary' : undefined}
-                      dimColor={source.mode !== 'strict'}
-                      onPress={() => void setMode($, source.id, source.mode === 'strict' ? 'guidance' : 'strict')}
-                    />
-                  )}
-                </Box>
-              </Box>,
-              isOpen && (
-                <Box flexDirection="column" gap={1} marginTop={1}>
-                  {card(
-                    ui,
-                    `preview-${source.id}`,
-                    [
-                      source.kind === 'file' && /\.mdx?$/i.test(source.path ?? '') ? (
-                        <Markdown key={`text-${source.id}`} text={source.text.slice(0, 1_500)} />
-                      ) : (
-                        <Text wrap="wrap">{source.text.slice(0, 1_500) || 'No readable text.'}</Text>
-                      ),
-                      source.text.length > 1_500 && <Text dimColor>… {chars(source.text.length - 1_500)} more reach the agent</Text>,
-                    ],
-                    { tone: 'muted' },
-                  )}
-                  {view.isEditingText && source.kind === 'note' && Input !== undefined && (
-                    <Input key={`edit-text-${source.id}`} label="Text " value={source.text} submitLabel="save" autoFocus onSubmit={value => void editNote($, source.id, value)} />
-                  )}
-                  <Box gap={1} alignItems="center" flexWrap="wrap">
-                    {Input !== undefined && (
-                      <Box flexGrow={1}>
-                        <Input key={`rename-source-${source.id}`} label="Title " value={source.title} submitLabel="rename" onSubmit={value => void renameSource($, source.id, value)} />
-                      </Box>
-                    )}
-                  </Box>
-                  <Box gap={1} justifyContent="flex-end" alignItems="center">
-                    <Box flexGrow={1}>
-                      <Text dimColor>
-                        {!isOn ? 'Off: hidden from the agent.' : source.mode === 'strict' ? 'Strict: the agent must follow it.' : 'On: the agent weighs it.'}
-                      </Text>
-                    </Box>
-                    {source.kind === 'note' && Input !== undefined && (
-                      <Button key={`edit-text-start-${source.id}`} label={view.isEditingText ? 'Done' : 'Edit text'} dimColor onPress={go({ isEditingText: !view.isEditingText })} />
-                    )}
-                    {source.kind !== 'note' && <Button key={`refresh-${source.id}`} label="Refresh" dimColor onPress={() => void refresh($, source)} />}
-                    <Button key={`remove-${source.id}`} onPress={() => void removeSource($, source.id)}>
-                      <Text color="error">Delete</Text>
-                    </Button>
-                  </Box>
-                </Box>
-              ),
-            ]
-      return isNested ? (
-        <Box key={`row-${source.id}`} flexDirection="column" marginTop={1} paddingLeft={2}>
-          {parts}
+      return (
+        <Box key={`row-${source.id}`} flexDirection="column" paddingLeft={isNested ? 2 : 0}>
+          <Box justifyContent="space-between" alignItems="center" gap={1}>
+            <Box gap={1} alignItems="center" flexShrink={1}>
+              {onOff(`toggle-${source.id}`, isSourceOn ? 'on' : 'off', () => void setMode($, source.id, isSourceOn ? 'off' : 'guidance'))}
+              {rich ? svg(ui, glyph(source.kind), source.kind, 18, 18) : <Text color={GLYPH_COLOR[source.kind]}>{KIND_MARK[source.kind]}</Text>}
+              <Button key={`open-${source.id}`} plain onPress={go({ openId: isOpen ? null : source.id, isEditingText: false })}>
+                <Text dimColor={!isSourceOn}>{shorten(source.title, room - (isNested ? 2 : 0))}</Text>
+              </Button>
+            </Box>
+            {isSourceOn && (
+              <Button
+                key={`strict-${source.id}`}
+                label="Strict"
+                variant={source.mode === 'strict' ? 'primary' : undefined}
+                dimColor={source.mode !== 'strict'}
+                onPress={() => void setMode($, source.id, source.mode === 'strict' ? 'guidance' : 'strict')}
+              />
+            )}
+          </Box>
+          {isOpen && (
+            <Box flexDirection="column" gap={rich ? 1 : 0} paddingLeft={2} marginTop={rich ? 1 : 0}>
+              <Text dimColor wrap="truncate-end">
+                {facts(source)}
+                {isThin(source) ? ' · may be empty' : ''}
+              </Text>
+              {source.kind === 'file' && /\.mdx?$/i.test(source.path ?? '') ? (
+                <Markdown key={`text-${source.id}`} text={source.text.slice(0, 600)} />
+              ) : (
+                <Text wrap="wrap">{source.text.slice(0, 600) || 'No readable text.'}</Text>
+              )}
+              {source.text.length > 600 && <Text dimColor>… {chars(source.text.length - 600)} more reach the agent</Text>}
+              {view.isEditingText && source.kind === 'note' && Input !== undefined && (
+                <Input key={`edit-text-${source.id}`} label="Text " value={source.text} submitLabel="save" autoFocus onSubmit={value => void editNote($, source.id, value)} />
+              )}
+              {Input !== undefined && <Input key={`rename-source-${source.id}`} label="Title " value={source.title} submitLabel="rename" onSubmit={value => void renameSource($, source.id, value)} />}
+              <Box gap={1} flexWrap="wrap">
+                {source.kind === 'note' && Input !== undefined && (
+                  <Button key={`edit-text-start-${source.id}`} label={view.isEditingText ? 'Done' : 'Edit text'} dimColor onPress={go({ isEditingText: !view.isEditingText })} />
+                )}
+                {source.kind !== 'note' && <Button key={`refresh-${source.id}`} label="Refresh" dimColor onPress={() => void refresh($, source)} />}
+                <Button key={`remove-${source.id}`} onPress={() => void removeSource($, source.id)}>
+                  <Text color="error">Delete</Text>
+                </Button>
+              </Box>
+            </Box>
+          )}
         </Box>
-      ) : (
-        card(ui, `row-card-${source.id}`, parts, { tone: source.mode === 'strict' ? 'accent' : isOn ? 'plain' : 'muted' })
       )
     }
 
@@ -538,162 +506,92 @@ export function registerContext(on: On): void {
       const onCount = members.filter(one => one.mode !== 'off').length
       const state = members.length === 0 || onCount === 0 ? 'off' : onCount === members.length ? 'on' : 'some'
       const isOpen = view.openFolders.includes(folder.id)
-      return card(
-        ui,
-        `folder-card-${folder.id}`,
-        [
+      return (
+        <Box key={`folder-card-${folder.id}`} flexDirection="column">
           <Box justifyContent="space-between" alignItems="center" gap={1}>
             <Box gap={1} alignItems="center" flexShrink={1}>
               {members.length > 0 && onOff(`folder-toggle-${folder.id}`, state, () => void setFolderOn($, folder.id, state !== 'on'))}
-              {rich && svg(ui, glyph('folder'), 'folder', 18, 18)}
+              {rich ? svg(ui, glyph('folder'), 'folder', 18, 18) : <Text color="warning">▣</Text>}
               <Button key={`fold-${folder.id}`} plain onPress={() => void toggleFolderOpen($, folder.id)}>
-                <Text color="suggestion" bold>
-                  {isOpen ? '▾ ' : '▸ '}
-                </Text>
-                <Text bold>{folder.name}</Text>
-                <Text dimColor>
-                  {members.length === 0 ? '  empty' : `  ${members.length} ${members.length === 1 ? 'source' : 'sources'} · ${onCount} on`}
-                </Text>
+                <Text bold>{shorten(folder.name, room - 8)}</Text>
+                <Text dimColor> {members.length === 0 ? 'empty' : `${onCount}/${members.length}`} {isOpen ? '⌄' : '›'}</Text>
               </Button>
             </Box>
-            <Box gap={1} alignItems="center" flexShrink={0}>
-              <Button key={`folder-delete-${folder.id}`} dimColor onPress={go({ deletingFolder: folder.id })}>
-                Remove
-              </Button>
-            </Box>
-          </Box>,
-          view.deletingFolder === folder.id && (
-            <Box flexDirection="column" marginTop={1} gap={1}>
-              <Text>
-                Remove <Text bold>{folder.name}</Text> and its {members.length} sources? <Text dimColor>The files on disk stay as they are.</Text>
-              </Text>
-              <Box gap={1} justifyContent="flex-end" flexWrap="wrap">
+            <Button key={`folder-delete-${folder.id}`} label="Remove" dimColor onPress={go({ deletingFolder: folder.id })} />
+          </Box>
+          {view.deletingFolder === folder.id && (
+            <Box flexDirection="column">
+              <Text dimColor>Remove {folder.name} and its {members.length} sources? The files stay on disk.</Text>
+              <Box gap={1} justifyContent="flex-end">
                 <Button key="delete-cancel" label="Cancel" dimColor onPress={go({ deletingFolder: null })} />
                 <Button key="delete-folder" label="Remove" variant="primary" onPress={() => void deleteFolder($, folder.id)} />
               </Box>
             </Box>
-          ),
-          ...(isOpen ? members.map(source => sourceRow(source, true)) : []),
-        ],
-        { tone: view.deletingFolder === folder.id ? 'danger' : state === 'off' ? 'muted' : 'plain' },
+          )}
+          {isOpen && members.map(source => sourceRow(source, true))}
+        </Box>
       )
     }
 
     const isWarning = /^(Could|That link|No text|Skipped)/.test(status)
     const adder = (
-      <Box flexDirection="column" gap={1}>
-        <Box justifyContent="space-between" alignItems="center" gap={1} flexWrap="wrap">
-          <Box gap={1} alignItems="center" flexWrap="wrap">
-            <Button
-              key="pick-files"
-              label={view.picking === 'file' ? 'Choosing…' : 'Choose files…'}
-              variant={view.picking === null ? 'primary' : undefined}
-              dimColor={view.picking !== null}
-              onPress={() => void choose($, 'file')}
-            />
-            <Button
-              key="pick-folder"
-              label={view.picking === 'folder' ? 'Choosing…' : 'Choose folder…'}
-              dimColor={view.picking !== null}
-              onPress={() => void choose($, 'folder')}
-            />
-          </Box>
-          {status !== '' && (
-            <Text color={isWarning ? 'warning' : undefined} dimColor={!isWarning} wrap="truncate-end">
-              {status}
-            </Text>
-          )}
+      <Box key="adder" flexDirection="column" gap={rich ? 1 : 0}>
+        <Box gap={1} alignItems="center" flexWrap="wrap">
+          <Button key="pick-files" label={view.picking === 'file' ? 'Choosing…' : 'Add files…'} dimColor={view.picking !== null} onPress={() => void choose($, 'file')} />
+          <Button key="pick-folder" label={view.picking === 'folder' ? 'Choosing…' : 'Add folder…'} dimColor={view.picking !== null} onPress={() => void choose($, 'folder')} />
         </Box>
         {Input !== undefined && (
           <Input
             key="add-input"
-            placeholder="Or paste a link, or write a note"
+            placeholder="Paste a link or write a note"
             value={draft.input}
             submitLabel="add"
             onInput={value => void update($, contextDraft, now => ({ ...now, input: value }))}
             onSubmit={value => void addFromInput($, value)}
           />
         )}
-      </Box>
-    )
-
-    const meter = (
-      <Box justifyContent="space-between" alignItems="center" gap={1} flexWrap="wrap">
-        <Box gap={1} alignItems="center">
-          {rich ? (
-            svg(ui, tickMeter(list.length === 0 ? 0 : sharedList.length / list.length, 160), `${sharedList.length} of ${list.length} on`, 160, 10)
-          ) : (
-            <Text color="success">{bar(list.length === 0 ? 0 : sharedList.length / list.length, 16)}</Text>
-          )}
-          <Text>
-            <Text bold>{sharedList.length}</Text>
-            <Text dimColor> of </Text>
-            <Text bold>{list.length}</Text>
-            <Text dimColor> sources on</Text>
+        {status !== '' && (
+          <Text color={isWarning ? 'warning' : undefined} dimColor={!isWarning} wrap="truncate-end">
+            {status}
           </Text>
-        </Box>
-        <Text color={isOver ? 'error' : undefined} dimColor={!isOver}>
-          about {tokens(sharedTokens)} of {tokens(TOKEN_BUDGET)} tokens{isOver ? ' · over budget, switch some off' : ''}
-        </Text>
+        )}
       </Box>
     )
 
-    const isOn = await read($, isContextOn)
     const isEmpty = list.length === 0 && groups.length === 0
     return frame(
       ui,
       'context',
       columns,
-      (id: Tab) => void update($, tab, () => id),
+      select,
       <Box flexDirection="column" gap={1}>
-        <Box justifyContent="space-between" alignItems="flex-start" gap={1}>
-          <Box flexDirection="column" flexShrink={1}>
-            <Text bold>Context the agent reads</Text>
-            <Text dimColor>
-              {isOn
-                ? 'Sources that are On go into every request. A folder you choose comes in as a group you can switch at once.'
-                : 'Off: no source reaches the agent, whatever its own switch says. Your library is kept for when you turn it back on.'}
-            </Text>
-          </Box>
-          {useSwitch(ui, 'context-on', 'Use context', isOn, turned => void setContextOn($, turned))}
-        </Box>
+        {setting}
         {adder}
-        {!isEmpty && meter}
         {isEmpty ? (
-          card(
-            ui,
-            'empty',
-            [
-              <Box gap={2} alignItems="center">
-                {svg(ui, folderArt(0, 0, 120, 70), 'An empty folder', 120, 70)}
-                <Box flexDirection="column" flexShrink={1}>
-                  <Text bold>No sources yet</Text>
-                  <Text dimColor>Choose files or a folder from your Mac, paste a link to your API docs, or write a note like "Amounts are integer cents".</Text>
-                </Box>
-              </Box>,
-            ],
-            { tone: 'muted' },
-          )
+          <Text dimColor>No sources yet. Try a note like "Amounts are integer cents".</Text>
         ) : (
-          <Box flexDirection="column" gap={rich ? 1 : 0}>
+          <Box flexDirection="column">
+            <Text color={isOver ? 'error' : undefined} dimColor={!isOver}>
+              {sharedList.length} of {list.length} on · about {tokens(sharedTokens)} tokens{isOver ? ', over budget' : ''}
+            </Text>
             {groups.map(folderBlock)}
             {loose.map(source => sourceRow(source, false))}
           </Box>
         )}
-        {!isEmpty && (await drawWindow($, ui, columns))}
+        {!isEmpty && (await drawWindow($, ui))}
       </Box>,
+      heads,
     )
   })
 }
 
-const FILL_HEX: Record<string, string> = { success: '#3fb6a8', warning: '#d6a24a', error: '#e5534b' }
 
 const KIND_MARK: Record<Source['kind'], string> = { note: '¶', link: '↗', file: '▢' }
 
-// The live context window, folded to one line under the library.
-async function drawWindow($: $, ui: Ui, columns: number) {
+// The live context window, one line at the foot of the card.
+async function drawWindow($: $, ui: Ui) {
   const { Box, Text, Button } = ui
-  // Reading isTurnRunning redraws the tab as each turn starts and ends, so
+  // Reading isTurnRunning redraws the card as each turn starts and ends, so
   // the window figures below are read fresh then.
   const isRunning = await read($, isTurnRunning)
   const isShown = await read($, isWindowShown)
@@ -703,46 +601,31 @@ async function drawWindow($: $, ui: Ui, columns: number) {
   const window = breakdown?.rawMaxTokens ?? usage.context.window
   const percent = breakdown?.percentage ?? usage.context.percent ?? 0
   const categories = (breakdown?.categories ?? []).filter(one => one.kind === 'used' && one.tokens > 0)
-  const last = breakdown?.apiUsage ?? null
-  const barWidth = Math.max(10, Math.min(30, columns - 50))
-  return card(
-    ui,
-    'window',
-    [
+  return (
+    <Box key="window" flexDirection="column">
       <Box justifyContent="space-between" alignItems="center" gap={1}>
-        <Box gap={1} alignItems="center" flexShrink={1}>
-          <Text dimColor>Context window</Text>
-          {isRich(ui) ? (
-            svg(ui, track(percent / 100, Math.max(120, (columns - 52) * 8), FILL_HEX[fillColor(percent)]), `${percent}% of the context window`, Math.max(120, (columns - 52) * 8), 6)
-          ) : (
-            <Text color={fillColor(percent)}>{bar(percent / 100, barWidth)}</Text>
-          )}
-          <Text>
-            <Text bold>{percent}%</Text>
-            <Text dimColor> · {tokens(used)} of {tokens(window)}</Text>
+        <Text wrap="truncate-end">
+          <Text dimColor>Window </Text>
+          <Text color={fillColor(percent)} bold>
+            {percent}%
           </Text>
-        </Box>
-        <Box gap={1}>
+          <Text dimColor>
+            {' '}
+            · {tokens(used)} of {tokens(window)}
+          </Text>
+        </Text>
+        <Box gap={1} flexShrink={0}>
           <Button key="window-details" label={isShown ? 'Hide' : 'Details'} dimColor onPress={() => void update($, isWindowShown, now => !now)} />
           {!isRunning && <Button key="usage-compact" label="Compact" dimColor onPress={() => void $.session.compact({})} />}
         </Box>
-      </Box>,
-      ...(isShown
-        ? categories.map(category => (
-            <Text>
-              <Text dimColor>{category.name.slice(0, 18).padEnd(19)}</Text>
-              {tokens(category.tokens).padStart(6)} <Text color="promptBorder">{bar(category.tokens / Math.max(1, used), 12)}</Text>
-            </Text>
-          ))
-        : []),
-      isShown && last !== null && (
-        <Text dimColor>
-          Last response: in {tokens(last.input_tokens)} · out {tokens(last.output_tokens)} · cache read {tokens(last.cache_read_input_tokens)} · cache write{' '}
-          {tokens(last.cache_creation_input_tokens)}
-          {usage.cost === undefined ? '' : ` · session $${usage.cost.usd.toFixed(2)}`}
-        </Text>
-      ),
-    ],
-    { tone: 'muted' },
+      </Box>
+      {isShown &&
+        categories.map(category => (
+          <Text>
+            <Text dimColor>{category.name.slice(0, 18).padEnd(19)}</Text>
+            {tokens(category.tokens).padStart(6)} <Text color="promptBorder">{bar(category.tokens / Math.max(1, used), 10)}</Text>
+          </Text>
+        ))}
+    </Box>
   )
 }

@@ -3,7 +3,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { activate, COMPOSE, mountBand, mountPane, startSession, world } from './world'
+import { activate, COMPOSE, mountBand, mountPane, openCard, startSession, world } from './world'
 
 const SOLO = { foresight: 1, crew: 1, tenacity: 2, autonomy: 4, proof: 2, voice: 2 }
 
@@ -22,16 +22,16 @@ test('Use dials off: no working style, Solo no longer refuses subagents, the age
   expect((await $.tool.call({ tool: 'Agent', prompt: 'look around' } as never)).deny).toContain('Solo')
 
   const ui = await mountPane($, 'terminal')
-  await activate(ui, 'tab-dials')
+  await openCard(ui, 'dials')
   await activate(ui, 'dials-on-off')
-  expect(await ui.find({ text: /Off: the agent gets no working style/ })).toBeDefined()
+  expect(await ui.find({ text: 'The agent gets no working style.' })).toBeDefined()
   expect(await ui.find({ type: 'Button', key: 'brief-toggle' })).toBeUndefined()
   expect(await sections($)).not.toContain('fishstack:dials')
   expect(await told($)).toContain('The user turned the working style dials off')
   expect((await $.tool.call({ tool: 'Agent', prompt: 'look around' } as never)).deny).toBeUndefined()
 
   const terminal = await mountBand($, 'terminal')
-  expect((await terminal.find({ key: 'rail-dials' }))?.text).toContain('Dials off')
+  expect((await terminal.find({ key: 'rail-dials' }))?.text).toBe('◇ Off')
   const desktop = JSON.stringify(await (await mountBand($, 'desktop')).drawn())
   expect(desktop).toContain('>Off<')
   expect(desktop).toContain('Dials are off: the agent gets no working style')
@@ -42,23 +42,25 @@ test('Use dials off: no working style, Solo no longer refuses subagents, the age
   expect(await told($)).toContain('Crew (Solo)')
 })
 
-test('Use context off: no source reaches the agent, the agent is told, the rail says Context off; the library is kept', async ($, on) => {
+test('Use context off: no source reaches the agent, the agent is told, the rail says Off; the library is kept', async ($, on) => {
   world(on, { isRepo: false })
   await startSession($)
   const ui = await mountPane($, 'terminal')
-  await activate(ui, 'tab-context')
+  await openCard(ui, 'context')
   await ui.input({ key: 'add-input', text: 'Money is integer cents.' })
   expect(await sections($)).toContain('fishstack:context')
   await told($)
 
   await activate(ui, 'context-on-off')
-  expect(await ui.find({ text: /Off: no source reaches the agent/ })).toBeDefined()
+  expect(await ui.find({ text: 'No source reaches the agent.' })).toBeDefined()
   expect(await sections($)).not.toContain('fishstack:context')
   expect(await told($)).toContain('The user turned the shared project context off')
-  expect((await (await mountBand($, 'terminal')).find({ key: 'rail-sources' }))?.text).toContain('Context off')
-  // The note is still in the library, and back on it reaches the agent.
-  expect(await ui.find({ text: /Money is integer cents/ })).toBeDefined()
+  expect((await (await mountBand($, 'terminal')).find({ key: 'rail-sources' }))?.text).toBe('▤ Off')
+  // The card hides the library while off; the note is still in it, and
+  // back on it is listed and reaches the agent.
+  expect(await ui.find({ text: /Money is integer cents/ })).toBeUndefined()
   await activate(ui, 'context-on-on')
+  expect(await ui.find({ text: /Money is integer cents/ })).toBeDefined()
   expect(await told($)).toContain('Money is integer cents.')
 })
 
@@ -68,5 +70,6 @@ test('the switches are kept across sessions', async ($, on) => {
   expect(await sections($)).not.toContain('fishstack:dials')
   expect(await sections($)).not.toContain('fishstack:context')
   const rail = await mountBand($, 'terminal')
-  expect((await rail.find({ key: 'rail-dials' }))?.text).toContain('Dials off')
+  expect((await rail.find({ key: 'rail-dials' }))?.text).toBe('◇ Off')
+  expect((await rail.find({ key: 'rail-sources' }))?.text).toBe('▤ Off')
 })

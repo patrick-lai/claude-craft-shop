@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { activate, COMPOSE, mountPane, startSession, world } from './world'
+import { activate, COMPOSE, mountPane, openCard, startSession, world } from './world'
 
 async function dialsSection($: Engine) {
   const composed = await $.prompt.compose(COMPOSE)
@@ -12,7 +12,7 @@ test('dragging a dot on the desktop radar sets that dial, and the agent is told'
   world(on, { isRepo: false })
   await startSession($)
   const ui = await mountPane($, 'desktop')
-  await activate(ui, 'tab-dials')
+  await openCard(ui, 'dials')
   // The radar is 360 by 300 pixels; laid out at 45 by 15 cells, a cell is 8 by 20.
   await ui.resize({ columns: 45, rows: 15, in: 'radar-drag' })
 
@@ -22,7 +22,8 @@ test('dragging a dot on the desktop radar sets that dial, and the agent is told'
   await ui.pointer({ type: 'move', x: 33, y: 10, button: 'left', in: 'radar-drag' })
   await ui.pointer({ type: 'up', x: 33, y: 10, button: 'left', in: 'radar-drag' })
   expect(await dialsSection($)).toContain('Tenacity (Goal mode)')
-  expect(await ui.find({ text: /what the agent is told at/i })).toBeDefined()
+  // The dial dragged is the one selected: its row opens on what it does now.
+  expect(await ui.find({ text: /How hard it pushes to finish: Sets acceptance criteria/ })).toBeDefined()
 
   // Arrow keys move the focus to Autonomy and lower it.
   await ui.key({ key: 'right', in: 'radar-drag' })
@@ -36,7 +37,7 @@ test('the working style the model is told follows the dials', async ($, on) => {
   expect(await dialsSection($)).toContain('Foresight (Plan steps)')
 
   const ui = await mountPane($, 'terminal')
-  await activate(ui, 'tab-dials')
+  await openCard(ui, 'dials')
   await ui.press({ key: 'pip-foresight-5' })
   await ui.press({ key: 'pip-voice-1' })
   const section = await dialsSection($)
@@ -55,7 +56,7 @@ test('Crew set to Solo refuses subagents', async ($, on) => {
   expect((await $.tool.call(agent)).deny).toBeUndefined()
 
   const ui = await mountPane($, 'terminal')
-  await activate(ui, 'tab-dials')
+  await openCard(ui, 'dials')
   await ui.press({ key: 'pip-crew-1' })
   expect((await $.tool.call(agent)).deny).toContain('Solo')
 })
@@ -69,7 +70,7 @@ test('a dial changed mid-session reaches the model with the next prompt, once', 
   expect(await submit()).toBe('')
 
   const ui = await mountPane($, 'terminal')
-  await activate(ui, 'tab-dials')
+  await openCard(ui, 'dials')
   await ui.press({ key: 'pip-voice-5' })
   const told = await submit()
   expect(told).toContain('fishStack update')
@@ -87,7 +88,7 @@ test('a dial changed mid-turn reaches the agent before its next request, not onl
   expect(await batch()).toBe('')
 
   const ui = await mountPane($, 'terminal')
-  await activate(ui, 'tab-dials')
+  await openCard(ui, 'dials')
   await ui.press({ key: 'pip-voice-5' })
   // A subagent's batch does not take it: the main agent has not been told.
   expect(await batch('sub-1')).toBe('')

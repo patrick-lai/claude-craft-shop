@@ -25,11 +25,11 @@ If you run Claude Code all day, a few things keep getting in the way:
 - **You keep repeating yourself.** "Write a spec first." "Don't ask, just decide." "Run the tests." You type it every session.
 - **The agent forgets what matters.** API conventions, the design doc, the ticket: pasted in again and again.
 
-fishStack adds one pane with three tabs, and a status rail above the prompt. Each tab has a switch at the top (**Use worktrees**, **Use dials**, **Use context**), so you can turn any of them off and the rail shows it.
+fishStack adds one side panel of three cards, like the desktop app's own panel: each card names a feature on the left and says its state on the right (`fish/abcdef`, `Balanced`, `3 of 4 on`). Click a card to open it in place. Each card starts with its switch (**Use worktrees**, **Use dials**, **Use context**), so you can turn any of them off.
 
 Every setting is kept per repository: the switches, **Enforce**, the dials, **Ask each time** or **Always a worktree**, and the context library. A worktree shares its main checkout's settings; outside git, the folder has its own. A repository that hasn't set something yet starts from the value you had before settings were per repository.
 
-| Tab | What it does |
+| Card | What it does |
 | - | - |
 | **[Worktrees](#worktrees)** | A new session can move into a worktree of its own, already set up, typically in about three seconds. |
 | **[Dials](#dials)** | Six dials set how the agent plans, delegates, persists, asks, proves and talks. Some levels are enforced in code, not only asked for. |
@@ -58,7 +58,7 @@ npx -y fishstack-mod install
 npx -y fishstack-mod uninstall
 ```
 
-Restart Claude Code, then open the pane with **`/fs`** (or `/fishstack`). `/fs dials` goes straight to a tab. Keys <kbd>1</kbd>–<kbd>3</kbd> switch tabs.
+Restart Claude Code. Where the panel can dock (the desktop app, or a terminal in fullscreen mode at 110 columns or more) it opens on the right by itself. Anywhere else, a one-line status sits above the prompt, and **`/fs`** (or `/fishstack`) opens the panel. `/fs dials` opens a card directly. Keys <kbd>1</kbd>–<kbd>3</kbd> open and close the cards.
 
 fishStack is built and tested on macOS: copy-on-write cloning and the file pickers use macOS tools.
 
@@ -76,13 +76,13 @@ Plain `claude` in a main checkout doesn't say whether you want one, so fishStack
 | - | - |
 | **A worktree** | A branch of its own from the latest origin, read-only for the few seconds until it moves in |
 | **This main checkout** | It works right there, on whatever branch is checked out (the dialog names it), with full access |
-| **Always a worktree** | A worktree now, and for every new terminal session without asking. **New terminal sessions: Ask each time** in the tab brings the question back |
+| **Always a worktree** | A worktree now, and for every new terminal session without asking. **New terminal sessions: Ask each time** in the Worktree card brings the question back |
 
-The pool keeps warming while the question is open, so a worktree is still quick to take, and **Create worktree now** in the tab changes your mind later. Autopilot never answers this question for you. `claude --worktree` is an answer already, so it is not asked.
+The pool keeps warming while the question is open, so a worktree is still quick to take, and **Create worktree now** in the Worktree card changes your mind later. Autopilot never answers this question for you. `claude --worktree` is an answer already, so it is not asked.
 
 It's fast because the work happens before you need it:
 
-- **A warm pool.** fishStack keeps a pool of slots in the background (three to start, with one always free), each checked out, with dependencies in place and your setup command already run. A new session takes one and moves in. In the run above that took about three seconds from launch. The tab lists every slot: **+ Add slot** grows the pool, and a new slot shows up straight away as *setting up* with the step it is on, until it's ready. **Remove** (a second press confirms) takes a free slot out, and the pool stays that size from then on (it still keeps one free for the next session).
+- **A warm pool.** fishStack keeps a pool of slots in the background (three to start, with one always free), each checked out, with dependencies in place and your setup command already run. A new session takes one and moves in. In the run above that took about three seconds from launch. The card's **Pool** line opens the list of every slot: **+ Add slot** grows the pool, and a new slot shows up straight away as *setting up* with the step it is on, until it's ready. **Remove** (a second press confirms) takes a free slot out, and the pool stays that size from then on (it still keeps one free for the next session).
 - **A head start.** While the slot is prepared, the agent can already read, search and plan. Anything that writes waits until it has moved in.
 - **No copying.** `node_modules` is cloned copy-on-write (APFS), so a slot costs almost no disk until something changes.
 - **Nothing lost.** A slot is reused once its session ends. Anything left uncommitted is saved under `refs/fish/backup/` first.
@@ -119,7 +119,7 @@ The desktop runs the hook only for a session a person starts, so a fork or a ses
 3. **Seed.** Each missing `node_modules` (up to six folders deep) is cloned with `cp -c` into a staging folder, then renamed into place. The source is an idle sibling slot with the same lockfiles, or else the main checkout. Then `setupCommand` runs, unless this slot already ran it with these lockfiles.
 4. **Move in.** The session enters the slot (`EnterWorktree`) as soon as it is ready, even mid-turn. The agent always knows where it is: a head start that began after the prompt (an app attaching late) is told after its next tool call, and so is a move it was not warned of. Slots live under the repository's `.claude/worktrees/`, where Claude Code keeps its own, so the move needs no confirming. Set `worktreeRoot` elsewhere and Claude Code asks you to confirm each move.
 
-A slot being made is marked in the store, so every session lists it as setting up and none claims it half made. Removing a slot leases it first, saves anything uncommitted under `refs/fish/backup/`, then moves it out of the pool and deletes it; its branch stays. The pool stops warming when free disk drops under `minFreeGb` (20 GB), and the tab says why. During the head start, the guard refuses Edit, Write, MultiEdit, NotebookEdit and ExitPlanMode. It also refuses any shell command that is not a known read (`ls`, `cat`, `rg`, read-only `git`, `sed -n` and the like). A redirect anywhere but `/dev/null` counts as a write.
+A slot being made is marked in the store, so every session lists it as setting up and none claims it half made. Removing a slot leases it first, saves anything uncommitted under `refs/fish/backup/`, then moves it out of the pool and deletes it; its branch stays. The pool stops warming when free disk drops under `minFreeGb` (20 GB), and the card says why. During the head start, the guard refuses Edit, Write, MultiEdit, NotebookEdit and ExitPlanMode. It also refuses any shell command that is not a known read (`ls`, `cat`, `rg`, read-only `git`, `sed -n` and the like). A redirect anywhere but `/dev/null` counts as a write.
 </details>
 
 ## Dials
@@ -174,7 +174,7 @@ Autopilot is the top Autonomy level: the agent works as if you're away. It decid
 
 If it still asks you something and nobody answers, the question isn't left hanging overnight. After 15 minutes (`autoAnswerMinutes`), Autopilot picks the option marked *(Recommended)*, or the first one. The agent is told that no person chose, and carries on.
 
-While Autopilot waits, the dials pill on the rail turns amber with a ring that runs down, and its tooltip says what it will pick. Once it has answered, the pill turns green with a check until you type again. Answer yourself, or lower the dial, and nothing is picked.
+While Autopilot waits, the Dials card says **Answers in N min** in amber, and a line under the question says what it will pick. Answer yourself, or lower the dial, and nothing is picked.
 
 ## Context
 
@@ -182,7 +182,7 @@ While Autopilot waits, the dials pill on the rail turns amber with a ring that r
   <img src="docs/media/context.gif" width="100%" alt="Real Claude Code: a note added in the Context tab and marked Strict, then the agent names a new field in snake_case because of it">
 </p>
 
-Add the things the agent should always know (**Use context** off holds them all back at once): a note, a link (fetched as text), a file, or a whole folder from **Choose folder…**. Each source has an **On/Off** switch. A **Strict** source is binding: if the code disagrees, the agent has to say so. A meter keeps the total near a 12k-token budget, and a footer shows how full the context window is.
+Add the things the agent should always know (**Use context** off holds them all back at once): a note, a link (fetched as text), a file, or a whole folder from **Add folder…**. Each source has an **On/Off** switch. A **Strict** source is binding: if the code disagrees, the agent has to say so. A line keeps the total near a 12k-token budget, and the card's last line shows how full the context window is.
 
 Libraries are kept per repository and reach the agent as a **Project context** section, every request.
 
@@ -190,20 +190,15 @@ Libraries are kept per repository and reach the agent as a **Project context** s
   <img src="docs/media/context-desktop.png" width="760" alt="The Context tab in the desktop app: a folder group and notes, each with its switch, the token meter and the context window">
 </p>
 
-## The rail
+## The status line
 
-The rail is one row of pills above the prompt, and it stays one row at any window width. In the desktop app, hover a pill for details (nothing shifts) and click it to open its tab.
+Where the panel can't dock (a narrow terminal, or one not in fullscreen mode) and wherever it is closed, one line above the prompt says the same three things as the cards, and each part opens its card:
 
-| Pill | Shows |
-| - | - |
-| **Mark** | Opens fishStack. |
-| **Cache** | The prompt cache. Five bars run down over the five minutes after a reply. While any are lit, your next message reuses the cache, so it's faster and cheaper. Hover for the hit rate: the last reply's and the whole session's share of input read from the cache, from the token counts Claude reports. |
-| **Cost** | Claude Code's own `/cost` total at API list prices, cache reads and writes included. It isn't your plan's bill. Tokens in and out on hover. |
-| **Dials** | The preset, or Off. Amber while Autopilot waits to answer for you, green once it has. |
-| **Context** | How many sources are on, or Off. |
-| **Worktree** | The branch this session works on. |
+```
+≋ fishStack  ⎇ fish/abcdef  ◇ Balanced  ▤ 3 of 4 on  /fs
+```
 
-In the terminal the rail is plain text, and the same items open the same tabs.
+While a worktree is being made it says **Preparing…**, a failed one says **Failed**, and Autopilot waiting on a question says **Answers in N min**. Beside an open docked panel the line goes away.
 
 ## Options
 

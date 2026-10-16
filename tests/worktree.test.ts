@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { activate, mountBand, PANE_PROPS, REPO, startSession, world } from './world'
+import { activate, mountBand, openCard, PANE_PROPS, REPO, startSession, world } from './world'
 
 const EDIT = { tool: 'Edit', file_path: '/repo/a.ts', old_string: 'a', new_string: 'b' } as const
 
@@ -162,7 +162,7 @@ test("a desktop session in the main checkout stays there: the desktop's worktree
 
   // Asked for by name, it is made all the same.
   const ui = await $.ui.mount({ plugin: 'fishstack', surface: 'desktop', component: 'Pane', requestId: 'fishstack', props: PANE_PROPS })
-  await activate(ui, 'tab-worktree')
+  await openCard(ui, 'worktree')
   await activate(ui, 'worktree-create')
   await clock.advance(1)
   expect(toolCalls).toContain('EnterWorktree')
@@ -197,10 +197,11 @@ test('Perm worktree is off by default: no slot and no read-only guard', async ($
   expect(toolCalls).not.toContain('EnterWorktree')
 
   const ui = await $.ui.mount({ plugin: 'fishstack', surface: 'desktop', component: 'Pane', requestId: 'fishstack', props: PANE_PROPS })
-  await activate(ui, 'tab-worktree')
-  expect(await ui.find({ text: /Off: fishStack leaves worktrees to Claude Code/ })).toBeDefined()
+  await openCard(ui, 'worktree')
+  expect(await ui.find({ text: 'Sessions work in the main checkout.' })).toBeDefined()
   await activate(ui, 'auto-worktree')
-  expect(await ui.find({ text: /On: a new terminal session in a main checkout asks/ })).toBeDefined()
+  expect(await ui.find({ text: 'New sessions get a worktree of their own.' })).toBeDefined()
+  expect((await ui.find({ key: 'terminal-worktree-ask' }))?.props.variant).toBe('primary')
 })
 
 test("Claude Code's own worktree creation gets a slot, read-only until it is seeded", { options: { autoWorktree: true, setupCommand: '' } }, async ($, on) => {
@@ -240,8 +241,8 @@ for (const where of ['This main checkout', 'dismissed']) {
     expect(toolCalls).not.toContain('EnterWorktree')
 
     const ui = await $.ui.mount({ plugin: 'fishstack', surface: 'desktop', component: 'Pane', requestId: 'fishstack', props: PANE_PROPS })
-    await activate(ui, 'tab-worktree')
-    expect(await ui.find({ text: /This session works in the main checkout/ })).toBeDefined()
+    await openCard(ui, 'worktree')
+    expect(await ui.find({ text: /This session: main checkout/ })).toBeDefined()
     await activate(ui, 'worktree-create')
     await clock.advance(1)
     expect(toolCalls).toContain('EnterWorktree')
@@ -303,8 +304,8 @@ test('"Always a worktree" takes one now and for every new terminal session, unti
   expect(saved[`terminalWorktree:${REPO}`]).toBe('always')
 
   const ui = await $.ui.mount({ plugin: 'fishstack', surface: 'desktop', component: 'Pane', requestId: 'fishstack', props: PANE_PROPS })
-  await activate(ui, 'tab-worktree')
-  expect(await ui.find({ text: /On: a new terminal session in a main checkout takes a lasting slot/ })).toBeDefined()
+  await openCard(ui, 'worktree')
+  expect((await ui.find({ key: 'terminal-worktree-always' }))?.props.variant).toBe('primary')
   await activate(ui, 'terminal-worktree-ask')
   expect(saved[`terminalWorktree:${REPO}`]).toBe('ask')
 })

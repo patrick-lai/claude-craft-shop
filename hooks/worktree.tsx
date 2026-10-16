@@ -948,6 +948,12 @@ const PHASE: Record<WorktreePhase, { label: string; color: string }> = {
   failed: { label: 'Failed (read-only)', color: 'error' },
 }
 
+// A pane opened unasked is a sidebar only where the surface docks one, which
+// a render's viewport says and session.start does not; the last render of
+// the band says whether this surface does.
+let hasAutoOpened = false
+let isDocking = false
+
 // Claims a slot once per load, for the first person at the session: a REPL
 // at session.start, or the desktop app or an editor attaching (they run the
 // session headless, so its session.start says no one is at the prompt).
@@ -1302,6 +1308,10 @@ export function registerWorktree(on: On, options: PluginOptions): void {
   on('session.attach', async ($, e, next) => {
     const attached = await next(e)
     if (e.surface === 'desktop' || e.surface === 'vscode') await startWorktree($, options, await $.session.cwd(), { isDesktop: e.surface === 'desktop' })
+    if (e.viewport?.isFullscreen === true && !hasAutoOpened) {
+      hasAutoOpened = true
+      $.clock.after(0, () => void $.ui.open({ id: PANE, title: PANE_TITLE, columns: PANE_COLUMNS }))
+    }
     return attached
   })
 
@@ -1402,6 +1412,14 @@ export function registerWorktree(on: On, options: PluginOptions): void {
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    // Where the surface docks a pane (the desktop, a fullscreen terminal), the
+    // cards sit in it on the right, opened unasked once; elsewhere a card
+    // opens under the rail.
+    isDocking = e.viewport?.isFullscreen === true
+    if (isDocking && !hasAutoOpened) {
+      hasAutoOpened = true
+      $.clock.after(0, () => void $.ui.open({ id: PANE, title: PANE_TITLE, columns: PANE_COLUMNS }))
+    }
     const state = await read($, worktree)
     if (e.props.hasSurvey) {
       railHover = null
@@ -1468,10 +1486,10 @@ export function registerWorktree(on: On, options: PluginOptions): void {
         },
         e.props.bodyColumns,
       )
-      // A card opened from the rail draws under it, above the prompt, in the
-      // chat's own column.
+      // Where nothing docks, a card opened from the rail draws under it,
+      // above the prompt.
       const open = await read($, tab)
-      if (open === null) return rail
+      if (open === null || isDocking) return rail
       const width = Math.min(e.props.bodyColumns, BAND_CARD_COLUMNS)
       const body = open === 'worktree' ? await worktreeBody($, ui, options) : open === 'dials' ? await dialsBody($, ui, width) : await contextBody($, ui, width)
       const { Box } = ui
@@ -1707,12 +1725,15 @@ function tickWhileWarm($: $, isWarm: boolean): void {
   }
 }
 
-// The rail's items open their card under it, above the prompt, or close it
-// when it is the one open; the mark opens the Worktree card or closes any.
+// The rail's items open their card, or close it when it is the one open;
+// the mark opens the Worktree card or closes any. Where the surface docks,
+// the card shows in the pane on the right, which opens if it was closed.
 async function toggleCard($: $, at: Tab | null, options: PluginOptions): Promise<void> {
   const open = await read($, tab)
-  const next = at === null ? (open === null ? 'worktree' : null) : open === at ? null : at
+  const isShown = isDocking && (await $.ui.panes()).some(one => one.id === PANE && one.isShown)
+  const next = isDocking && !isShown ? (at ?? open ?? 'worktree') : at === null ? (open === null ? 'worktree' : null) : open === at ? null : at
   await update($, tab, () => next)
+  if (isDocking && !isShown) await $.ui.open({ id: PANE, title: PANE_TITLE, columns: PANE_COLUMNS, focus: true })
   if (next === 'worktree') await refreshSlots($, options)
 }
 

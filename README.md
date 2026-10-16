@@ -25,7 +25,7 @@ If you run Claude Code all day, a few things keep getting in the way:
 - **You keep repeating yourself.** "Write a spec first." "Don't ask, just decide." "Run the tests." You type it every session.
 - **The agent forgets what matters.** API conventions, the design doc, the ticket: pasted in again and again.
 
-fishStack adds a status rail above the prompt, inside the chat: the prompt cache's heat bar, the cost, and where the agent works and how (`⎇ fish/abcdef`, `◇ Balanced`, `▤ 3 of 4 on`). Click one of those three and its card opens right under the rail, above the prompt; click again to close it. Each card starts with its switch (**Use worktrees**, **Use dials**, **Use context**), so you can turn any of them off.
+fishStack adds a status rail above the prompt, inside the chat: the prompt cache's heat bar, the cost, and where the agent works and how (`⎇ fish/abcdef`, `◇ Balanced`, `▤ 3 of 4 on`). Click one of those three to open its card: on the right, beside Claude Code's own panel, where the app docks one; otherwise right under the rail, above the prompt. Each card starts with its switch (**Use worktrees**, **Use dials**, **Use context**), so you can turn any of them off.
 
 Every setting is kept per repository: the switches, **Enforce**, the dials, **Ask each time** or **Always a worktree**, and the context library. A worktree shares its main checkout's settings; outside git, the folder has its own. A repository that hasn't set something yet starts from the value you had before settings were per repository.
 
@@ -58,7 +58,7 @@ npx -y fishstack-mod install
 npx -y fishstack-mod uninstall
 ```
 
-Restart Claude Code. The rail shows above the prompt; click an item, or type **`/fs dials`** (or `/fishstack dials`), to open a card. `/fs panel` opens all three cards as a separate pane instead, docked beside the chat where Claude Code docks panes.
+Restart Claude Code. The rail shows above the prompt. In the desktop app (and a terminal in fullscreen mode at 110 columns or more) the three cards also open on the right by themselves, beside Claude Code's own panel; click a rail item, or type **`/fs dials`** (or `/fishstack dials`), to open that card there. Anywhere the cards can't sit on the right, a card opens under the rail, above the prompt.
 
 fishStack is built and tested on macOS: copy-on-write cloning and the file pickers use macOS tools.
 

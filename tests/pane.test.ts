@@ -39,11 +39,11 @@ test('the cards open one at a time on press, close on a second, and each draws i
   }
 })
 
-test('/fishstack, or /fs for short, opens the card it names above the prompt, and /fs panel opens the pane', async ($, on) => {
+test('/fishstack, or /fs for short, opens the card it names: above the prompt where nothing docks, on the right where it does', async ($, on) => {
   const { panes } = world(on, { isRepo: false })
   await startSession($)
-  const run = (command: string, args: string) =>
-    $.command.run({ command, args, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 200 } })
+  const run = (command: string, args: string, isFullscreen = false) =>
+    $.command.run({ command, args, origin: { kind: 'composer' }, presentation: { isFullscreen, columns: 200 } })
   expect((await run('fs', 'nope')).text).toBe('No card named "nope". Try /fs worktree, dials, context or panel.')
   // Alone, it opens the Worktree card when none was open before.
   expect((await run('fs', '')).text).toBe('Opened fishStack · Worktree, above the prompt.')
@@ -57,6 +57,10 @@ test('/fishstack, or /fs for short, opens the card it names above the prompt, an
   expect(panes).toEqual([])
   expect((await run('fs', 'panel')).text).toBe('Opened the fishStack panel.')
   expect(panes).toEqual(['fishstack'])
+  // Where the pane docks, the card shows there.
+  expect((await run('fs', 'context', true)).text).toBe('Opened fishStack · Context.')
+  const pane = await mountPane($, 'desktop')
+  expect(await pane.find({ key: 'body-context' })).toBeDefined()
 })
 
 test("the rail's cache gauge runs down for 5 minutes after a reply, then goes cold", async ($, on) => {
@@ -320,7 +324,7 @@ test('each rail pill opens its own card under the rail, and the cache and cost o
 
 // The rail stays where the pane docks: nothing opens the pane but /fs panel,
 // and with it open and shown the rail still draws.
-test('under a docking surface nothing opens the pane until /fs panel, and the rail stays with it open', async ($, on) => {
+test('where the surface docks, the pane opens on the right by itself, the rail stays, and a rail item opens its card there', async ($, on) => {
   const { clock, panes } = world(on, { isRepo: false })
   await startSession($)
   const band = await $.ui.mount({
@@ -331,12 +335,16 @@ test('under a docking surface nothing opens the pane until /fs panel, and the ra
     props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 120, scroll: { offset: 0, bodyRows: 10 }, view: {} },
   })
   await clock.advance(1)
-  expect(panes).toEqual([])
-  await $.command.run({ command: 'fs', args: 'panel', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 200 } })
   expect(panes).toEqual(['fishstack'])
   await band.redraw()
   const keys = await keysOf(band, /^rail-.*-press$/)
   for (const key of ['rail-brand-press', 'rail-cache-press', 'rail-dials-press', 'rail-sources-press', 'rail-worktree-press']) expect(keys).toContain(key)
+  // The Dials item opens its card in the pane, not under the rail.
+  await activate(band, 'rail-dials-press')
+  await band.redraw()
+  expect(await band.find({ key: 'body-dials' })).toBeUndefined()
+  const pane = await mountPane($, 'desktop')
+  expect(await pane.find({ key: 'body-dials' })).toBeDefined()
 })
 
 // The element drawn under a key, hover and all (find leaves hover out).

@@ -10,15 +10,15 @@ import type { Ui } from './ui'
 const tab = atom({ plugin: 'fishstack', key: 'tab' } as const, null)
 const isClientDown = atom({ plugin: 'fishstack', key: 'isClientDown' } as const, false)
 
-// /fishstack opens a card under the rail, above the prompt, and /fs is its
-// short form: bare /fish reads as the fish shell. /fs panel opens the cards
-// as a pane of their own instead, docked beside the chat where it docks.
+// /fishstack opens a card, and /fs is its short form: bare /fish reads as the
+// fish shell. Where the surface docks a pane the card shows in it, on the
+// right; elsewhere under the rail, above the prompt. /fs panel opens the pane.
 export const FISH_COMMANDS: CommandSpec[] = [
   { name: 'fishstack', description: 'Open a fishStack card above the prompt: worktree, dials or context', argumentHint: '[worktree|dials|context|panel]' },
   { name: 'fs', description: 'Open a fishStack card (short for /fishstack)', argumentHint: '[worktree|dials|context|panel]' },
 ]
 
-async function openCard($: EngineInterface, args: string): Promise<{ text: string }> {
+async function openCard($: EngineInterface, args: string, isDocking: boolean): Promise<{ text: string }> {
   const wanted = args.trim().toLowerCase()
   if (wanted === 'panel') {
     await $.ui.open({ id: PANE, title: PANE_TITLE, columns: PANE_COLUMNS, focus: true })
@@ -29,7 +29,13 @@ async function openCard($: EngineInterface, args: string): Promise<{ text: strin
   }
   const card: Tab = isTab(wanted) ? wanted : ((await read($, tab)) ?? 'worktree')
   await update($, tab, () => card)
-  return { text: `Opened fishStack · ${TABS.find(one => one.id === card)!.label}, above the prompt.` }
+  const label = TABS.find(one => one.id === card)!.label
+  // Where the pane docks, the card shows there, on the right.
+  if (isDocking) {
+    await $.ui.open({ id: PANE, title: PANE_TITLE, columns: PANE_COLUMNS, focus: true })
+    return { text: `Opened fishStack · ${label}.` }
+  }
+  return { text: `Opened fishStack · ${label}, above the prompt.` }
 }
 
 // Faults heard since this load: a reload starts over, as session.ts does.
@@ -85,6 +91,6 @@ export function registerPane(on: On): void {
     return frame(ui, null, e.props.bodyColumns, (id: Tab | null) => void update($, tab, () => id), null, await paneHeads($))
   })
 
-  on('command.run', { command: 'fishstack' }, async ($, e) => openCard($, e.args))
-  on('command.run', { command: 'fs' }, async ($, e) => openCard($, e.args))
+  on('command.run', { command: 'fishstack' }, async ($, e) => openCard($, e.args, e.presentation.isFullscreen))
+  on('command.run', { command: 'fs' }, async ($, e) => openCard($, e.args, e.presentation.isFullscreen))
 }

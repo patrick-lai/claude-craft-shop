@@ -79,6 +79,8 @@ declare module 'claude-code' {
       slotAsk: string | null
       elsewhere: string | null
       railTick: number
+      // Why fishStack refused each recent tool call, by its tool_use_id.
+      refusals: Record<string, string>
       autopilot: AutopilotWait | null
       isTurnRunning: boolean
       isDialsOn: boolean

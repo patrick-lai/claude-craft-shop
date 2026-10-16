@@ -1,4 +1,4 @@
-import { atom, read } from 'claude-code'
+import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 
 import { checkedOutBranches, isReadOnlyShell } from './readonly'
@@ -10,6 +10,20 @@ const dials = atom({ plugin: 'fishstack', key: 'dials' } as const, BALANCED)
 const worktree = atom({ plugin: 'fishstack', key: 'worktree' } as const, IDLE_WORKTREE)
 const isDialsOn = atom({ plugin: 'fishstack', key: 'isDialsOn' } as const, true)
 const isEnforced = atom({ plugin: 'fishstack', key: 'isEnforced' } as const, true)
+const refusals = atom({ plugin: 'fishstack', key: 'refusals' } as const, {})
+
+// fishStack's refusals are its rules at work, not a failure: their rows in
+// the transcript are drawn in teal, not as the engine's red error. Kept by
+// call, the latest few.
+const REFUSAL_COLOR = '#2ec4b6'
+const REFUSALS_KEPT = 50
+
+async function refuse($: EngineInterface, id: string | undefined, text: string): Promise<{ deny: string }> {
+  if (id !== undefined) {
+    await update($, refusals, now => Object.fromEntries([...Object.entries(now), [id, text]].slice(-REFUSALS_KEPT)))
+  }
+  return { deny: text }
+}
 
 const WRITE_TOOLS = new Set([...EDIT_TOOLS, 'ExitPlanMode'])
 
@@ -97,21 +111,42 @@ export function registerGuard(on: On): void {
     const tool = String(e.tool)
     if (isReadOnlyPhase((await read($, worktree)).phase)) {
       const isWrite = WRITE_TOOLS.has(tool) || (e.tool === 'Bash' && !isReadOnlyShell(e.command))
-      if (isWrite) return { deny: READ_ONLY_DENY }
+      if (isWrite) return refuse($, e.tool_use_id, READ_ONLY_DENY)
     }
     if (e.tool === 'Bash') {
       const kept = await defaultBranchRefusal($, e.command)
-      if (kept !== null) return { deny: kept }
+      if (kept !== null) return refuse($, e.tool_use_id, kept)
     }
     const call = { ...(e as unknown as Call), tool }
     const refusal = await refusalOf($, call)
-    if (refusal !== null) return { deny: refusal }
+    if (refusal !== null) return refuse($, e.tool_use_id, refusal)
     const done = await next(e)
     record(call, 'deny' in done || (done as { isError?: boolean }).isError === true)
     return done
   }).catch(($, e, next) =>
     next.called ? next(e) : { deny: 'fishStack could not check this call, so it was refused.' },
   )
+
+  // A call fishStack refused draws its reason in teal where the engine would
+  // draw a red error.
+  on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {
+    const text = e.props.isErrored ? (await read($, refusals))[e.props.tool_use_id] : undefined
+    if (text === undefined) return next(e)
+    const { Box, Text } = $.ui.resolve(e)
+    // The terminal hangs a result under its row with ⎿, as the engine does.
+    return e.surface === 'terminal' ? (
+      <Box>
+        <Text dimColor>{'  ⎿  '}</Text>
+        <Text color={REFUSAL_COLOR} wrap="wrap">
+          {text}
+        </Text>
+      </Box>
+    ) : (
+      <Text color={REFUSAL_COLOR} wrap="wrap">
+        {text}
+      </Text>
+    )
+  })
 
   // The end of a turn that changed code, held back once if the dials ask for
   // something it has not done: never twice (stop_hook_active), never on a

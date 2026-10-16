@@ -188,3 +188,19 @@ test('with Enforce off, or the dials off, nothing is refused or held back', asyn
   expect((await edit($)).deny).toBeUndefined()
   expect((await stop($, 'Done.')).block).toBeUndefined()
 })
+
+// A refusal is fishStack's rule at work, not a failure: its row is teal,
+// and an error that is not fishStack's keeps the engine's own drawing.
+test("a call fishStack refused draws its reason in teal, not as a red error", async ($, on) => {
+  world(on, { isRepo: false, store: { dials: { foresight: 1, crew: 1, tenacity: 2, autonomy: 4, proof: 2, voice: 2 } } })
+  // The engine's own drawing of an errored result, beneath the plugin's.
+  on('ui.render', { component: 'ToolResult' }, () => ({ type: 'Text', props: { color: 'error' }, children: ['Error'] }) as never)
+  await startSession($)
+  const denied = await $.tool.call({ tool: 'Agent', description: 'scout', prompt: 'find the code', tool_use_id: 'call-refused' } as never)
+  expect(denied.deny).toContain('Solo')
+  const row = (id: string) =>
+    $.ui.mount({ plugin: 'fishstack', surface: 'terminal', component: 'ToolResult', requestId: id, props: { tool_use_id: id, tool: 'Agent', output: null, isErrored: true } })
+  const refused = (await (await row('call-refused')).findAll({ type: 'Text' })).find(one => one.props.color === '#2ec4b6')
+  expect(JSON.stringify(refused)).toContain(String(denied.deny))
+  expect(await (await row('call-other')).drawn()).toMatchObject({ props: { color: 'error' }, children: ['Error'] })
+})

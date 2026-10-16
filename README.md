@@ -25,7 +25,7 @@ If you run Claude Code all day, a few things keep getting in the way:
 - **You keep repeating yourself.** "Write a spec first." "Don't ask, just decide." "Run the tests." You type it every session.
 - **The agent forgets what matters.** API conventions, the design doc, the ticket: pasted in again and again.
 
-fishStack adds one side panel of three cards, like the desktop app's own panel: each card names a feature on the left and says its state on the right (`fish/abcdef`, `Balanced`, `3 of 4 on`). Click a card to open it in place. Each card starts with its switch (**Use worktrees**, **Use dials**, **Use context**), so you can turn any of them off.
+fishStack adds a status rail above the prompt, inside the chat: the prompt cache's heat bar, the cost, and where the agent works and how (`⎇ fish/abcdef`, `◇ Balanced`, `▤ 3 of 4 on`). Click one of those three and its card opens right under the rail, above the prompt; click again to close it. Each card starts with its switch (**Use worktrees**, **Use dials**, **Use context**), so you can turn any of them off.
 
 Every setting is kept per repository: the switches, **Enforce**, the dials, **Ask each time** or **Always a worktree**, and the context library. A worktree shares its main checkout's settings; outside git, the folder has its own. A repository that hasn't set something yet starts from the value you had before settings were per repository.
 
@@ -58,7 +58,7 @@ npx -y fishstack-mod install
 npx -y fishstack-mod uninstall
 ```
 
-Restart Claude Code. Where the panel can dock (the desktop app, or a terminal in fullscreen mode at 110 columns or more) it opens on the right by itself. Anywhere else, a one-line status sits above the prompt, and **`/fs`** (or `/fishstack`) opens the panel. `/fs dials` opens a card directly. Keys <kbd>1</kbd>–<kbd>3</kbd> open and close the cards.
+Restart Claude Code. The rail shows above the prompt; click an item, or type **`/fs dials`** (or `/fishstack dials`), to open a card. `/fs panel` opens all three cards as a separate pane instead, docked beside the chat where Claude Code docks panes.
 
 fishStack is built and tested on macOS: copy-on-write cloning and the file pickers use macOS tools.
 
@@ -174,7 +174,7 @@ Autopilot is the top Autonomy level: the agent works as if you're away. It decid
 
 If it still asks you something and nobody answers, the question isn't left hanging overnight. After 15 minutes (`autoAnswerMinutes`), Autopilot picks the option marked *(Recommended)*, or the first one. The agent is told that no person chose, and carries on.
 
-While Autopilot waits, the Dials card says **Answers in N min** in amber, and a line under the question says what it will pick. Answer yourself, or lower the dial, and nothing is picked.
+While Autopilot waits, the dials pill on the rail turns amber with a ring that runs down, the Dials card says **Answers in N min**, and a line under the question says what it will pick. Answer yourself, or lower the dial, and nothing is picked.
 
 ## Context
 
@@ -190,15 +190,20 @@ Libraries are kept per repository and reach the agent as a **Project context** s
   <img src="docs/media/context-desktop.png" width="760" alt="The Context tab in the desktop app: a folder group and notes, each with its switch, the token meter and the context window">
 </p>
 
-## The status line
+## The rail
 
-Where the panel can't dock (a narrow terminal, or one not in fullscreen mode) and wherever it is closed, one line above the prompt says the same three things as the cards, and each part opens its card:
+The rail is one row of pills above the prompt, and it stays one row at any window width. In the desktop app, hover a pill for details (nothing shifts). Click Dials, Context or Worktree to open that card under the rail.
 
-```
-≋ fishStack  ⎇ fish/abcdef  ◇ Balanced  ▤ 3 of 4 on  /fs
-```
+| Pill | Shows |
+| - | - |
+| **Mark** | Opens the Worktree card, or closes the open one. |
+| **Cache** | The prompt cache. Five bars run down over the five minutes after a reply. While any are lit, your next message reuses the cache, so it's faster and cheaper. Hover for the hit rate: the last reply's and the whole session's share of input read from the cache, from the token counts Claude reports. |
+| **Cost** | Claude Code's own `/cost` total at API list prices, cache reads and writes included. It isn't your plan's bill. Tokens in and out on hover. |
+| **Dials** | The preset, or Off. Amber while Autopilot waits to answer for you, green once it has. |
+| **Context** | How many sources are on, or Off. |
+| **Worktree** | Where this session works: its branch, **Preparing…**, or the main checkout. |
 
-While a worktree is being made it says **Preparing…**, a failed one says **Failed**, and Autopilot waiting on a question says **Answers in N min**. Beside an open docked panel the line goes away.
+In the terminal the rail is plain text, and the same items open the same cards.
 
 ## Options
 

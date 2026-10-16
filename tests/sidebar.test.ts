@@ -5,7 +5,7 @@ import { expect, test } from 'claude-code/testing'
 import type { RenderPropsOf } from 'claude-code'
 import type { Engine } from 'claude-code/testing'
 
-import { openCard, startSession, world } from './world'
+import { activate, openCard, startSession, world } from './world'
 
 declare const console: { log: (...args: unknown[]) => void }
 
@@ -51,4 +51,24 @@ test('the sidebar draws a ready worktree on the desktop', { options: { autoWorkt
   await openCard(ui, 'worktree')
   await ui.redraw()
   await show(ui, 'side-worktree-ready')
+})
+
+// The rail above the prompt on the desktop, its Dials item pressed: the card
+// opens under it, in the chat's own column.
+test('a rail item opens its card above the prompt on the desktop', async ($, on) => {
+  world(on, { isRepo: false })
+  await startSession($)
+  const band = await $.ui.mount({
+    plugin: 'fishstack',
+    surface: 'desktop',
+    component: 'AbovePrompt',
+    props: { hasSurvey: false, isWorking: false, maxRows: 40, bodyColumns: 110, scroll: { offset: 0, bodyRows: 40 }, view: {} },
+  })
+  await activate(band, 'rail-dials-press')
+  await band.redraw()
+  expect(await band.find({ key: 'body-dials' })).toBeDefined()
+  await show(band as never, 'band-dials')
+  await activate(band, 'rail-dials-press')
+  await band.redraw()
+  expect(await band.find({ key: 'body-dials' })).toBeUndefined()
 })

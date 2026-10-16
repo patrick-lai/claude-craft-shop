@@ -7,9 +7,10 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, PluginOptions, Timer } from 'claude-code'
 
 import type { Slot, Tab, Worktree, WorktreePhase } from '../types'
-import { frame, PANE, PANE_COLUMNS, PANE_TITLE, resolveUi } from './ui'
+import { BAND_CARD_COLUMNS, cardOf, frame, PANE, PANE_COLUMNS, PANE_TITLE, resolveUi } from './ui'
 import type { Ui } from './ui'
-import { BALANCED, presetName } from './dials'
+import { BALANCED, dialsBody, presetName } from './dials'
+import { contextBody } from './context'
 import { segmented, switchRow } from './kit'
 import { beginTurn } from './enforce'
 import { drawRail } from './rail'
@@ -947,10 +948,6 @@ const PHASE: Record<WorktreePhase, { label: string; color: string }> = {
   failed: { label: 'Failed (read-only)', color: 'error' },
 }
 
-// A pane opened unasked is a sidebar only where the surface docks one, which
-// a render's viewport says and session.start does not.
-let hasAutoOpened = false
-
 // Claims a slot once per load, for the first person at the session: a REPL
 // at session.start, or the desktop app or an editor attaching (they run the
 // session headless, so its session.start says no one is at the prompt).
@@ -1305,10 +1302,6 @@ export function registerWorktree(on: On, options: PluginOptions): void {
   on('session.attach', async ($, e, next) => {
     const attached = await next(e)
     if (e.surface === 'desktop' || e.surface === 'vscode') await startWorktree($, options, await $.session.cwd(), { isDesktop: e.surface === 'desktop' })
-    if (e.viewport?.isFullscreen === true && !hasAutoOpened) {
-      hasAutoOpened = true
-      $.clock.after(0, () => void $.ui.open({ id: PANE, title: PANE_TITLE, columns: PANE_COLUMNS }))
-    }
     return attached
   })
 
@@ -1409,14 +1402,8 @@ export function registerWorktree(on: On, options: PluginOptions): void {
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    if (e.viewport?.isFullscreen === true && !hasAutoOpened) {
-      hasAutoOpened = true
-      $.clock.after(0, () => void $.ui.open({ id: PANE, title: PANE_TITLE, columns: PANE_COLUMNS }))
-    }
     const state = await read($, worktree)
-    // Where the pane docks and shows, it says all this already: no line.
-    const isDocked = e.viewport?.isFullscreen === true && (await $.ui.panes()).some(one => one.id === PANE && one.isShown && one.isPlaced)
-    if (e.props.hasSurvey || isDocked) {
+    if (e.props.hasSurvey) {
       railHover = null
       return next(e)
     }
@@ -1433,6 +1420,7 @@ export function registerWorktree(on: On, options: PluginOptions): void {
       const repliedAt = (await read($, lastReplyAt)) ?? keptHere?.repliedAt ?? null
       const now = await $.clock.now()
       const cacheSecondsLeft = repliedAt === null ? null : Math.max(0, Math.round((CACHE_TTL_MS - (now - repliedAt)) / 1000))
+      tickWhileWarm($, cacheSecondsLeft !== null && cacheSecondsLeft > 0 && !isWorking)
       const usage = await $.session.usage({ breakdown: 'summary' })
       const breakdown = usage.context.breakdown
       const last = breakdown?.apiUsage ?? null
@@ -1444,7 +1432,8 @@ export function registerWorktree(on: On, options: PluginOptions): void {
       const isDials = await read($, isDialsOn)
       const auto = isDials && values.autonomy === 5 ? await read($, autopilot) : null
       const ui: Ui = resolveUi($.ui.resolve(e), e.surface, await read($, isClientDown))
-      return drawRail(
+      const heads = await paneHeads($)
+      const rail = drawRail(
         ui,
         {
           isWorking,
@@ -1460,7 +1449,7 @@ export function registerWorktree(on: On, options: PluginOptions): void {
           preparingStep: state.phase === 'preparing' ? state.step : null,
           isDialsOn: isDials,
           isContextOn: await read($, isContextOn),
-          heads: await paneHeads($),
+          heads,
           autopilot:
             auto === null
               ? null
@@ -1468,7 +1457,7 @@ export function registerWorktree(on: On, options: PluginOptions): void {
                 ? { kind: 'waiting', secondsLeft: Math.max(0, Math.round((auto.deadline - now) / 1000)), totalSeconds: Math.round((auto.deadline - auto.since) / 1000), picked: auto.picked, count: auto.count }
                 : { kind: 'answered', at: clockTime(auto.at), picked: auto.picked, waitedMinutes: Math.round(auto.waitedMs / 60_000) },
         },
-        at => void openAt($, at),
+        at => void toggleCard($, at, options),
         railHover,
         (id, isOn) => {
           // Leaving A may land after entering B: only A's own leave clears it.
@@ -1478,6 +1467,21 @@ export function registerWorktree(on: On, options: PluginOptions): void {
           void update($, railTick, n => n + 1)
         },
         e.props.bodyColumns,
+      )
+      // A card opened from the rail draws under it, above the prompt, in the
+      // chat's own column.
+      const open = await read($, tab)
+      if (open === null) return rail
+      const width = Math.min(e.props.bodyColumns, BAND_CARD_COLUMNS)
+      const body = open === 'worktree' ? await worktreeBody($, ui, options) : open === 'dials' ? await dialsBody($, ui, width) : await contextBody($, ui, width)
+      const { Box } = ui
+      return (
+        <Box flexDirection="column" gap={ui.Svg !== undefined ? 1 : 0}>
+          {rail}
+          <Box key="band-card" width={width} flexDirection="column">
+            {cardOf(ui, open, true, heads[open], () => void update($, tab, () => null), body)}
+          </Box>
+        </Box>
       )
     }
 
@@ -1498,191 +1502,191 @@ export function registerWorktree(on: On, options: PluginOptions): void {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
     if ((await read($, tab)) !== 'worktree') return next(e)
     const ui: Ui = resolveUi($.ui.resolve(e), e.surface, await read($, isClientDown))
-    const { Box, Text, Button } = ui
-    const state = await read($, worktree)
-    const list = await read($, slots)
-    const phase = PHASE[state.phase]
-    const first = state.steps[0]?.at ?? 0
-    const select = (id: Tab | null) => void update($, tab, () => id)
-    const rich = ui.Svg !== undefined
+    return frame(ui, 'worktree', e.props.bodyColumns, id => void update($, tab, () => id), await worktreeBody($, ui, options), await paneHeads($))
+  })
+}
 
-    const isAuto = await isAutoOn($, options)
-    const terminal = await terminalChoice($)
-    const isInSlot = state.main !== null && state.path !== null && (await isSlot($, options, state.main, state.path))
-    const note = await read($, poolNote)
-    const settingUp = list.filter(one => one.setup !== null).length
-    const idle = list.filter(one => !one.isLeased && one.setup === null).length
+// The Worktree card's body: the setting, where this session works, the pool.
+// The pane and the band above the prompt both draw it.
+async function worktreeBody($: $, ui: Ui, options: PluginOptions) {
+  const { Box, Text, Button } = ui
+  const state = await read($, worktree)
+  const list = await read($, slots)
+  const phase = PHASE[state.phase]
+  const first = state.steps[0]?.at ?? 0
+  const rich = ui.Svg !== undefined
 
-    // The setting first: on or off, and when on, what a new session does.
-    const setting = (
-      <Box key="worktree-setting" flexDirection="column" gap={rich ? 1 : 0}>
-        {switchRow(ui, 'auto-worktree', 'Use worktrees', isAuto, isAuto ? 'New sessions get a worktree of their own.' : 'Sessions work in the main checkout.', isOn => void setAuto($, options, isOn))}
-        {isAuto && (
-          <Box key="terminal-line" flexDirection="column">
-            <Text dimColor>New terminal sessions</Text>
-            {segmented(ui, 'terminal-worktree', TERMINAL_CHOICES, terminal, choice => void setTerminalChoice($, choice))}
+  const isAuto = await isAutoOn($, options)
+  const terminal = await terminalChoice($)
+  const isInSlot = state.main !== null && state.path !== null && (await isSlot($, options, state.main, state.path))
+  const note = await read($, poolNote)
+  const settingUp = list.filter(one => one.setup !== null).length
+  const idle = list.filter(one => !one.isLeased && one.setup === null).length
+
+  // The setting first: on or off, and when on, what a new session does.
+  const setting = (
+    <Box key="worktree-setting" flexDirection="column" gap={rich ? 1 : 0}>
+      {switchRow(ui, 'auto-worktree', 'Use worktrees', isAuto, isAuto ? 'New sessions get a worktree of their own.' : 'Sessions work in the main checkout.', isOn => void setAuto($, options, isOn))}
+      {isAuto && (
+        <Box key="terminal-line" flexDirection="column">
+          <Text dimColor>New terminal sessions</Text>
+          {segmented(ui, 'terminal-worktree', TERMINAL_CHOICES, terminal, choice => void setTerminalChoice($, choice))}
+        </Box>
+      )}
+    </Box>
+  )
+
+  // Where this session works, and what to do about it.
+  const isReady = state.phase === 'ready'
+  const other = await read($, elsewhere)
+  const showSteps = state.phase !== 'off' && (!isReady || (await read($, isStepsShown)))
+  const isTimed = state.steps.some(step => step.at !== first)
+  const stage = stageOf(state)
+  const here =
+    state.phase === 'off' ? (
+      other !== null ? (
+        <Box key="worktree-here" flexDirection="column">
+          <Text bold>This session works in its own worktree</Text>
+          <Text dimColor wrap="truncate-start">{shortPath(other)}</Text>
+        </Box>
+      ) : (
+        <Box key="worktree-here" flexDirection="column" gap={rich ? 1 : 0}>
+          <Text>
+            <Text dimColor>This session: </Text>
+            <Text bold>main checkout</Text>
+          </Text>
+          <Box>
+            <Button key="worktree-create" label="Create worktree now" variant="primary" onPress={() => void claimNow($, options)} />
+          </Box>
+        </Box>
+      )
+    ) : (
+      <Box key="worktree-here" flexDirection="column">
+        <Box justifyContent="space-between" alignItems="center" gap={1}>
+          <Text wrap="truncate-end">
+            <Text color={phase.color} bold>
+              ● {phase.label}
+            </Text>
+            <Text dimColor> · {isReady ? (state.branch ?? '') : state.phase === 'failed' ? (state.error ?? '') : state.step}</Text>
+          </Text>
+          {state.phase === 'failed' && <Button key="worktree-retry" label="Retry" variant="primary" onPress={() => void beginWorktree($, options)} />}
+          {isReady && state.path !== null && (
+            <Button key="worktree-copy" label="Copy path" dimColor onPress={press => void $.ui.copy({ text: state.path ?? '', surface: press.surface })} />
+          )}
+        </Box>
+        {state.phase === 'preparing' && <Text dimColor>Read-only until it moves in, in seconds.</Text>}
+        {isReady && state.base !== null && (
+          <Text dimColor wrap="truncate-end">
+            from {state.base}
+            {state.baseSha === null ? '' : ` @ ${state.baseSha.slice(0, 7)}`}
+            {isInSlot ? '' : ' · not a pool slot'}
+          </Text>
+        )}
+        {showSteps && (
+          <Box flexDirection="column" marginTop={1}>
+            <Text>
+              {STAGES.map((name, index) => (
+                <Text color={index < stage || isReady ? 'success' : index === stage ? phase.color : undefined} dimColor={index > stage && !isReady}>
+                  {index < stage || isReady ? '✓' : index === stage ? '●' : '○'} {name}
+                  {index < STAGES.length - 1 ? '  ' : ''}
+                </Text>
+              ))}
+            </Text>
+            {state.steps.map(step => (
+              <Text color={step.isWarning ? 'warning' : undefined} dimColor={!step.isWarning} wrap="truncate-end">
+                {isTimed ? `+${((step.at - first) / 1000).toFixed(1)}s  ` : '·  '}
+                {step.label}
+              </Text>
+            ))}
+          </Box>
+        )}
+        {isReady && (
+          <Box gap={1} marginTop={rich ? 1 : 0}>
+            <Button key="steps-toggle" label={showSteps ? 'Hide steps' : 'Steps'} dimColor onPress={() => void update($, isStepsShown, now => !now)} />
+            <Button key="slots-refresh" label="Refresh" hotkey="r" dimColor onPress={() => void refreshSlots($, options)} />
           </Box>
         )}
       </Box>
     )
 
-    // Where this session works, and what to do about it.
-    const isReady = state.phase === 'ready'
-    const other = await read($, elsewhere)
-    const showSteps = state.phase !== 'off' && (!isReady || (await read($, isStepsShown)))
-    const isTimed = state.steps.some(step => step.at !== first)
-    const stage = stageOf(state)
-    const here =
-      state.phase === 'off' ? (
-        other !== null ? (
-          <Box key="worktree-here" flexDirection="column">
-            <Text bold>This session works in its own worktree</Text>
-            <Text dimColor wrap="truncate-start">{shortPath(other)}</Text>
-          </Box>
-        ) : (
-          <Box key="worktree-here" flexDirection="column" gap={rich ? 1 : 0}>
-            <Text>
-              <Text dimColor>This session: </Text>
-              <Text bold>main checkout</Text>
-            </Text>
-            <Box>
-              <Button key="worktree-create" label="Create worktree now" variant="primary" onPress={() => void claimNow($, options)} />
-            </Box>
-          </Box>
-        )
-      ) : (
-        <Box key="worktree-here" flexDirection="column">
-          <Box justifyContent="space-between" alignItems="center" gap={1}>
-            <Text wrap="truncate-end">
-              <Text color={phase.color} bold>
-                ● {phase.label}
-              </Text>
-              <Text dimColor> · {isReady ? (state.branch ?? '') : state.phase === 'failed' ? (state.error ?? '') : state.step}</Text>
-            </Text>
-            {state.phase === 'failed' && <Button key="worktree-retry" label="Retry" variant="primary" onPress={() => void beginWorktree($, options)} />}
-            {isReady && state.path !== null && (
-              <Button key="worktree-copy" label="Copy path" dimColor onPress={press => void $.ui.copy({ text: state.path ?? '', surface: press.surface })} />
-            )}
-          </Box>
-          {state.phase === 'preparing' && <Text dimColor>Read-only until it moves in, in seconds.</Text>}
-          {isReady && state.base !== null && (
-            <Text dimColor wrap="truncate-end">
-              from {state.base}
-              {state.baseSha === null ? '' : ` @ ${state.baseSha.slice(0, 7)}`}
-              {isInSlot ? '' : ' · not a pool slot'}
-            </Text>
-          )}
-          {showSteps && (
-            <Box flexDirection="column" marginTop={1}>
-              <Text>
-                {STAGES.map((name, index) => (
-                  <Text color={index < stage || isReady ? 'success' : index === stage ? phase.color : undefined} dimColor={index > stage && !isReady}>
-                    {index < stage || isReady ? '✓' : index === stage ? '●' : '○'} {name}
-                    {index < STAGES.length - 1 ? '  ' : ''}
-                  </Text>
-                ))}
-              </Text>
-              {state.steps.map(step => (
-                <Text color={step.isWarning ? 'warning' : undefined} dimColor={!step.isWarning} wrap="truncate-end">
-                  {isTimed ? `+${((step.at - first) / 1000).toFixed(1)}s  ` : '·  '}
-                  {step.label}
-                </Text>
-              ))}
-            </Box>
-          )}
-          {isReady && (
-            <Box gap={1} marginTop={rich ? 1 : 0}>
-              <Button key="steps-toggle" label={showSteps ? 'Hide steps' : 'Steps'} dimColor onPress={() => void update($, isStepsShown, now => !now)} />
-              <Button key="slots-refresh" label="Refresh" hotkey="r" dimColor onPress={() => void refreshSlots($, options)} />
+  // The pool, one line until opened: every slot of this repository's pool,
+  // a free one removable, + Add slot at its foot.
+  const isSlotsOpen = await read($, isSlotsShown)
+  const ask = await read($, slotAsk)
+  const slotRow = (slot: Slot) => {
+    const number = slot.path.split('/').pop()
+    const isSettingUp = slot.setup !== null
+    const isRemovable = !slot.isMine && !slot.isLeased && !isSettingUp && !slot.isRemoving
+    const isAsked = ask === slot.path && isRemovable
+    const status = slot.isRemoving
+      ? { text: '◌ removing', color: 'inactive' }
+      : isSettingUp
+        ? { text: '◐ setting up', color: 'warning' }
+        : slot.isMine
+          ? { text: '● this session', color: 'success' }
+          : slot.isLeased
+            ? { text: '● in use', color: 'warning' }
+            : { text: '○ free', color: 'inactive' }
+    return (
+      <Box key={`slot-${slot.path}`} flexDirection="column">
+        <Box justifyContent="space-between" alignItems="center" gap={1}>
+          <Text wrap="truncate-end">
+            <Text bold>#{number}</Text> <Text color={status.color}>{status.text}</Text>
+            {isSettingUp && <Text dimColor> · {slot.setup}</Text>}
+          </Text>
+          {!isSettingUp && !slot.isRemoving && (
+            <Box gap={1} flexShrink={0}>
+              <Button key={`slot-copy-${slot.path}`} label="Copy" dimColor onPress={press => void $.ui.copy({ text: slot.path, surface: press.surface })} />
+              {slot.isLeased && !slot.isMine && <Button key={`slot-release-${slot.path}`} label="Release" dimColor onPress={() => void releaseAndRefresh($, slot.path, options)} />}
+              {isRemovable && !isAsked && <Button key={`slot-remove-${slot.path}`} label="Remove" dimColor onPress={() => void update($, slotAsk, () => slot.path)} />}
             </Box>
           )}
         </Box>
-      )
-
-    // The pool, one line until opened: every slot of this repository's pool,
-    // a free one removable, + Add slot at its foot.
-    const isSlotsOpen = await read($, isSlotsShown)
-    const ask = await read($, slotAsk)
-    const slotRow = (slot: Slot) => {
-      const number = slot.path.split('/').pop()
-      const isSettingUp = slot.setup !== null
-      const isRemovable = !slot.isMine && !slot.isLeased && !isSettingUp && !slot.isRemoving
-      const isAsked = ask === slot.path && isRemovable
-      const status = slot.isRemoving
-        ? { text: '◌ removing', color: 'inactive' }
-        : isSettingUp
-          ? { text: '◐ setting up', color: 'warning' }
-          : slot.isMine
-            ? { text: '● this session', color: 'success' }
-            : slot.isLeased
-              ? { text: '● in use', color: 'warning' }
-              : { text: '○ free', color: 'inactive' }
-      return (
-        <Box key={`slot-${slot.path}`} flexDirection="column">
-          <Box justifyContent="space-between" alignItems="center" gap={1}>
-            <Text wrap="truncate-end">
-              <Text bold>#{number}</Text> <Text color={status.color}>{status.text}</Text>
-              {isSettingUp && <Text dimColor> · {slot.setup}</Text>}
-            </Text>
-            {!isSettingUp && !slot.isRemoving && (
-              <Box gap={1} flexShrink={0}>
-                <Button key={`slot-copy-${slot.path}`} label="Copy" dimColor onPress={press => void $.ui.copy({ text: slot.path, surface: press.surface })} />
-                {slot.isLeased && !slot.isMine && <Button key={`slot-release-${slot.path}`} label="Release" dimColor onPress={() => void releaseAndRefresh($, slot.path, options)} />}
-                {isRemovable && !isAsked && <Button key={`slot-remove-${slot.path}`} label="Remove" dimColor onPress={() => void update($, slotAsk, () => slot.path)} />}
-              </Box>
-            )}
-          </Box>
-          {isAsked && (
-            <Box flexDirection="column">
-              <Text dimColor>Remove #{number}? Its branch stays; uncommitted work is backed up.</Text>
-              <Box gap={1} justifyContent="flex-end">
-                <Button key="slot-remove-cancel" label="Cancel" dimColor onPress={() => void update($, slotAsk, () => null)} />
-                <Button key="slot-remove-confirm" label="Remove" variant="primary" onPress={() => void removeSlot($, options, slot.path)} />
-              </Box>
+        {isAsked && (
+          <Box flexDirection="column">
+            <Text dimColor>Remove #{number}? Its branch stays; uncommitted work is backed up.</Text>
+            <Box gap={1} justifyContent="flex-end">
+              <Button key="slot-remove-cancel" label="Cancel" dimColor onPress={() => void update($, slotAsk, () => null)} />
+              <Button key="slot-remove-confirm" label="Remove" variant="primary" onPress={() => void removeSlot($, options, slot.path)} />
             </Box>
-          )}
-          {slot.branch !== null && !isSettingUp && <Text dimColor wrap="truncate-end">  {slot.branch}</Text>}
-        </Box>
-      )
-    }
-    const pool =
-      list.length === 0 && !isAuto ? null : (
-        <Box key="slot-list" flexDirection="column">
-          <Box justifyContent="space-between" alignItems="center" gap={1}>
-            <Button key="slots-toggle" plain onPress={() => void update($, isSlotsShown, now => !now)}>
-              <Text bold>Pool </Text>
-              <Text color={idle > 0 ? 'success' : 'warning'}>● </Text>
-              <Text dimColor>
-                {list.length} {list.length === 1 ? 'slot' : 'slots'}, {idle} ready{settingUp > 0 ? `, ${settingUp} setting up` : ''}
-              </Text>
-            </Button>
-            <Button key="slots-toggle-mark" plain onPress={() => void update($, isSlotsShown, now => !now)}>
-              <Text dimColor>{isSlotsOpen ? '⌄' : '›'}</Text>
-            </Button>
           </Box>
-          {note !== '' && <Text dimColor>{note}</Text>}
-          {isSlotsOpen && list.map(slotRow)}
-          {isSlotsOpen && (
-            <Box>
-              <Button key="pool-add" label="+ Add slot" dimColor onPress={() => void addSlot($, options)} />
-            </Box>
-          )}
-        </Box>
-      )
-
-    return frame(
-      ui,
-      'worktree',
-      e.props.bodyColumns,
-      select,
-      <Box flexDirection="column" gap={1}>
-        {setting}
-        {here}
-        {pool}
-      </Box>,
-      await paneHeads($),
+        )}
+        {slot.branch !== null && !isSettingUp && <Text dimColor wrap="truncate-end">  {slot.branch}</Text>}
+      </Box>
     )
-  })
+  }
+  const pool =
+    list.length === 0 && !isAuto ? null : (
+      <Box key="slot-list" flexDirection="column">
+        <Box justifyContent="space-between" alignItems="center" gap={1}>
+          <Button key="slots-toggle" plain onPress={() => void update($, isSlotsShown, now => !now)}>
+            <Text bold>Pool </Text>
+            <Text color={idle > 0 ? 'success' : 'warning'}>● </Text>
+            <Text dimColor>
+              {list.length} {list.length === 1 ? 'slot' : 'slots'}, {idle} ready{settingUp > 0 ? `, ${settingUp} setting up` : ''}
+            </Text>
+          </Button>
+          <Button key="slots-toggle-mark" plain onPress={() => void update($, isSlotsShown, now => !now)}>
+            <Text dimColor>{isSlotsOpen ? '⌄' : '›'}</Text>
+          </Button>
+        </Box>
+        {note !== '' && <Text dimColor>{note}</Text>}
+        {isSlotsOpen && list.map(slotRow)}
+        {isSlotsOpen && (
+          <Box>
+            <Button key="pool-add" label="+ Add slot" dimColor onPress={() => void addSlot($, options)} />
+          </Box>
+        )}
+      </Box>
+    )
+
+  return (
+    <Box flexDirection="column" gap={1}>
+      {setting}
+      {here}
+      {pool}
+    </Box>
+  )
 }
 
 // A time of day as the person's clock shows it: 4:12 pm.
@@ -1690,13 +1694,26 @@ function clockTime(at: number): string {
   return new Date(at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
 }
 
-// The prompt cache lives 5 minutes past the last reply.
+// The prompt cache lives 5 minutes past the last reply. While it is warm
+// the rail redraws every few seconds so its bars run down.
 const CACHE_TTL_MS = 5 * 60_000
+let cacheTick: Timer | null = null
 
-// The rail's items open the pane, at their tab when they name one.
-async function openAt($: $, at: Tab | null): Promise<void> {
-  if (at !== null) await update($, tab, () => at)
-  await $.ui.open({ id: PANE, title: PANE_TITLE, columns: PANE_COLUMNS, focus: true })
+function tickWhileWarm($: $, isWarm: boolean): void {
+  if (isWarm && cacheTick === null) cacheTick = $.clock.every(5_000, () => void update($, railTick, n => n + 1))
+  if (!isWarm && cacheTick !== null) {
+    cacheTick.cancel()
+    cacheTick = null
+  }
+}
+
+// The rail's items open their card under it, above the prompt, or close it
+// when it is the one open; the mark opens the Worktree card or closes any.
+async function toggleCard($: $, at: Tab | null, options: PluginOptions): Promise<void> {
+  const open = await read($, tab)
+  const next = at === null ? (open === null ? 'worktree' : null) : open === at ? null : at
+  await update($, tab, () => next)
+  if (next === 'worktree') await refreshSlots($, options)
 }
 
 // A home folder spelled ~, as the terminal shows paths.

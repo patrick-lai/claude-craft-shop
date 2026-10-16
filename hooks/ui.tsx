@@ -43,43 +43,44 @@ export function isTab(value: string): value is Tab {
   return TABS.some(one => one.id === value)
 }
 
-// The pane is one column of cards, as the desktop's own side panel is: each
-// card's head names it on the left and says its state on the right, and a
-// press opens it in place, one at a time. Each tab's file draws the whole
-// pane while its card is open (a $ never crosses an import, so a card cannot
-// be drawn from another file); pane.tsx draws it with every card closed.
+// One card: its head names it on the left and says its state on the right,
+// a press opens or closes it, and while open its body sits under the head.
+export function cardOf(ui: Ui, id: Tab, isOpen: boolean, head: Head, onToggle: () => void, body: RenderElement | null) {
+  const { Box, Button, Text } = ui
+  const index = TABS.findIndex(one => one.id === id)
+  const one = TABS[index]!
+  return card(
+    ui,
+    `card-${id}`,
+    [
+      <Box key={`head-${id}`} justifyContent="space-between" alignItems="center" gap={1}>
+        <Button key={`tab-${id}`} plain hotkey={String(index + 1)} onPress={onToggle}>
+          <Text color="suggestion">{one.icon} </Text>
+          <Text bold>{one.label}</Text>
+        </Button>
+        <Button key={`tab-${id}-state`} plain onPress={onToggle}>
+          <Text color={head.tone} dimColor={head.tone === undefined}>
+            {head.value}
+          </Text>
+          <Text dimColor> {isOpen ? '⌄' : '›'}</Text>
+        </Button>
+      </Box>,
+      isOpen && body !== null && (
+        <Box key={`body-${id}`} flexDirection="column" gap={1} marginTop={1}>
+          {body}
+        </Box>
+      ),
+    ],
+    { tone: isOpen ? 'selected' : 'plain' },
+  )
+}
+
+// The pane is one column of cards, as the desktop's own side panel is, one
+// open at a time. Each tab's file draws the whole pane while its card is
+// open; pane.tsx draws it with every card closed.
 export function frame(ui: Ui, current: Tab | null, columns: number, onSelect: (id: Tab | null) => void, body: RenderElement | null, heads: Record<Tab, Head>) {
-  const { Box, Button, Text, Svg } = ui
+  const { Box, Svg } = ui
   const rich = Svg !== undefined
-  const cardOf = (one: (typeof TABS)[number], index: number) => {
-    const isOpen = one.id === current
-    const head = heads[one.id]
-    const toggle = () => onSelect(isOpen ? null : one.id)
-    return card(
-      ui,
-      `card-${one.id}`,
-      [
-        <Box key={`head-${one.id}`} justifyContent="space-between" alignItems="center" gap={1}>
-          <Button key={`tab-${one.id}`} plain hotkey={String(index + 1)} onPress={toggle}>
-            <Text color="suggestion">{one.icon} </Text>
-            <Text bold>{one.label}</Text>
-          </Button>
-          <Button key={`tab-${one.id}-state`} plain onPress={toggle}>
-            <Text color={head.tone} dimColor={head.tone === undefined}>
-              {head.value}
-            </Text>
-            <Text dimColor> {isOpen ? '⌄' : '›'}</Text>
-          </Button>
-        </Box>,
-        isOpen && body !== null && (
-          <Box key={`body-${one.id}`} flexDirection="column" gap={1} marginTop={1}>
-            {body}
-          </Box>
-        ),
-      ],
-      { tone: isOpen ? 'selected' : 'plain' },
-    )
-  }
   return (
     <Box flexDirection="column" width={columns} gap={rich ? 1 : 0}>
       {rich && (
@@ -87,10 +88,14 @@ export function frame(ui: Ui, current: Tab | null, columns: number, onSelect: (i
           <Svg source={wordmarkArt().source} alt="fishStack" width={wordmarkArt().width} height={wordmarkArt().height} />
         </Box>
       )}
-      {TABS.map(cardOf)}
+      {TABS.map(one => cardOf(ui, one.id, one.id === current, heads[one.id], () => onSelect(one.id === current ? null : one.id), one.id === current ? body : null))}
     </Box>
   )
 }
+
+// How wide a card opened from the rail is drawn above the prompt: room for
+// its rows, never the whole width of a wide window.
+export const BAND_CARD_COLUMNS = 72
 
 // How wide each card of a grid is, so the cards fill the row: as many as fit
 // at `least` columns each, with one column between them.

@@ -10,22 +10,26 @@ import type { Ui } from './ui'
 const tab = atom({ plugin: 'fishstack', key: 'tab' } as const, null)
 const isClientDown = atom({ plugin: 'fishstack', key: 'isClientDown' } as const, false)
 
-// /fishstack opens the pane, and /fs is its short form: bare /fish reads as
-// the fish shell.
+// /fishstack opens a card under the rail, above the prompt, and /fs is its
+// short form: bare /fish reads as the fish shell. /fs panel opens the cards
+// as a pane of their own instead, docked beside the chat where it docks.
 export const FISH_COMMANDS: CommandSpec[] = [
-  { name: 'fishstack', description: 'Open the fishStack pane: worktree, dials and context', argumentHint: '[worktree|dials|context]' },
-  { name: 'fs', description: 'Open the fishStack pane (short for /fishstack)', argumentHint: '[worktree|dials|context]' },
+  { name: 'fishstack', description: 'Open a fishStack card above the prompt: worktree, dials or context', argumentHint: '[worktree|dials|context|panel]' },
+  { name: 'fs', description: 'Open a fishStack card (short for /fishstack)', argumentHint: '[worktree|dials|context|panel]' },
 ]
 
-async function openPane($: EngineInterface, args: string): Promise<{ text: string }> {
+async function openCard($: EngineInterface, args: string): Promise<{ text: string }> {
   const wanted = args.trim().toLowerCase()
-  if (wanted !== '' && !isTab(wanted)) {
-    return { text: `No tab named "${wanted}". Try /fishstack worktree, dials or context.` }
+  if (wanted === 'panel') {
+    await $.ui.open({ id: PANE, title: PANE_TITLE, columns: PANE_COLUMNS, focus: true })
+    return { text: 'Opened the fishStack panel.' }
   }
-  if (isTab(wanted)) await update($, tab, () => wanted)
-  await $.ui.open({ id: PANE, title: PANE_TITLE, columns: PANE_COLUMNS, focus: true })
-  const label = TABS.find(one => one.id === wanted)?.label
-  return { text: label === undefined ? 'Opened fishStack.' : `Opened fishStack · ${label}.` }
+  if (wanted !== '' && !isTab(wanted)) {
+    return { text: `No card named "${wanted}". Try /fs worktree, dials, context or panel.` }
+  }
+  const card: Tab = isTab(wanted) ? wanted : ((await read($, tab)) ?? 'worktree')
+  await update($, tab, () => card)
+  return { text: `Opened fishStack · ${TABS.find(one => one.id === card)!.label}, above the prompt.` }
 }
 
 // Faults heard since this load: a reload starts over, as session.ts does.
@@ -81,6 +85,6 @@ export function registerPane(on: On): void {
     return frame(ui, null, e.props.bodyColumns, (id: Tab | null) => void update($, tab, () => id), null, await paneHeads($))
   })
 
-  on('command.run', { command: 'fishstack' }, async ($, e) => openPane($, e.args))
-  on('command.run', { command: 'fs' }, async ($, e) => openPane($, e.args))
+  on('command.run', { command: 'fishstack' }, async ($, e) => openCard($, e.args))
+  on('command.run', { command: 'fs' }, async ($, e) => openCard($, e.args))
 }

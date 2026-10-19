@@ -192,7 +192,7 @@ Libraries are kept per repository and reach the agent as a **Project context** s
 
 ## The rail
 
-The rail is one row of pills above the prompt, and it stays one row at any window width. In the desktop app, hover a pill for details (nothing shifts). Click Dials, Context or Worktree to open that card under the rail.
+The rail is one row of pills above the prompt, and it stays one row at any window width. In the desktop app, hover a pill for details (nothing shifts). Click Dials, Context or Worktree to open that card, docked on the right.
 
 | Pill | Shows |
 | - | - |

@@ -1,6 +1,6 @@
 {
   "name": "fishstack-mod",
-  "version": "0.7.1",
+  "version": "0.8.3",
   "description": "Installs the fishStack mod into Claude Code: npx -y fishstack-mod install",
   "keywords": [
     "claude-code",
@@ -26,7 +26,7 @@
     "LICENSE"
   ],
   "dependencies": {
-    "claude-fish-stack-mod": "0.7.1"
+    "claude-fish-stack-mod": "0.8.3"
   },
   "engines": {
     "node": ">=18"

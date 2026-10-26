@@ -11,7 +11,7 @@ import { BAND_CARD_COLUMNS, cardOf, frame, PANE, PANE_COLUMNS, PANE_TITLE, resol
 import type { Ui } from './ui'
 import { BALANCED, dialsBody, presetName } from './dials'
 import { contextBody } from './context'
-import { segmented, switchRow } from './kit'
+import { switchRow } from './kit'
 import { beginTurn } from './enforce'
 import { drawRail } from './rail'
 import { getSetting, repoMain, setSetting } from './settings'
@@ -20,7 +20,6 @@ import { IDLE_WORKTREE, paneHeads } from './state'
 export { IDLE_WORKTREE }
 
 const isHeadStartPrompted = atom({ plugin: 'fishstack', key: 'isHeadStartPrompted' } as const, false)
-const isWhereAsked = atom({ plugin: 'fishstack', key: 'isWhereAsked' } as const, false)
 const isTurnRunning = atom({ plugin: 'fishstack', key: 'isTurnRunning' } as const, false)
 const owedMoveNote = atom({ plugin: 'fishstack', key: 'owedMoveNote' } as const, null)
 const slots = atom({ plugin: 'fishstack', key: 'slots' } as const, [])
@@ -919,7 +918,7 @@ async function prepare($: $, options: PluginOptions): Promise<void> {
       await setStep($, `Could not fetch origin; starting from the local ${branchName}`, true)
     }
     const baseSha = await gitOut($, ['rev-parse', base], main, `Could not resolve ${base}.`)
-    const wanted = `fish/${adoptedName ?? (await $.session.id()).slice(0, 6)}`
+    const wanted = `fish/${(await $.session.id()).slice(0, 6)}`
     await update($, worktree, current => ({ ...current, base, baseSha }))
 
     await setStep($, 'Claiming a slot')
@@ -1059,7 +1058,7 @@ async function setAuto($: $, options: PluginOptions, isOn: boolean): Promise<voi
   else await unwireDesktopHook($, main)
 }
 
-async function startWorktree($: $, options: PluginOptions, cwd: string, { isForced = false, isDesktop = false } = {}): Promise<void> {
+async function startWorktree($: $, options: PluginOptions, cwd: string, { isForced = false } = {}): Promise<void> {
   if (hasStarted) return
   hasStarted = true
   const current = await read($, worktree)
@@ -1107,129 +1106,22 @@ async function startWorktree($: $, options: PluginOptions, cwd: string, { isForc
     }
   }
 
-  // Off, fishStack stays out of the way: no slot, no read-only guard, and
-  // Claude Code's own worktree handling applies.
-  if (!isForced && !(await isAutoOn($, options))) {
-    if (here !== main) await update($, elsewhere, () => here)
-    return
-  }
-
+  // A session never moves on its own, the toggle on or off: it stays where it
+  // started until Create worktree now is pressed (or Claude Code asks for a
+  // worktree, which WorktreeCreate answers with a slot). No slot, no read-only
+  // guard, and a worktree made elsewhere is left as it is.
   if (here !== main) {
-    // A worktree Claude Code made itself (claude --worktree, the desktop's
-    // worktree option): those are made before any mod loads, so its
-    // WorktreeCreate never reaches fishStack. Any other worktree (a slot of
-    // ours among them) is left as it is. Work already begun there (a reload
-    // mid-session runs this again) stays with it.
-    if (!here.startsWith(`${main}/.claude/worktrees/`) || !(await isUntouched($, here))) {
-      await update($, elsewhere, () => here)
-      return
-    }
-    // The desktop app's: set up where it is, read-only until then. The app's
-    // diff, PR and archive follow the worktree it made, and it reuses its
-    // worktrees as sessions end, so a slot would only duplicate it.
-    if (isDesktop) {
-      const branch = (await git($, ['rev-parse', '--abbrev-ref', 'HEAD'], here)).stdout.trim() || null
-      await update($, worktree, (): Worktree => ({ ...IDLE_WORKTREE, main, path: here, branch }))
-      await beginWorktree($, options)
-      return
-    }
-    // From the terminal: adopted into a slot on its name, read-only until
-    // the slot is ready, then the session moves in. A slot starts from origin.
-    adoptedName = here.split('/').pop()!.replace(/[^A-Za-z0-9._-]+/g, '-').slice(0, 40)
-  } else if (main !== (await realPath($, repo.root))) {
-    return
-  } else if (isDesktop && !isForced) {
-    // The desktop's composer asks whether a session gets a worktree, and
-    // makes one itself when it does (adopted above). In the main checkout,
-    // the person asked for none: it stays there.
-    return
-  } else if (!isForced && (await terminalChoice($)) === 'ask') {
-    // From the terminal or an editor, plain `claude` in the main checkout
-    // says nothing about a worktree, so the person is asked, once a session,
-    // unless they said always. The pool warms meanwhile, so a worktree is
-    // still quick to take.
-    if (await read($, isWhereAsked)) return
-    await update($, isWhereAsked, () => true)
-    $.clock.after(0, () => void askWhere($, options, main))
+    await update($, elsewhere, () => here)
     return
   }
+  if (!isForced || main !== (await realPath($, repo.root))) return
 
   await update($, worktree, now => ({ ...now, main }))
   await beginWorktree($, options)
 }
 
-const WHERE_QUESTION = 'Where should this session work?'
-const WHERE_WORKTREE = 'A worktree'
-const WHERE_MAIN = 'This main checkout'
-const WHERE_ALWAYS = 'Always a worktree'
-
-// What a new terminal session in a main checkout does with Use worktrees on:
-// asks, or takes a worktree as the person said it always should. Kept across
-// sessions for each repository, like the toggle.
-export const TERMINAL_KEY = 'terminalWorktree'
-type TerminalChoice = 'ask' | 'always'
-const TERMINAL_CHOICES = [
-  { value: 'ask', label: 'Ask each time' },
-  { value: 'always', label: 'Always a worktree' },
-] as const
-
-async function terminalChoice($: $): Promise<TerminalChoice> {
-  return (await getSetting($, TERMINAL_KEY)) === 'always' ? 'always' : 'ask'
-}
-
-async function setTerminalChoice($: $, choice: TerminalChoice): Promise<void> {
-  await setSetting($, TERMINAL_KEY, choice)
-  $.ui.invalidate('ui.render')
-}
-
-// What each answer to the where question leads to, the main checkout's
-// branch among it: the dialog draws them under the labels (see the
-// AskUserQuestion render below), as $.ui.ask carries labels alone.
-let whereDetails: Record<string, string> | null = null
-
-// Off the session's start, so its dialog never holds the start up. A
-// worktree, now or always, claims one; the main checkout, a dismissed
-// dialog or a typed answer leave the session where it is, with Create
-// worktree now in the tab. A plugin's question, so Autopilot leaves it to
-// the person.
-async function askWhere($: $, options: PluginOptions, main: string): Promise<void> {
-  let answer: string
-  try {
-    const on = (await git($, ['rev-parse', '--abbrev-ref', 'HEAD'], main)).stdout.trim()
-    const base = await defaultBranch($, main).catch(() => 'the default branch')
-    whereDetails = {
-      [WHERE_WORKTREE]: `A branch of its own from the latest origin/${base}. It reads and plans at once and edits once it moves in, in seconds.`,
-      [WHERE_MAIN]: `Right here, ${on === '' || on === 'HEAD' ? 'on a detached HEAD' : `on ${on}`}, with full access. Nothing is claimed.`,
-      [WHERE_ALWAYS]: 'A worktree now, and for every new terminal session. Back to asking from /fs.',
-    }
-    answer = await $.ui.ask(WHERE_QUESTION, { header: 'Worktree', options: [WHERE_WORKTREE, WHERE_MAIN, WHERE_ALWAYS] })
-  } catch {
-    return
-  } finally {
-    whereDetails = null
-  }
-  if (answer === WHERE_ALWAYS) await setTerminalChoice($, 'always')
-  if ((answer !== WHERE_WORKTREE && answer !== WHERE_ALWAYS) || (await read($, worktree)).phase !== 'off') return
-  await update($, worktree, now => ({ ...now, main }))
-  await beginWorktree($, options)
-}
-
-// Nothing uncommitted and no commit of its own: what any other branch or
-// remote holds is not this worktree's. When git cannot say, it is touched.
-async function isUntouched($: $, path: string): Promise<boolean> {
-  const status = await git($, ['status', '--porcelain'], path)
-  if (status.exitCode !== 0 || status.stdout.trim() !== '') return false
-  const branch = (await git($, ['rev-parse', '--abbrev-ref', 'HEAD'], path)).stdout.trim()
-  const others = branch === '' || branch === 'HEAD' ? [] : [`--exclude=${branch}`]
-  const own = await git($, ['rev-list', '-n', '1', 'HEAD', '--not', ...others, '--branches', '--remotes'], path)
-  return own.exitCode === 0 && own.stdout.trim() === ''
-}
-
-// The name of the Claude Code worktree this session started in, which its
-// slot's branch takes; null for a session started in the main checkout.
-let adoptedName: string | null = null
-
-// The empty state's button: claims a slot now, whether the toggle is on or off.
+// The empty state's button, the one way a session moves in: claims a slot now,
+// whether the toggle is on or off.
 async function claimNow($: $, options: PluginOptions): Promise<void> {
   hasStarted = false
   await startWorktree($, options, await $.session.cwd(), { isForced: true })
@@ -1283,15 +1175,6 @@ export function registerWorktree(on: On, options: PluginOptions): void {
     return path === null ? next(e) : { worktreePath: path }
   })
 
-  // The where question's options, each with what it leads to.
-  on('ui.render', { component: 'AskUserQuestion' }, async ($, e, next) => {
-    const details = whereDetails
-    const [question, ...rest] = e.props.questions as { question?: string; options?: { label: string; description?: string }[] }[]
-    if (details === null || question?.question !== WHERE_QUESTION || question.options === undefined) return next(e)
-    const options = question.options.map(one => ({ ...one, description: details[one.label] ?? one.description }))
-    return next({ ...e, props: { ...e.props, questions: [{ ...question, options }, ...rest] } })
-  })
-
   on('session.start', { isInteractive: true }, async ($, e, next) => {
     const started = await next(e)
     await startWorktree($, options, e.cwd)
@@ -1301,13 +1184,13 @@ export function registerWorktree(on: On, options: PluginOptions): void {
   on('session.start', { isInteractive: false }, async ($, e, next) => {
     const started = await next(e)
     const surfaces = await $.session.surfaces()
-    if (surfaces.some(one => one === 'desktop' || one === 'vscode')) await startWorktree($, options, e.cwd, { isDesktop: surfaces.includes('desktop') })
+    if (surfaces.some(one => one === 'desktop' || one === 'vscode')) await startWorktree($, options, e.cwd)
     return started
   })
 
   on('session.attach', async ($, e, next) => {
     const attached = await next(e)
-    if (e.surface === 'desktop' || e.surface === 'vscode') await startWorktree($, options, await $.session.cwd(), { isDesktop: e.surface === 'desktop' })
+    if (e.surface === 'desktop' || e.surface === 'vscode') await startWorktree($, options, await $.session.cwd())
     if (e.viewport?.isFullscreen === true && !hasAutoOpened) {
       hasAutoOpened = true
       $.clock.after(0, () => void $.ui.open({ id: PANE, title: PANE_TITLE, columns: PANE_COLUMNS }))
@@ -1535,22 +1418,15 @@ async function worktreeBody($: $, ui: Ui, options: PluginOptions) {
   const rich = ui.Svg !== undefined
 
   const isAuto = await isAutoOn($, options)
-  const terminal = await terminalChoice($)
   const isInSlot = state.main !== null && state.path !== null && (await isSlot($, options, state.main, state.path))
   const note = await read($, poolNote)
   const settingUp = list.filter(one => one.setup !== null).length
   const idle = list.filter(one => !one.isLeased && one.setup === null).length
 
-  // The setting first: on or off, and when on, what a new session does.
+  // The setting first: on keeps slots ready; the button below is what moves a session in.
   const setting = (
     <Box key="worktree-setting" flexDirection="column" gap={rich ? 1 : 0}>
-      {switchRow(ui, 'auto-worktree', 'Use worktrees', isAuto, isAuto ? 'New sessions get a worktree of their own.' : 'Sessions work in the main checkout.', isOn => void setAuto($, options, isOn))}
-      {isAuto && (
-        <Box key="terminal-line" flexDirection="column">
-          <Text dimColor>New terminal sessions</Text>
-          {segmented(ui, 'terminal-worktree', TERMINAL_CHOICES, terminal, choice => void setTerminalChoice($, choice))}
-        </Box>
-      )}
+      {switchRow(ui, 'auto-worktree', 'Use worktrees', isAuto, isAuto ? 'Slots are kept ready. A session moves in when you press Create worktree now.' : 'No slots kept. Create worktree now still works.', isOn => void setAuto($, options, isOn))}
     </Box>
   )
 

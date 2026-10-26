@@ -13,7 +13,7 @@
     "autoWorktree": {
       "type": "boolean",
       "title": "Perm worktree",
-      "description": "Default for the Perm worktree toggle: give each session started in a main checkout, and each worktree Claude Code creates, a lasting slot, read-only until it is ready. Off leaves worktrees to Claude Code.",
+      "description": "Default for the Perm worktree toggle: keep slots ready, and give each worktree Claude Code creates a lasting slot, read-only until it is ready. A session started in a main checkout moves into one only when you press Create worktree now. Off leaves worktrees to Claude Code.",
       "default": false
     },
     "worktreeRoot": {

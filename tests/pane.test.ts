@@ -18,7 +18,7 @@ test('the cards open one at a time on press, close on a second, and each draws i
     expect((await ui.find({ key: 'tab-context-state' }))?.text, surface).toBe('None yet ›')
 
     await openCard(ui, 'worktree')
-    expect(await ui.find({ text: 'Sessions work in the main checkout.' }), surface).toBeDefined()
+    expect(await ui.find({ text: 'No slots kept. Create worktree now still works.' }), surface).toBeDefined()
     expect(await ui.find({ type: 'Button', key: 'worktree-create' }), surface).toBeDefined()
 
     await openCard(ui, 'dials')

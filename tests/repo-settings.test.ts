@@ -1,10 +1,9 @@
 // Settings are kept per repository: the dials, Use dials, Enforce, Use
-// context, Use worktrees and Ask each time / Always a worktree that one
-// repository sets reach no other.
+// context and Use worktrees that one repository sets reach no other.
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { activate, COMPOSE, mountPane, openCard, REPO, startSession, world } from './world'
+import { activate, claimWorktree, COMPOSE, mountPane, openCard, REPO, startSession, world } from './world'
 
 const SOLO = { foresight: 1, crew: 1, tenacity: 2, autonomy: 4, proof: 2, voice: 2 }
 const ELSEWHERE = '/elsewhere'
@@ -20,24 +19,23 @@ async function isAutoShown($: Engine) {
 }
 
 test("another repository's settings do not reach this one", async ($, on) => {
-  const { clock, asked } = world(on, {
+  const { clock } = world(on, {
     store: {
       [`dials:${ELSEWHERE}`]: SOLO,
       [`useContext:${ELSEWHERE}`]: false,
       [`autoWorktree:${ELSEWHERE}`]: true,
-      [`terminalWorktree:${ELSEWHERE}`]: 'always',
     },
   })
   await startSession($)
   await clock.advance(1)
   expect(await dialsSection($)).toContain('Crew (Helpers)')
   expect(await isAutoShown($)).toBe(false)
-  expect(asked).toEqual([])
 })
 
 test('a change is kept for this repository alone', { options: { worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
   const { clock, saved } = world(on)
   await startSession($)
+  await claimWorktree($)
   const ui = await mountPane($, 'terminal')
   await openCard(ui, 'dials')
   await ui.press({ key: 'pip-crew-1' })
@@ -47,7 +45,6 @@ test('a change is kept for this repository alone', { options: { worktreeRoot: '/
   await activate(ui, 'context-on-off')
   await openCard(ui, 'worktree')
   await activate(ui, 'auto-worktree-on')
-  await activate(ui, 'terminal-worktree-always')
   await clock.advance(1)
 
   expect(saved[`dials:${REPO}`]).toMatchObject({ crew: 1 })
@@ -55,8 +52,7 @@ test('a change is kept for this repository alone', { options: { worktreeRoot: '/
   expect(saved[`useDials:${REPO}`]).toBe(false)
   expect(saved[`useContext:${REPO}`]).toBe(false)
   expect(saved[`autoWorktree:${REPO}`]).toBe(true)
-  expect(saved[`terminalWorktree:${REPO}`]).toBe('always')
-  for (const key of ['dials', 'enforceDials', 'useDials', 'useContext', 'autoWorktree', 'terminalWorktree']) expect(saved[key]).toBeUndefined()
+  for (const key of ['dials', 'enforceDials', 'useDials', 'useContext', 'autoWorktree']) expect(saved[key]).toBeUndefined()
 })
 
 test('what was kept for every repository before still applies until this repository sets its own', async ($, on) => {
@@ -65,11 +61,4 @@ test('what was kept for every repository before still applies until this reposit
   // Its own Use dials wins; the old dials and Use worktrees carry over.
   expect(await dialsSection($)).toContain('Crew (Solo)')
   expect(await isAutoShown($)).toBe(true)
-})
-
-test("this repository's Ask each time wins over an Always a worktree kept for every repository", { options: { autoWorktree: true } }, async ($, on) => {
-  const { clock, asked } = world(on, { where: 'held', store: { terminalWorktree: 'always', [`terminalWorktree:${REPO}`]: 'ask' } })
-  await startSession($)
-  await clock.advance(1)
-  expect(asked).toEqual(['Where should this session work?'])
 })

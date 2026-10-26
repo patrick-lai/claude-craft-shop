@@ -73,7 +73,7 @@ export function world(
     isMoveHeld = false,
     isSetupHeld = false,
     fetch = 'quick',
-    where = 'A worktree',
+    surfaces = ['terminal'],
   }: {
     isRepo?: boolean
     isDialogSlow?: boolean
@@ -97,10 +97,8 @@ export function world(
     // How fetching origin goes: at once; held until state.finishFetches; or
     // still running at its timeout, so the call rejects.
     fetch?: 'quick' | 'held' | 'stuck'
-    // How the person answers fishStack's own "Where should this session
-    // work?": a label, at once; 'held' waits for state.answer, as the
-    // agent's questions do; 'dismissed' closes the dialog.
-    where?: string
+    // The surfaces the session reports; none while it is headless.
+    surfaces?: string[]
   } = {},
 ): World {
   const clock = mock.clock(on, { now: 1_000_000 })
@@ -328,14 +326,11 @@ export function world(
       const asked = (e as unknown as { questions: { question: string }[] }).questions
       state.asked.push(...asked.map(one => one.question))
       state.askedWith.push(...asked)
-      if (asked[0]?.question === 'Where should this session work?' && where !== 'held') {
-        if (where === 'dismissed') return { deny: 'dismissed' }
-        return { result: { questions: asked, answers: { [asked[0].question]: where } } as never }
-      }
       return new Promise(resolve => (state.answer = answers => resolve({ result: { questions: asked, answers } as never })))
     }
     return { result: 'ok' }
   })
+  on('session.surfaces', () => ({ value: surfaces }))
   on('ui.notice', ($, e) => {
     state.notices.push(e.text)
     return { value: undefined }
@@ -412,6 +407,15 @@ export async function openPool(ui: Pressable & Pick<Drawing, 'find'>): Promise<v
   await openCard(ui, 'worktree')
   if ((await ui.find({ key: 'pool-add' })) !== undefined) return
   await ui.press({ key: 'slots-toggle' })
+}
+
+// How a person moves a session into a worktree: opens the Worktree card and
+// presses Create worktree now. Nothing else moves it.
+export async function claimWorktree($: Engine, surface: 'terminal' | 'desktop' = 'desktop'): Promise<void> {
+  const ui = await mountPane($, surface)
+  await openCard(ui, 'worktree')
+  await activate(ui, 'worktree-create')
+  await ui.unmount()
 }
 
 // The keys of the controls, Buttons or drawn, whose key matches.

@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { activate, COMPOSE, mountPane, openCard, openPool, REPO, startSession, world } from './world'
+import { activate, claimWorktree, COMPOSE, mountPane, openCard, openPool, REPO, startSession, world } from './world'
 
 // Where the slots of /repo live under a worktreeRoot of /slots.
 async function repoDir(): Promise<string> {
@@ -51,6 +51,7 @@ test('a new slot whose checkout is cut short is removed, not left to be reused, 
 test('a session claims a slot and the pool tops itself up behind it, one spare kept', { options: { autoWorktree: true, worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
   const { clock, commands, toolCalls } = world(on)
   await startSession($)
+  await claimWorktree($)
   await clock.advance(1)
   expect(toolCalls).toContain('EnterWorktree')
   const dir = await repoDir()
@@ -62,6 +63,7 @@ test('a session claims a slot and the pool tops itself up behind it, one spare k
 test('a blobless clone can check a slot out: writes may fetch the blobs they lack and get minutes; reads neither', { options: { autoWorktree: true, worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
   const { clock, inits } = world(on)
   await startSession($)
+  await claimWorktree($)
   await clock.advance(1)
   const dir = await repoDir()
   for (const write of [
@@ -78,6 +80,7 @@ test('a blobless clone can check a slot out: writes may fetch the blobs they lac
 test('a claim and the pool starting together share one fetch, both from origin', { options: { autoWorktree: true, worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
   const { clock, commands, finishFetches, toolCalls } = world(on, { fetch: 'held' })
   await startSession($)
+  await claimWorktree($)
   await clock.advance(1)
   await clock.advance(1)
   // Both wait on the one fetch, which neither would win against the other.
@@ -94,6 +97,7 @@ test('a claim and the pool starting together share one fetch, both from origin',
 test('a fetch still running at its timeout starts the slot from the local branch', { options: { autoWorktree: true, worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
   const { clock, commands, toolCalls } = world(on, { fetch: 'stuck' })
   await startSession($)
+  await claimWorktree($)
   await clock.advance(1)
   expect(toolCalls).toContain('EnterWorktree')
   const dir = await repoDir()
@@ -103,6 +107,7 @@ test('a fetch still running at its timeout starts the slot from the local branch
 test("with no worktreeRoot set, slots live under the repository's .claude/worktrees/, kept out of its git status once", { options: { autoWorktree: true, setupCommand: '' } }, async ($, on) => {
   const { clock, commands, toolCalls } = world(on)
   await startSession($)
+  await claimWorktree($)
   await clock.advance(1)
   const dir = `${REPO}/.claude/worktrees/fishstack`
   expect(toolCalls).toContain('EnterWorktree')
@@ -195,6 +200,7 @@ test('on a reused slot with its setup skipped, the stepper keeps up with the log
   const state = world(on, { slots: [`${dir}/1`], store: { [`setup:${dir}/1`]: { command: 'pnpm install', lockHash: '' } }, isMoveHeld: true })
   const { clock } = state
   await startSession($)
+  await claimWorktree($)
   await clock.advance(1)
   const ui = await mountPane($, 'terminal')
   await openCard(ui, 'worktree')
@@ -211,6 +217,7 @@ test('on a reused slot with its setup skipped, the stepper keeps up with the log
 test("the pool's warming after a claim adds nothing to the session's steps", { options: { autoWorktree: true, worktreeRoot: '/slots', setupCommand: 'pnpm install' } }, async ($, on) => {
   const { clock, commands } = world(on)
   await startSession($)
+  await claimWorktree($)
   await clock.advance(1)
   // The pool warmed slot 1 and ran the setup in each of its slots; the
   // session took slot 1, its setup already done. None of the pool's runs is
@@ -248,36 +255,11 @@ test('with too little free disk the pool does not warm, and the tab says why', {
   expect(await ui.find({ text: /Paused: .* GB of disk free, under the 10000 GB it keeps/ })).toBeDefined()
 })
 
-test("a session started in a worktree Claude Code made (claude --worktree, the desktop's option) is adopted into a slot on its name", { options: { autoWorktree: true, worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
-  const { clock, commands, toolCalls } = world(on)
-  await $.session.start({ cwd: `${REPO}/.claude/worktrees/feat-x`, surface: 'terminal', isInteractive: true })
-  // Read-only until its slot is ready, then moved in.
-  expect((await $.tool.call({ tool: 'Edit', file_path: '/repo/a.ts', old_string: 'a', new_string: 'b' })).deny).toContain('Read-only until the worktree is ready')
-  await clock.advance(1)
-  const dir = await repoDir()
-  expect(commands).toContain(`${dir}/1$ git -c core.hooksPath=/dev/null checkout -q -B fish/feat-x origin/main`)
-  expect(toolCalls).toContain('EnterWorktree')
-})
-
-// Claude Code reuses a worktree folder for a new session: the branch named
-// for it may be out in another slot still, or left behind by a session that
-// ended. Either way it is not this session's, so it gets one of its own.
-for (const [what, held] of [['still out in another slot', true], ['left with no worktree on it', false]] as const) {
-  test(`a Claude Code worktree reused by a new session, its old branch ${what}, gets a branch of its own and leaves the old one be`, { options: { autoWorktree: true, worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
-    const dir = await repoDir()
-    const { clock, commands, toolCalls } = world(on, held ? { slots: [`${dir}/1`, `${dir}/2`], onBranch: { [`${dir}/2`]: 'fish/feat-x' } } : { slots: [`${dir}/1`], branches: ['fish/feat-x'] })
-    await $.session.start({ cwd: `${REPO}/.claude/worktrees/feat-x`, surface: 'terminal', isInteractive: true })
-    await clock.advance(1)
-    expect(commands).toContain(`${dir}/1$ git -c core.hooksPath=/dev/null checkout -q -B fish/feat-x-abcdef origin/main`)
-    expect(commands.filter(one => one.endsWith('checkout -q -B fish/feat-x origin/main'))).toEqual([])
-    expect(toolCalls).toContain('EnterWorktree')
-  })
-}
-
 test('a retry comes back to the slot this session already leases, ahead of an idle one before it', { options: { autoWorktree: true, worktreeRoot: '/slots', setupCommand: '' } }, async ($, on) => {
   const dir = await repoDir()
   const { clock, commands } = world(on, { slots: [`${dir}/1`, `${dir}/2`], store: { [`lease:${dir}/2`]: { sessionId: 'abcdef123456', beatAt: 1_000_000 } } })
   await startSession($)
+  await claimWorktree($)
   await clock.advance(1)
   expect(commands).toContain(`${dir}/2$ git -c core.hooksPath=/dev/null checkout -q -B fish/abcdef origin/main`)
   // Slot 1 is only looked at, as the slot to offer the desktop's hook.
@@ -508,6 +490,7 @@ test('a slot the desktop holds is never claimed, and Release lets go of the hold
   const dir = await repoDir()
   const { clock, commands } = world(on, { slots: [1, 2].map(n => `${dir}/${n}`), files: { [`${dir}/1.held`]: 'desktop-session\n' } })
   await startSession($)
+  await claimWorktree($)
   await clock.advance(1)
   // Slot 2 is offered to the desktop meanwhile, so the session takes the one
   // warmed after it, never the held one.
